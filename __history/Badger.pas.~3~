@@ -79,7 +79,10 @@ begin
   FreeOnTerminate := True;
   FCriticalSection := TCriticalSection.Create;
   FServerSocket := TTCPBlockSocket.Create;
+
   FRouteManager := TRouteManager.Create;
+
+
 end;
 
 destructor TBadger.Destroy;
