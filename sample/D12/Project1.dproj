@@ -302,11 +302,11 @@
             <Form>Form1</Form>
             <FormType>fmx</FormType>
         </DCCReference>
-        <DCCReference Include="..\TTCPBlockSocket\src\Badger.pas"/>
-        <DCCReference Include="..\TTCPBlockSocket\src\BadgerMethods.pas"/>
-        <DCCReference Include="..\TTCPBlockSocket\src\BadgerMultipartDataReader.pas"/>
-        <DCCReference Include="..\TTCPBlockSocket\src\BadgerRouteManager.pas"/>
-        <DCCReference Include="..\TTCPBlockSocket\src\SyUtils.pas"/>
+        <DCCReference Include="..\..\src\Badger.pas"/>
+        <DCCReference Include="..\..\src\BadgerMethods.pas"/>
+        <DCCReference Include="..\..\src\BadgerMultipartDataReader.pas"/>
+        <DCCReference Include="..\..\src\BadgerRouteManager.pas"/>
+        <DCCReference Include="..\..\src\SyUtils.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
