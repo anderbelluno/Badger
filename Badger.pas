@@ -1,0 +1,285 @@
+unit Badger;
+
+interface
+
+uses
+ blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, uRouteManager, SyUtils;
+
+ type
+  TLastRequest   = Procedure(Value: String) Of Object;
+  TLastResponse  = Procedure(Value: String) Of Object;
+
+
+
+  TAuthType = (atNoAuth, atToken, atBasic);
+
+  TClientThread = class(TThread)
+  private
+    VLastRequest : TLastRequest;
+    VLastResponse: TLastResponse;
+    FClientSocket: TTCPBlockSocket;
+    FRouteManager : TRouteManager;
+    FAuthType : TAuthType;
+    FURI: string;
+    FMethod: string;
+    FRequestLine: string;
+    FResponseLineLine: string;
+    FCriticalSection: TCriticalSection;
+    FToken : String;
+  protected
+    function VerifyAuth(ClientSocket: TTCPBlockSocket; aAuthType: TAuthType): Boolean;
+    function ParseRequestHeader(ClientSocket: TTCPBlockSocket) : String;
+  public
+    constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;  ACriticalSection: TCriticalSection;
+                       aLastRequest: TLastRequest = nil; aLastResponse : TLastResponse = nil; aAuthType : TAuthType = atNoAuth; aToken : String = '');
+    procedure Execute; override;
+
+  end;
+
+  TBadger = class(TThread)
+  private
+    VLastRequest : TLastRequest;
+    VLastResponse: TLastResponse;
+    FServerSocket: TTCPBlockSocket;
+    FRouteManager : TRouteManager;
+    FCriticalSection: TCriticalSection;
+
+    FPort : Integer;
+    FUsername : String;
+    FPassword : String;
+    FToken : String;
+    FAuthType : TAuthType;
+    FNonBlockMode : Boolean;
+
+  protected
+    procedure Execute; override;
+
+
+  public
+    constructor Create;
+    destructor Destroy; override;
+
+    property Port : integer read FPort write FPort;
+    property OnLastRequest  : TLastRequest  read vLastRequest  write vLastRequest;
+    property OnLastResponse : TLastResponse read vLastResponse write vLastResponse;
+    property Username : String read FUsername write FUsername;
+    property Password : String read FPassword write FPassword;
+    property Token : String read FToken write FToken;
+    property AuthType : TAuthType read FAuthType write FAuthType;
+    property NonBlockMode : Boolean read FNonBlockMode write FNonBlockMode;
+
+  end;
+
+implementation
+
+
+constructor TBadger.Create;
+begin
+  inherited Create(False);
+  FreeOnTerminate := True;
+  FCriticalSection := TCriticalSection.Create;
+  FServerSocket := TTCPBlockSocket.Create;
+
+  FRouteManager := TRouteManager.Create;
+
+
+end;
+
+destructor TBadger.Destroy;
+begin
+  FServerSocket.Free;
+  FCriticalSection.Free;
+  FRouteManager.Free;
+  inherited;
+end;
+
+procedure TBadger.Execute;
+var
+  ClientSocket: TTCPBlockSocket;
+begin
+  FServerSocket.CreateSocket;
+  FServerSocket.NonBlockMode := FNonBlockMode;
+  FServerSocket.Bind('0.0.0.0', IntToStr(FPort));
+  FServerSocket.Listen;
+
+  while not Terminated do
+  begin
+     if FServerSocket.CanRead(1000) then
+     begin
+        ClientSocket := TTCPBlockSocket.Create;
+        ClientSocket.Socket := FServerSocket.Accept;
+        ClientSocket.SocksUsername := FUsername;
+        ClientSocket.SocksPassword := FPassword;
+        if ClientSocket.LastError = 0 then
+        begin
+           //if Assigned(vLastRequest) then
+              TClientThread.Create(ClientSocket, FRouteManager, FCriticalSection, VLastRequest, VLastResponse, FAuthType, FToken) // Cria uma nova thread para tratar a requisição
+           {else
+              TClientThread.Create(ClientSocket, FRoutes, FCriticalSection, nil, nil, FAuthType);} // Cria uma nova thread para tratar a requisição
+        end
+        else
+        ClientSocket.Free;
+     end;
+  end;
+end;
+
+function TClientThread.VerifyAuth(ClientSocket: TTCPBlockSocket;
+  aAuthType: TAuthType): Boolean;
+var
+ aUser: String;
+ aPass: String;
+ aToken: String;
+ authLine: String;
+ basicB64 : String;
+ init : Integer;
+
+begin
+  Result := False;
+  authLine := ParseRequestHeader(ClientSocket);
+
+  if aAuthType = atBasic then
+    begin
+      if Pos('Basic', authLine) > 0 then
+      begin
+        init := Pos(' ', authLine);
+        if init > 0 then
+        begin
+          basicB64 := Copy(authLine, init +1 , Length(authLine));
+
+          basicB64 := TSyUtils.DecodeBase64(basicB64);
+
+          init := Pos(':', basicB64);
+          if  init > 0 then
+          begin
+            aUser := Copy(basicB64, 0, init -1 );
+            aPass := Copy(basicB64, init + 1, length(basicB64));
+
+            if ((aUser = ClientSocket.SocksUsername) and (aPass = ClientSocket.SocksPassword)) then
+              Result := True
+            else
+              Result := False;
+          end;
+        end;
+      end;
+    end
+  else
+  if aAuthType = atToken then
+  begin
+    if Pos('Bearer', authLine) > 0 then
+    begin
+      init := Pos(' ', authLine);
+      if init > 0 then
+      begin
+        aToken := Copy(authLine, init +1 , Length(authLine));
+        // aToken := TSyUtils.DecodeBase64(aToken);
+        begin
+        if (aToken = FToken) then
+          Result := True
+        else
+          Result := False;
+        end;
+      end;
+    end;
+  end;
+end;
+
+function TClientThread.ParseRequestHeader(ClientSocket: TTCPBlockSocket): String;
+var
+  HeaderLine: string;
+begin
+  Result := '';
+  repeat
+    HeaderLine := ClientSocket.RecvString(5000);
+    if Pos('Authorization:', HeaderLine) > 0 then
+      Result := Trim(Copy(HeaderLine, Pos(':', HeaderLine) + 1, Length(HeaderLine)));
+  until HeaderLine = '';
+end;
+
+
+{ TClientThread }
+
+constructor TClientThread.Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager; ACriticalSection: TCriticalSection; aLastRequest: TLastRequest = nil; aLastResponse : TLastResponse = nil; aAuthType : TAuthType = atNoAuth; aToken: String = '');
+begin
+  inherited Create(True);
+  FreeOnTerminate  := True;
+  FClientSocket    := AClientSocket;
+  FCriticalSection := ACriticalSection;
+  VLastRequest     := aLastRequest;
+  VLastResponse    := aLastResponse;
+  FAuthType        := aAuthType;
+  FToken           := aToken;
+  FRouteManager    := ARouteManager;
+  Resume;
+end;
+
+procedure TClientThread.Execute;
+
+  procedure Exec(Index : Integer);
+  var
+  Callback: TRoutingCallback;
+  MethodPointer: TMethod;
+  begin
+      MethodPointer.Data := Self;
+      MethodPointer.Code := Pointer( FRouteManager.FRoutes.Objects[Index]);
+      Callback := TRoutingCallback(MethodPointer);
+      Callback(FClientSocket, FURI, FMethod, FRequestLine);
+  end;
+
+var
+  Index: Integer;
+
+  sUtils : TSyUtils;
+begin
+  sUtils := TSyUtils.Create;
+  try
+    if FClientSocket.LastError = 0 then
+    begin
+      FRequestLine := FClientSocket.RecvString(5000);
+      if sUtils.ExtractMethodAndURI(FRequestLine, FMethod, FURI) then
+      begin
+        FCriticalSection.Enter;
+
+        if Assigned(VLastRequest)then
+               VLastRequest(FRequestLine);
+
+        try
+          Index := FRouteManager.FRoutes.IndexOf(FURI);
+          if Index <> -1 then
+          begin
+             if FAuthType = atNoAuth then
+               Exec(Index)
+             else
+             if FAuthType <> atNoAuth then
+                 begin
+                    if  VerifyAuth(FClientSocket, FAuthType) then
+                       Exec(Index)
+                    else
+                       begin
+                           FClientSocket.SendString('HTTP/1.1 401 Unauthorized' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF  );
+                           FResponseLineLine:= 'HTTP/1.1 401 Unauthorized';
+                       end;
+                 end;
+          end
+          else
+            begin
+               FClientSocket.SendString('HTTP/1.1 404 Method or Route Not Found' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF);
+               FResponseLineLine:= 'HTTP/1.1 404 Method or Route Not Found';
+            end;
+            if Assigned(vLastResponse) then
+              VLastResponse(FResponseLineLine) ;
+
+           // FClientSocket;
+
+        finally
+          FCriticalSection.Leave;
+        end;
+      end;
+    end;
+  finally
+    FClientSocket.Free;
+    sUtils.Free;
+  end;
+end;
+
+end.
+
