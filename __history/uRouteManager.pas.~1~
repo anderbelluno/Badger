@@ -7,7 +7,7 @@ unit uRouteManager;
 interface
 
 uses
- Classes, SysUtils, BadgerMethods, blcksock;
+ Classes, SysUtils, SynaMethods, blcksock;
 
  type
    TRoutingCallback = procedure(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string) of object;
@@ -61,9 +61,9 @@ end;
 procedure TRouteManager.downLoad(ClientSocket: TTCPBlockSocket; const URI,
   Method, RequestLine: string);
 var
- SynClasses : TBadgerMethods;
+ SynClasses : TSynaMethods;
 begin
-  SynClasses := TBadgerMethods.Create;
+  SynClasses := TSynaMethods.Create;
   try
     SynClasses.fDownloadStream(ClientSocket,URI, Method, RequestLine);
   finally
@@ -76,9 +76,9 @@ end;
 procedure TRouteManager.rota1(ClientSocket: TTCPBlockSocket; const URI,
   Method, RequestLine: string);
 var
- SynClasses : TBadgerMethods;
+ SynClasses : TSynaMethods;
 begin
-  SynClasses := TBadgerMethods.Create;
+  SynClasses := TSynaMethods.Create;
   try
     ClientSocket.SendString('HTTP/1.1 200 ' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF + UTF8Encode( 'Rota1 executada') );
   finally
@@ -89,9 +89,9 @@ end;
 procedure TRouteManager.upLoad(ClientSocket: TTCPBlockSocket; const URI,
   Method, RequestLine: string);
 var
- SynClasses : TBadgerMethods;
+ SynClasses : TSynaMethods;
 begin
-  SynClasses := TBadgerMethods.Create;
+  SynClasses := TSynaMethods.Create;
   try
     ClientSocket.SendString('HTTP/1.1 200 OK' + CRLF + 'Content-Type: application/json' + CRLF + CRLF + SynClasses.fParserJsonStream( ClientSocket,URI, Method, RequestLine ) )
   finally
@@ -108,9 +108,9 @@ end;
 procedure TRouteManager.AtuImage(ClientSocket: TTCPBlockSocket; const URI,
   Method, RequestLine: string);
 var
- SynClasses : TBadgerMethods;
+ SynClasses : TSynaMethods;
 begin
-  SynClasses := TBadgerMethods.Create;
+  SynClasses := TSynaMethods.Create;
   try
     SynClasses.AtuImage(ClientSocket, URI, Method, RequestLine);
   finally

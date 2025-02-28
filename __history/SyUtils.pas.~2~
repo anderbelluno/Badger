@@ -17,7 +17,7 @@ type
     destructor Destroy; override;
     function GetFileMIMEType(const AFileName: string): string;
     class function DecodeBase64(const a64: String) : String;
-    procedure AtuImage (ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
+
 end;
 
 

@@ -15,9 +15,10 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+    function ExtractMethodAndURI(const RequestLine: string; out Method, URI: string): Boolean;
     function GetFileMIMEType(const AFileName: string): string;
     class function DecodeBase64(const a64: String) : String;
-    procedure AtuImage (ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
+
 end;
 
 
@@ -529,6 +530,28 @@ destructor TSyUtils.Destroy;
 begin
   FMimeList.Free;
   inherited;
+end;
+
+function TSyUtils.ExtractMethodAndURI(const RequestLine: string;
+  out Method, URI: string): Boolean;
+var
+  SpacePos: Integer;
+  VRequestLine: String;
+begin
+  Result := False;
+  VRequestLine := RequestLine;
+  SpacePos := Pos(' ', VRequestLine);
+  if SpacePos > 0 then
+  begin
+    Method := Copy(VRequestLine, 1, SpacePos - 1);
+    Delete(VRequestLine, 1, SpacePos);
+    SpacePos := Pos(' ', VRequestLine);
+    if SpacePos > 0 then
+    begin
+      URI := Copy(VRequestLine, 1, SpacePos - 1);
+      Result := True;
+    end;
+  end;
 end;
 
 function TSyUtils.GetFileMIMEType(const AFileName: string): string;

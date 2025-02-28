@@ -3,7 +3,7 @@ unit Badger;
 interface
 
 uses
- blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, uRouteManager, SyUtils, BadgerMethods;
+ blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, uRouteManager, SyUtils;
 
  type
   TLastRequest   = Procedure(Value: String) Of Object;
@@ -225,14 +225,14 @@ procedure TClientThread.Execute;
 var
   Index: Integer;
 
-  Methods : TBadgerMethods;
+  sUtils : TSyUtils;
 begin
-  Methods := TBadgerMethods.Create;
+  sUtils := TSyUtils.Create;
   try
     if FClientSocket.LastError = 0 then
     begin
       FRequestLine := FClientSocket.RecvString(5000);
-      if Methods.ExtractMethodAndURI(FRequestLine, FMethod, FURI) then
+      if sUtils.ExtractMethodAndURI(FRequestLine, FMethod, FURI) then
       begin
         FCriticalSection.Enter;
 
@@ -274,7 +274,7 @@ begin
     end;
   finally
     FClientSocket.Free;
-    Methods.Free;
+    sUtils.Free;
   end;
 end;
 
