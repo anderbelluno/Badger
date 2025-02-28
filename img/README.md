@@ -1,0 +1,1 @@
+Picture created be "Microsoft Copilot" help
