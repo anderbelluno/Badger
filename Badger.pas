@@ -23,7 +23,7 @@ uses
     FURI: string;
     FMethod: string;
     FRequestLine: string;
-    FResponseLineLine: string;
+    FResponseLine: string;
     FCriticalSection: TCriticalSection;
     FToken : String;
   protected
@@ -253,19 +253,19 @@ begin
                     else
                        begin
                            FClientSocket.SendString('HTTP/1.1 401 Unauthorized' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF  );
-                           FResponseLineLine:= 'HTTP/1.1 401 Unauthorized';
+                           FResponseLine:= 'HTTP/1.1 401 Unauthorized';
                        end;
                  end;
           end
           else
             begin
                FClientSocket.SendString('HTTP/1.1 404 Method or Route Not Found' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF);
-               FResponseLineLine:= 'HTTP/1.1 404 Method or Route Not Found';
+               FResponseLine:= 'HTTP/1.1 404 Method or Route Not Found';
             end;
             if Assigned(vLastResponse) then
-              VLastResponse(FResponseLineLine) ;
-
-           // FClientSocket;
+              VLastResponse(FResponseLine) ;  { TODO -oAnderson -cMelhorias :
+                                                vLastResponse não está correto, acredito que a posição não seja essa.
+                                                Ele serve somente para log e informações assim como o vLastRequest }
 
         finally
           FCriticalSection.Leave;

@@ -32,8 +32,7 @@ implementation
 
 { TRouteManager }
 
-procedure TRouteManager.RegisterRoute(const Route: string;
-  Callback: TRoutingCallback);
+procedure TRouteManager.RegisterRoute(const Route: string; Callback: TRoutingCallback);
 var
   Method: TMethod;
 begin
@@ -48,7 +47,7 @@ begin
   RegisterRoute('/upload',   upLoad);
   RegisterRoute('/download', download);
   RegisterRoute('/rota1',    rota1);
-  RegisterRoute('/ping', ping);
+  RegisterRoute('/ping',     ping);
   RegisterRoute('/AtuImage', AtuImage);
 end;
 
@@ -58,8 +57,7 @@ begin
   inherited;
 end;
 
-procedure TRouteManager.downLoad(ClientSocket: TTCPBlockSocket; const URI,
-  Method, RequestLine: string);
+procedure TRouteManager.downLoad(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
 var
  SynClasses : TBadgerMethods;
 begin
@@ -71,23 +69,12 @@ begin
   end;
 end;
 
-
-
-procedure TRouteManager.rota1(ClientSocket: TTCPBlockSocket; const URI,
-  Method, RequestLine: string);
-var
- SynClasses : TBadgerMethods;
+procedure TRouteManager.rota1(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
 begin
-  SynClasses := TBadgerMethods.Create;
-  try
     ClientSocket.SendString('HTTP/1.1 200 ' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF + UTF8Encode( 'Rota1 executada') );
-  finally
-    FreeAndNil(SynClasses);
-  end;
 end;
 
-procedure TRouteManager.upLoad(ClientSocket: TTCPBlockSocket; const URI,
-  Method, RequestLine: string);
+procedure TRouteManager.upLoad(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
 var
  SynClasses : TBadgerMethods;
 begin
@@ -99,14 +86,12 @@ begin
   end;
 end;
 
-procedure TRouteManager.ping(ClientSocket: TTCPBlockSocket; const URI,
-  Method, RequestLine: string);
+procedure TRouteManager.ping(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
 begin
    ClientSocket.SendString('HTTP/1.1 200 ' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF + UTF8Encode( 'Pong') );
 end;
 
-procedure TRouteManager.AtuImage(ClientSocket: TTCPBlockSocket; const URI,
-  Method, RequestLine: string);
+procedure TRouteManager.AtuImage(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
 var
  SynClasses : TBadgerMethods;
 begin
