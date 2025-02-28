@@ -3,7 +3,7 @@ unit Badger;
 interface
 
 uses
- blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, uRouteManager, SyUtils, BadgerMethods;
+ blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, BadgerRouteManager, SyUtils, BadgerMethods;
 
  type
   TLastRequest   = Procedure(Value: String) Of Object;

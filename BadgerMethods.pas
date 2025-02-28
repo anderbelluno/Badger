@@ -3,7 +3,8 @@ unit BadgerMethods;
 interface
 
 uses
- blcksock, SysUtils, Classes, {DBClient, VirtualTable,} DB, {$IFDEF VER150}Dialogs{$ELSE}FMX.Dialogs{$ENDIF} , uFormDataReader, Contnrs, SyUtils;
+ blcksock, SysUtils, Classes, {DBClient, VirtualTable,} DB, {$IFDEF VER150}Dialogs{$ELSE}FMX.Dialogs{$ENDIF} ,
+ BadgerMultipartDataReader, Contnrs, SyUtils;
 
 type
  TBadgerMethods = class(TObject)
