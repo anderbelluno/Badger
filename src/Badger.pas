@@ -104,20 +104,26 @@ begin
      if FServerSocket.CanRead(1000) then
      begin
         ClientSocket := TTCPBlockSocket.Create;
-        ClientSocket.Socket := FServerSocket.Accept;
-        ClientSocket.SocksUsername := FUsername;
-        ClientSocket.SocksPassword := FPassword;
-        if ClientSocket.LastError = 0 then
-        begin
-           //if Assigned(vLastRequest) then
+        try
+           ClientSocket.Socket := FServerSocket.Accept;
+           ClientSocket.SocksUsername := FUsername;
+           ClientSocket.SocksPassword := FPassword;
+           if ClientSocket.LastError = 0 then
               TClientThread.Create(ClientSocket, FRouteManager, FCriticalSection, VLastRequest, VLastResponse, FAuthType, FToken) // Cria uma nova thread para tratar a requisição
-           {else
-              TClientThread.Create(ClientSocket, FRoutes, FCriticalSection, nil, nil, FAuthType);} // Cria uma nova thread para tratar a requisição
-        end
-        else
-        ClientSocket.Free;
-     end;
+           else
+           begin
+              if Assigned(VLastResponse) then
+                VLastResponse('Error accepting connection: ' + ClientSocket.LastErrorDesc);
+                ClientSocket.Free;
+           end;
+        except
+          ClientSocket.Free;
+        // Logar exceção ou disparar evento OnError
+        end;
+    end;
   end;
+  FServerSocket.CloseSocket; // Garantir que o socket seja fechado
+
 end;
 
 function TClientThread.VerifyAuth(ClientSocket: TTCPBlockSocket;
