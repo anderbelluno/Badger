@@ -63,7 +63,7 @@ var
 begin
   SynClasses := TBadgerMethods.Create;
   try
-    SynClasses.fDownloadStream(ClientSocket,URI, Method, RequestLine);
+    SynClasses.fDownloadStream(ClientSocket,URI, Method, RequestLine,'D:\GoogleDrive\Camera\0cc1b8a542673ba65bda4a151228e384.png');
   finally
     FreeAndNil(SynClasses);
   end;

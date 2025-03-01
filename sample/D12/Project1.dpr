@@ -8,7 +8,8 @@ uses
   BadgerMethods in '..\..\src\BadgerMethods.pas',
   BadgerMultipartDataReader in '..\..\src\BadgerMultipartDataReader.pas',
   BadgerRouteManager in '..\..\src\BadgerRouteManager.pas',
-  SyUtils in '..\..\src\SyUtils.pas';
+  SyUtils in '..\..\src\SyUtils.pas',
+  BadgerBasicAuth in '..\..\src\Auth\BadgerBasicAuth.pas';
 
 {$R *.res}
 

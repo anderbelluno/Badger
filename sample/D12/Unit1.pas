@@ -6,7 +6,7 @@ uses
   System.SysUtils, System.Types, System.UITypes, System.Classes, System.Variants,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   FMX.Memo.Types, FMX.ScrollBox, FMX.Memo, FMX.StdCtrls, FMX.Layouts,
-  FMX.Controls.Presentation, FMX.Edit, Badger;
+  FMX.Controls.Presentation, FMX.Edit, Badger, BadgerBasicAuth;
 
 type
   TForm1 = class(TForm)
@@ -23,6 +23,7 @@ type
   private
     { Private declarations }
     ServerThread: TBadger;
+    BasicAuth: TBasicAuth; // Instância da autenticação Basic
     procedure StartHTTPServer(var ServerThread: TBadger);
     procedure StopHTTPServer(var ServerThread: TBadger);
   public
@@ -65,11 +66,13 @@ end;
 procedure TForm1.FormCreate(Sender: TObject);
 begin
   ServerThread := nil;
+  BasicAuth := TBasicAuth.Create('andersons', 'fioris'); // Credenciais fixas para teste
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
   StopHTTPServer(ServerThread);
+  BasicAuth.Free;
 end;
 
 procedure TForm1.onLastRequest(Value: String);
@@ -88,20 +91,9 @@ procedure TForm1.StartHTTPServer(var ServerThread: TBadger);
 begin
   ServerThread := TBadger.Create;
   ServerThread.NonBlockMode := CBxNonBlockMode.IsChecked;
-  ServerThread.Username := 'andersons';
-  ServerThread.Password := 'fioris';
-  ServerThread.Token    := 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.'+
-                           'eyJpc3MiOiJhcGkuaWxvdmVwZGYuY29tIiwiY'+
-                           'XVkIjoiIiwiaWF0IjoxNzI1OTI2NzIxLCJuYmY'+
-                           'iOjE3MjU5MjY3MjEsImV4cCI6MTcyNTkzMDMyM'+
-                           'SwianRpIjoicHJvamVjdF9wdWJsaWNfOTM4YzI1'+
-                           'NmU3ZDBmOTlhNjE4MGEzZTdhMDQxYTFjMzZfZml'+
-                           '0MXg3ZTNjZTQwOGY2ZWVkYWE4ODY0MjJhZjBkOD'+
-                           'YxMTgwZCJ9.Ut6qSflj7QYH4DgQK-pibzoF7QB-pwb_dJqpNKvJ52k';
-
   ServerThread.OnLastRequest := onLastRequest;
   ServerThread.OnLastResponse := onLastResponse;
-
+  ServerThread.AddMiddleware(BasicAuth.Check); // Adiciona o middleware de autenticação Basic
 end;
 
 procedure TForm1.StopHTTPServer(var ServerThread: TBadger);

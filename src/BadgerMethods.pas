@@ -16,7 +16,7 @@ type
 
  public
    function fParserJsonStream(const ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: String): string;
-   procedure fDownloadStream(const ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: String);
+   function fDownloadStream(const ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine, FilePath: String): Boolean;
    procedure AtuImage (ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
    function getRequestStream(ClientSocket: TTCPBlockSocket; ContentLength: Integer): TMemoryStream;
    function ExtractMethodAndURI(const RequestLine: string; out Method, URI: string): Boolean;
@@ -91,17 +91,18 @@ begin
 
       Files := Reader.ProcessMultipartFormData(V_Stream, V_Boundary) ;
 
-     for i := 0 to Files.Count - 1 do
-      begin
-        FormDataFile := TFormDataFile(Files[i]);
-        UniqueName := Reader.UniqueFileName(FormDataFile.FileName);
-        FormDataFile.Stream.SaveToFile(UniqueName);
-      end;
+      try
+         for i := 0 to Files.Count - 1 do
+         begin
+            FormDataFile := TFormDataFile(Files[i]);
+            UniqueName := Reader.UniqueFileName(FormDataFile.FileName);
+            FormDataFile.Stream.SaveToFile(UniqueName);
+         end;
 
-      if V_ErrMsg = EmptyStr then
-         ClientSocket.SendString('HTTP/1.1 200 OK' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF )
-      else
+       ClientSocket.SendString('HTTP/1.1 200 OK' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF );
+      except
          ClientSocket.SendString( 'HTTP/1.1 500 ' + UTF8Encode(V_ErrMsg) + CRLF + 'Content-Type: text/plain' + CRLF + CRLF );
+      end;
 
    finally
       if (Assigned(V_HeaderList)) then
@@ -141,33 +142,34 @@ begin
 end;
 
 
-procedure TBadgerMethods.fDownloadStream(const ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: String);
+function TBadgerMethods.fDownloadStream(const ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine, FilePath: String): Boolean;
 var
   Header: string;
   Buffer: array[0..8191] of Byte;
   BytesRead: Integer;
   FileStream: TFileStream;
-  V_HeaderList : TStringList;
-
 begin
-  V_HeaderList := nil;
-  V_HeaderList := ReadHeaders(ClientSocket);
-  FileStream := TFileStream.Create('.\master.png', fmOpenRead or fmShareDenyNone);
+  Result := False;
   try
-    Header := 'HTTP/1.0 200 OK' + CRLF +
-              'Content-Type: ' + getMime('.\master.png') + CRLF +
-              'Content-Length: ' + IntToStr(FileStream.Size) + CRLF + CRLF;
-    ClientSocket.SendString(Header);
+    FileStream := TFileStream.Create(FilePath, fmOpenRead or fmShareDenyNone);
+    try
+      Header := 'HTTP/1.0 200 OK' + CRLF +
+                'Content-Type: ' + getMime(FilePath) + CRLF +
+                'Content-Length: ' + IntToStr(FileStream.Size) + CRLF + CRLF;
+      ClientSocket.SendString(Header);
 
-    FileStream.Position := 0;
-    repeat
-      BytesRead := FileStream.Read(Buffer, SizeOf(Buffer)); // Ler o Stream em blocos de 8KB
-      if BytesRead > 0 then
-        ClientSocket.SendBuffer(@Buffer, BytesRead); // Enviar o buffer ao cliente
-    until BytesRead = 0;
-
-  finally
-    FileStream.Free;
+      FileStream.Position := 0;
+      repeat
+        BytesRead := FileStream.Read(Buffer, SizeOf(Buffer));
+        if BytesRead > 0 then
+          ClientSocket.SendBuffer(@Buffer, BytesRead);
+      until BytesRead = 0;
+      Result := True;
+    finally
+      FileStream.Free;
+    end;
+  except
+    ClientSocket.SendString('HTTP/1.1 500 Internal Server Error' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF);
   end;
 end;
 
@@ -222,25 +224,21 @@ begin
   end;
 end;
 
-function TBadgerMethods.getRequestStream(ClientSocket: TTCPBlockSocket;
-  ContentLength: Integer): TMemoryStream;
-var
-  BodyStream: TMemoryStream;
+function TBadgerMethods.getRequestStream(ClientSocket: TTCPBlockSocket; ContentLength: Integer): TMemoryStream;
 begin
-    BodyStream := TMemoryStream.Create;
-    Result     := TMemoryStream.Create;
+   Result := TMemoryStream.Create;
 
-    try
+   try
       if ContentLength > 0 then
       begin
-        BodyStream.SetSize(ContentLength);
-        ClientSocket.RecvBufferEx(BodyStream.Memory, ContentLength, 5000); // Timeout 5 seconds
-        BodyStream.Position := 0;
-        Result.LoadFromStream( BodyStream );
+         Result.SetSize(ContentLength);
+         ClientSocket.RecvBufferEx(Result.Memory, ContentLength, 5000); // Timeout 5 seconds
+         Result.Position := 0;
       end;
-    finally
-       BodyStream.Free;
-    end;
+   except
+      Result.Free;
+      raise;
+   end;
 end;
 
 function TBadgerMethods.ParseRequestHeaderStr(Headers: TStringList; aRequestHeader: String): String;
