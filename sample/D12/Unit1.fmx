@@ -73,4 +73,15 @@ object Form1: TForm1
     TabOrder = 8
     Text = 'NonBlockMode'
   end
+  object ComboAuth: TComboBox
+    Items.Strings = (
+      'No Auth'
+      'Basic'
+      'Token'
+      'JWT')
+    ItemIndex = 0
+    Position.X = 24.000000000000000000
+    Position.Y = 200.000000000000000000
+    TabOrder = 9
+  end
 end

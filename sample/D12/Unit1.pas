@@ -6,7 +6,7 @@ uses
   System.SysUtils, System.Types, System.UITypes, System.Classes, System.Variants,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   FMX.Memo.Types, FMX.ScrollBox, FMX.Memo, FMX.StdCtrls, FMX.Layouts,
-  FMX.Controls.Presentation, FMX.Edit, Badger, BadgerBasicAuth;
+  FMX.Controls.Presentation, FMX.Edit, Badger, BadgerBasicAuth, FMX.ListBox;
 
 type
   TForm1 = class(TForm)
@@ -17,6 +17,7 @@ type
     Memo1: TMemo;
     Label1: TLabel;
     edtPorta: TEdit;
+    ComboAuth: TComboBox;
     procedure btnSynaClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -51,6 +52,7 @@ begin
     CBxNonBlockMode.Enabled := False;
     btnSyna.Tag := 1;
     btnSyna.Text := 'Parar Servidor';
+    ComboAuth.Enabled := False;
   end
   else
   begin
@@ -60,6 +62,7 @@ begin
     edtPorta.Enabled := True;
     rdLog.Enabled := True;
     CBxNonBlockMode.Enabled := True;
+    ComboAuth.Enabled := True;
   end;
 end;
 
@@ -93,7 +96,9 @@ begin
   ServerThread.NonBlockMode := CBxNonBlockMode.IsChecked;
   ServerThread.OnLastRequest := onLastRequest;
   ServerThread.OnLastResponse := onLastResponse;
-  ServerThread.AddMiddleware(BasicAuth.Check); // Adiciona o middleware de autenticação Basic
+
+  if ComboAuth.ItemIndex = 1 then
+    ServerThread.AddMiddleware(BasicAuth.Check); // Adiciona o middleware de autenticação Basic
 end;
 
 procedure TForm1.StopHTTPServer(var ServerThread: TBadger);
