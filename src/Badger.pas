@@ -9,7 +9,6 @@ type
   TLastRequest  = procedure(Value: String) of object;
   TLastResponse = procedure(Value: String) of object;
 
-  // Definição de tipos para middlewares
   THTTPRequest = record
     Socket: TTCPBlockSocket;
     URI, Method, RequestLine: string;
@@ -21,7 +20,6 @@ type
   end;
   TMiddlewareProc = function(Request: THTTPRequest; out Response: THTTPResponse): Boolean of object;
 
-  // Classe para encapsular o middleware (necessário para TList no Delphi 7)
   TMiddlewareWrapper = class
   public
     Middleware: TMiddlewareProc;
@@ -40,7 +38,7 @@ type
     FResponseLine: string;
     FCriticalSection: TCriticalSection;
     FMethods: TBadgerMethods;
-    FMiddlewares: TList; // TList em vez de TList<TMiddlewareProc>
+    FMiddlewares: TList;
   protected
     function ParseRequestHeader(ClientSocket: TTCPBlockSocket): TStringList;
   public
@@ -58,7 +56,7 @@ type
     FRouteManager: TRouteManager;
     FCriticalSection: TCriticalSection;
     FMethods: TBadgerMethods;
-    FMiddlewares: TList; // TList para middlewares
+    FMiddlewares: TList;
     FPort: Integer;
     FNonBlockMode: Boolean;
   protected
@@ -106,7 +104,7 @@ begin
   FRouteManager.Free;
   FMethods.Free;
   for I := 0 to FMiddlewares.Count - 1 do
-    TObject(FMiddlewares[I]).Free; // Liberar os wrappers
+    TObject(FMiddlewares[I]).Free;
   FMiddlewares.Free;
   inherited;
 end;
@@ -167,7 +165,6 @@ begin
   FRouteManager := ARouteManager;
   FMethods := AMethods;
   FMiddlewares := TList.Create;
-  // Copiar os middlewares do servidor
   for I := 0 to AMiddlewares.Count - 1 do
     FMiddlewares.Add(TMiddlewareWrapper.Create(TMiddlewareWrapper(AMiddlewares[I]).Middleware));
   Resume;
@@ -178,7 +175,7 @@ var
   I: Integer;
 begin
   for I := 0 to FMiddlewares.Count - 1 do
-    TObject(FMiddlewares[I]).Free; // Liberar os wrappers
+    TObject(FMiddlewares[I]).Free;
   FMiddlewares.Free;
   inherited;
 end;
@@ -201,6 +198,11 @@ begin
 end;
 
 procedure TClientThread.Execute;
+  function BuildHTTPResponse(StatusCode: Integer; StatusText, Body: string): string;
+    begin
+      Result := Format('HTTP/1.1 %d %s', [StatusCode, StatusText]) + CRLF + 'Content-Type: text/plain' + CRLF + CRLF + Body;
+    end;
+
   procedure Exec(Index: Integer);
   var
     Callback: TRoutingCallback;
@@ -218,7 +220,7 @@ var
   Resp: THTTPResponse;
   MiddlewareWrapper: TMiddlewareWrapper;
   Headers: TStringList;
-  ResponseString: string; // Variável auxiliar para construir a resposta
+  ResponseString: string;
 begin
 try
   try
@@ -240,15 +242,12 @@ try
             Req.RequestLine := FRequestLine;
             Req.Headers := Headers;
 
-            // Executar middlewares
             for I := 0 to FMiddlewares.Count - 1 do
             begin
               MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
               if not MiddlewareWrapper.Middleware(Req, Resp) then
               begin
-                // Construir a resposta manualmente
-                ResponseString := Format('HTTP/1.1 %d', [Resp.StatusCode]) + ' ' + Resp.Body + CRLF + 'Content-Type: text/plain' + CRLF + CRLF + Resp.Body;
-                FClientSocket.SendString(ResponseString);
+                FClientSocket.SendString(BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Body));
                 FResponseLine := Format('HTTP/1.1 %d', [Resp.StatusCode]);
                 if Assigned(VLastResponse) then
                   VLastResponse(FResponseLine);
