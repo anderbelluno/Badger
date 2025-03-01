@@ -308,6 +308,8 @@
         <DCCReference Include="..\..\src\BadgerRouteManager.pas"/>
         <DCCReference Include="..\..\src\SyUtils.pas"/>
         <DCCReference Include="..\..\src\Auth\BadgerBasicAuth.pas"/>
+        <DCCReference Include="..\..\src\BadgerHttpStatus.pas"/>
+        <DCCReference Include="..\..\src\BadgerTypes.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

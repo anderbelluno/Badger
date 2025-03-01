@@ -1,32 +1,25 @@
 unit BadgerRouteManager;
 
-{$IFDEF FPC}
-  {$mode delphi}
-{$ENDIF}
-
 interface
 
 uses
- Classes, SysUtils, BadgerMethods, blcksock;
+  Classes, SysUtils, BadgerMethods, BadgerTypes, BadgerHttpStatus;
 
- type
-   TRoutingCallback = procedure(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string) of object;
-
- TRouteManager = class(TObject)
- private
-
+type
+  TRouteManager = class(TObject)
+  private
     procedure RegisterRoute(const Route: string; Callback: TRoutingCallback);
- public
+  public
     FRoutes: TStringList;
     constructor Create;
     destructor Destroy; override;
 
-    procedure upLoad(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
-    procedure downLoad(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
-    procedure rota1(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
-    procedure ping(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
-    procedure AtuImage (ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
- end;
+    procedure upLoad(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
+    procedure downLoad(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
+    procedure rota1(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
+    procedure ping(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
+    procedure AtuImage(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
+  end;
 
 implementation
 
@@ -44,10 +37,10 @@ end;
 constructor TRouteManager.Create;
 begin
   FRoutes := TStringList.Create;
-  RegisterRoute('/upload',   upLoad);
-  RegisterRoute('/download', download);
-  RegisterRoute('/rota1',    rota1);
-  RegisterRoute('/ping',     ping);
+  RegisterRoute('/upload', upLoad);
+  RegisterRoute('/download', downLoad);
+  RegisterRoute('/rota1', rota1);
+  RegisterRoute('/ping', ping);
   RegisterRoute('/AtuImage', AtuImage);
 end;
 
@@ -57,47 +50,51 @@ begin
   inherited;
 end;
 
-procedure TRouteManager.downLoad(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
+procedure TRouteManager.downLoad(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
 var
- SynClasses : TBadgerMethods;
+  SynClasses: TBadgerMethods;
 begin
   SynClasses := TBadgerMethods.Create;
   try
-    SynClasses.fDownloadStream(ClientSocket,URI, Method, RequestLine,'D:\GoogleDrive\Camera\0cc1b8a542673ba65bda4a151228e384.png');
+    Response.StatusCode := THTTPStatus.OK;
+    Response.Stream := SynClasses.fDownloadStream('D:\GoogleDrive\Camera\0cc1b8a542673ba65bda4a151228e384.png', Response.ContentType);
   finally
     FreeAndNil(SynClasses);
   end;
 end;
 
-procedure TRouteManager.rota1(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
+procedure TRouteManager.rota1(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
 begin
-    ClientSocket.SendString('HTTP/1.1 200 ' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF + UTF8Encode( 'Rota1 executada') );
+  Response.StatusCode := THTTPStatus.OK;
+  Response.Body := UTF8Encode('Rota1 executada');
 end;
 
-procedure TRouteManager.upLoad(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
+procedure TRouteManager.upLoad(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
 var
- SynClasses : TBadgerMethods;
+  SynClasses: TBadgerMethods;
 begin
   SynClasses := TBadgerMethods.Create;
   try
-    ClientSocket.SendString('HTTP/1.1 200 OK' + CRLF + 'Content-Type: application/json' + CRLF + CRLF + SynClasses.fParserJsonStream( ClientSocket,URI, Method, RequestLine ) )
+    Response.StatusCode := THTTPStatus.OK;
+    Response.Body := SynClasses.fParserJsonStream(Body);
   finally
     FreeAndNil(SynClasses);
   end;
 end;
 
-procedure TRouteManager.ping(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
+procedure TRouteManager.ping(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
 begin
-   ClientSocket.SendString('HTTP/1.1 200 ' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF + UTF8Encode( 'Pong') );
+  Response.StatusCode := THTTPStatus.OK;
+  Response.Body := UTF8Encode('Pong');
 end;
 
-procedure TRouteManager.AtuImage(ClientSocket: TTCPBlockSocket; const URI, Method, RequestLine: string);
+procedure TRouteManager.AtuImage(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
 var
- SynClasses : TBadgerMethods;
+  SynClasses: TBadgerMethods;
 begin
   SynClasses := TBadgerMethods.Create;
   try
-    SynClasses.AtuImage(ClientSocket, URI, Method, RequestLine);
+    SynClasses.AtuImage(Body, Response.StatusCode, Response.Body);
   finally
     FreeAndNil(SynClasses);
   end;

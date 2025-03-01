@@ -3,7 +3,7 @@ unit BadgerBasicAuth;
 interface
 
 uses
-  SysUtils, Classes, SyUtils, Badger; // Inclui SyUtils para DecodeBase64 e Badger para THTTPRequest/THTTPResponse
+  SysUtils, Classes, SyUtils, Badger, BadgerTypes; // Inclui SyUtils para DecodeBase64 e Badger para THTTPRequest/THTTPResponse
 
 type
   TBasicAuth = class

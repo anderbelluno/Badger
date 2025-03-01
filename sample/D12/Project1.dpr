@@ -9,7 +9,9 @@ uses
   BadgerMultipartDataReader in '..\..\src\BadgerMultipartDataReader.pas',
   BadgerRouteManager in '..\..\src\BadgerRouteManager.pas',
   SyUtils in '..\..\src\SyUtils.pas',
-  BadgerBasicAuth in '..\..\src\Auth\BadgerBasicAuth.pas';
+  BadgerBasicAuth in '..\..\src\Auth\BadgerBasicAuth.pas',
+  BadgerHttpStatus in '..\..\src\BadgerHttpStatus.pas',
+  BadgerTypes in '..\..\src\BadgerTypes.pas';
 
 {$R *.res}
 

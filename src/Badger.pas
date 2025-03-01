@@ -3,29 +3,9 @@ unit Badger;
 interface
 
 uses
-  blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, BadgerRouteManager, SyUtils, BadgerMethods;
+  blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, BadgerRouteManager, SyUtils, BadgerMethods, BadgerHttpStatus, BadgerTypes, StrUtils;
 
 type
-  TLastRequest  = procedure(Value: String) of object;
-  TLastResponse = procedure(Value: String) of object;
-
-  THTTPRequest = record
-    Socket: TTCPBlockSocket;
-    URI, Method, RequestLine: string;
-    Headers: TStringList;
-  end;
-  THTTPResponse = record
-    StatusCode: Integer;
-    Body: string;
-  end;
-  TMiddlewareProc = function(Request: THTTPRequest; out Response: THTTPResponse): Boolean of object;
-
-  TMiddlewareWrapper = class
-  public
-    Middleware: TMiddlewareProc;
-    constructor Create(AMiddleware: TMiddlewareProc);
-  end;
-
   TClientThread = class(TThread)
   private
     VLastRequest: TLastRequest;
@@ -41,6 +21,7 @@ type
     FMiddlewares: TList;
   protected
     function ParseRequestHeader(ClientSocket: TTCPBlockSocket): TStringList;
+    function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string): string;
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager; ACriticalSection: TCriticalSection;
                        AMethods: TBadgerMethods; AMiddlewares: TList; ALastRequest: TLastRequest = nil; ALastResponse: TLastResponse = nil);
@@ -73,14 +54,6 @@ type
   end;
 
 implementation
-
-{ TMiddlewareWrapper }
-
-constructor TMiddlewareWrapper.Create(AMiddleware: TMiddlewareProc);
-begin
-  inherited Create;
-  Middleware := AMiddleware;
-end;
 
 { TBadger }
 
@@ -197,13 +170,19 @@ begin
   end;
 end;
 
-procedure TClientThread.Execute;
-  function BuildHTTPResponse(StatusCode: Integer; StatusText, Body: string): string;
-    begin
-      Result := Format('HTTP/1.1 %d %s', [StatusCode, StatusText]) + CRLF + 'Content-Type: text/plain' + CRLF + CRLF + Body;
-    end;
+function TClientThread.BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string): string;
+begin
+  if Assigned(Stream) then
+    Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
+              'Content-Type: ' + ContentType + CRLF +
+              'Content-Length: ' + IntToStr(Stream.Size) + CRLF + CRLF
+  else
+    Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
+              'Content-Type: ' + IfThen(ContentType = '', 'text/plain', ContentType) + CRLF + CRLF + Body;
+end;
 
-  procedure Exec(Index: Integer);
+procedure TClientThread.Execute;
+  procedure Exec(Index: Integer; const Body: string; out Response: THTTPResponse);
   var
     Callback: TRoutingCallback;
     MethodPointer: TMethod;
@@ -211,16 +190,18 @@ procedure TClientThread.Execute;
     MethodPointer.Data := Self;
     MethodPointer.Code := Pointer(FRouteManager.FRoutes.Objects[Index]);
     Callback := TRoutingCallback(MethodPointer);
-    Callback(FClientSocket, FURI, FMethod, FRequestLine);
+    Callback(FURI, FMethod, FRequestLine, Body, Response);
   end;
 
 var
-  Index, I: Integer;
+  Index, I, ContentLength: Integer;
   Req: THTTPRequest;
   Resp: THTTPResponse;
   MiddlewareWrapper: TMiddlewareWrapper;
   Headers: TStringList;
-  ResponseString: string;
+  Body: string;
+  Buffer: array[0..8191] of Byte;
+  BytesRead: Integer;
 begin
 try
   try
@@ -236,18 +217,38 @@ try
 
           Headers := ParseRequestHeader(FClientSocket);
           try
+            ContentLength := FMethods.ParseRequestHeaderInt(Headers, 'Content-Length');
+            if ContentLength > 0 then
+            begin
+              SetLength(Body, ContentLength);
+              FClientSocket.RecvBuffer(PChar(Body), ContentLength);
+            end
+            else
+              Body := '';
+
             Req.Socket := FClientSocket;
             Req.URI := FURI;
             Req.Method := FMethod;
             Req.RequestLine := FRequestLine;
             Req.Headers := Headers;
+            Req.Body := Body;
 
             for I := 0 to FMiddlewares.Count - 1 do
             begin
               MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
               if not MiddlewareWrapper.Middleware(Req, Resp) then
               begin
-                FClientSocket.SendString(BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Body));
+                FClientSocket.SendString(BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType));
+                if Assigned(Resp.Stream) then
+                begin
+                  Resp.Stream.Position := 0;
+                  repeat
+                    BytesRead := Resp.Stream.Read(Buffer, SizeOf(Buffer));
+                    if BytesRead > 0 then
+                      FClientSocket.SendBuffer(@Buffer, BytesRead);
+                  until BytesRead = 0;
+                  FreeAndNil(Resp.Stream);
+                end;
                 FResponseLine := Format('HTTP/1.1 %d', [Resp.StatusCode]);
                 if Assigned(VLastResponse) then
                   VLastResponse(FResponseLine);
@@ -255,17 +256,27 @@ try
               end;
             end;
 
-            // Executar a rota
             Index := FRouteManager.FRoutes.IndexOf(FURI);
             if Index <> -1 then
             begin
-              Exec(Index);
-              FResponseLine := 'HTTP/1.1 200 OK';
+              Exec(Index, Body, Resp);
+              FClientSocket.SendString(BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType));
+              if Assigned(Resp.Stream) then
+              begin
+                Resp.Stream.Position := 0;
+                repeat
+                  BytesRead := Resp.Stream.Read(Buffer, SizeOf(Buffer));
+                  if BytesRead > 0 then
+                    FClientSocket.SendBuffer(@Buffer, BytesRead);
+                until BytesRead = 0;
+                FreeAndNil(Resp.Stream);
+              end;
+              FResponseLine := Format('HTTP/1.1 %d', [Resp.StatusCode]);
             end
             else
             begin
-              FClientSocket.SendString('HTTP/1.1 404 Not Found' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF);
-              FResponseLine := 'HTTP/1.1 404 Not Found';
+              FClientSocket.SendString(BuildHTTPResponse(THTTPStatus.NotFound, 'Not Found', nil, 'text/plain'));
+              FResponseLine := Format('HTTP/1.1 %d', [THTTPStatus.NotFound]);
             end;
 
             if Assigned(VLastResponse) then
@@ -281,8 +292,8 @@ try
   except
     on E: Exception do
     begin
-      FClientSocket.SendString('HTTP/1.1 500 Internal Server Error' + CRLF + 'Content-Type: text/plain' + CRLF + CRLF + E.Message);
-      FResponseLine := 'HTTP/1.1 500 Internal Server Error';
+      FClientSocket.SendString(BuildHTTPResponse(THTTPStatus.InternalServerError, 'Internal Server Error: ' + E.Message, nil, 'text/plain'));
+      FResponseLine := Format('HTTP/1.1 %d', [THTTPStatus.InternalServerError]);
       if Assigned(VLastResponse) then
         VLastResponse(FResponseLine);
     end;
