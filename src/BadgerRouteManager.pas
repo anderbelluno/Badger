@@ -56,7 +56,7 @@ var
 begin
   SynClasses := TBadgerMethods.Create;
   try
-    Response.StatusCode := THTTPStatus.OK;
+    Response.StatusCode := HTTP_OK;
     Response.Stream := SynClasses.fDownloadStream('D:\GoogleDrive\Camera\0cc1b8a542673ba65bda4a151228e384.png', Response.ContentType);
   finally
     FreeAndNil(SynClasses);
@@ -65,7 +65,7 @@ end;
 
 procedure TRouteManager.rota1(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
 begin
-  Response.StatusCode := THTTPStatus.OK;
+  Response.StatusCode := HTTP_OK;
   Response.Body := UTF8Encode('Rota1 executada');
 end;
 
@@ -75,7 +75,7 @@ var
 begin
   SynClasses := TBadgerMethods.Create;
   try
-    Response.StatusCode := THTTPStatus.OK;
+    Response.StatusCode := HTTP_OK;
     Response.Body := SynClasses.fParserJsonStream(Body);
   finally
     FreeAndNil(SynClasses);
@@ -84,7 +84,7 @@ end;
 
 procedure TRouteManager.ping(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
 begin
-  Response.StatusCode := THTTPStatus.OK;
+  Response.StatusCode := HTTP_OK;
   Response.Body := UTF8Encode('Pong');
 end;
 

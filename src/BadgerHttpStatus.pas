@@ -2,82 +2,79 @@ unit BadgerHttpStatus;
 
 interface
 
+// Constantes globais para códigos de status HTTP
+const
+  HTTP_CONTINUE = 100;
+  HTTP_SWITCHING_PROTOCOLS = 101;
+  HTTP_PROCESSING = 102;
+
+  HTTP_OK = 200;
+  HTTP_CREATED = 201;
+  HTTP_ACCEPTED = 202;
+  HTTP_NON_AUTHORITATIVE_INFORMATION = 203;
+  HTTP_NO_CONTENT = 204;
+  HTTP_RESET_CONTENT = 205;
+  HTTP_PARTIAL_CONTENT = 206;
+  HTTP_MULTI_STATUS = 207;
+  HTTP_ALREADY_REPORTED = 208;
+  HTTP_IM_USED = 226;
+
+  HTTP_MULTIPLE_CHOICES = 300;
+  HTTP_MOVED_PERMANENTLY = 301;
+  HTTP_FOUND = 302;
+  HTTP_SEE_OTHER = 303;
+  HTTP_NOT_MODIFIED = 304;
+  HTTP_USE_PROXY = 305;
+  HTTP_TEMPORARY_REDIRECT = 307;
+  HTTP_PERMANENT_REDIRECT = 308;
+
+  HTTP_BAD_REQUEST = 400;
+  HTTP_UNAUTHORIZED = 401;
+  HTTP_PAYMENT_REQUIRED = 402;
+  HTTP_FORBIDDEN = 403;
+  HTTP_NOT_FOUND = 404;
+  HTTP_METHOD_NOT_ALLOWED = 405;
+  HTTP_NOT_ACCEPTABLE = 406;
+  HTTP_PROXY_AUTHENTICATION_REQUIRED = 407;
+  HTTP_REQUEST_TIMEOUT = 408;
+  HTTP_CONFLICT = 409;
+  HTTP_GONE = 410;
+  HTTP_LENGTH_REQUIRED = 411;
+  HTTP_PRECONDITION_FAILED = 412;
+  HTTP_PAYLOAD_TOO_LARGE = 413;
+  HTTP_REQUEST_URI_TOO_LONG = 414;
+  HTTP_UNSUPPORTED_MEDIA_TYPE = 415;
+  HTTP_REQUESTED_RANGE_NOT_SATISFIABLE = 416;
+  HTTP_EXPECTATION_FAILED = 417;
+  HTTP_IM_A_TEAPOT = 418;
+  HTTP_MISDIRECTED_REQUEST = 421;
+  HTTP_UNPROCESSABLE_ENTITY = 422;
+  HTTP_LOCKED = 423;
+  HTTP_FAILED_DEPENDENCY = 424;
+  HTTP_UPGRADE_REQUIRED = 426;
+  HTTP_PRECONDITION_REQUIRED = 428;
+  HTTP_TOO_MANY_REQUESTS = 429;
+  HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE = 431;
+  HTTP_CONNECTION_CLOSED_WITHOUT_RESPONSE = 444;
+  HTTP_UNAVAILABLE_FOR_LEGAL_REASONS = 451;
+  HTTP_CLIENT_CLOSED_REQUEST = 499;
+
+  HTTP_INTERNAL_SERVER_ERROR = 500;
+  HTTP_NOT_IMPLEMENTED = 501;
+  HTTP_BAD_GATEWAY = 502;
+  HTTP_SERVICE_UNAVAILABLE = 503;
+  HTTP_GATEWAY_TIMEOUT = 504;
+  HTTP_VERSION_NOT_SUPPORTED = 505;
+  HTTP_VARIANT_ALSO_NEGOTIATES = 506;
+  HTTP_INSUFFICIENT_STORAGE = 507;
+  HTTP_LOOP_DETECTED = 508;
+  HTTP_NOT_EXTENDED = 510;
+  HTTP_NETWORK_AUTHENTICATION_REQUIRED = 511;
+  HTTP_NETWORK_CONNECTION_TIMEOUT_ERROR = 599;
+
 type
   THTTPStatus = class
   public
-    // 1xx Informational
-    const Continue = 100;
-    const SwitchingProtocols = 101;
-    const Processing = 102;
-
-    // 2xx Success
-    const OK = 200;
-    const Created = 201;
-    const Accepted = 202;
-    const NonAuthoritativeInformation = 203;
-    const NoContent = 204;
-    const ResetContent = 205;
-    const PartialContent = 206;
-    const MultiStatus = 207;
-    const AlreadyReported = 208;
-    const IMUsed = 226;
-
-    // 3xx Redirection
-    const MultipleChoices = 300;
-    const MovedPermanently = 301;
-    const Found = 302;
-    const SeeOther = 303;
-    const NotModified = 304;
-    const UseProxy = 305;
-    const TemporaryRedirect = 307;
-    const PermanentRedirect = 308;
-
-    // 4xx Client Error
-    const BadRequest = 400;
-    const Unauthorized = 401;
-    const PaymentRequired = 402;
-    const Forbidden = 403;
-    const NotFound = 404;
-    const MethodNotAllowed = 405;
-    const NotAcceptable = 406;
-    const ProxyAuthenticationRequired = 407;
-    const RequestTimeout = 408;
-    const Conflict = 409;
-    const Gone = 410;
-    const LengthRequired = 411;
-    const PreconditionFailed = 412;
-    const PayloadTooLarge = 413;
-    const RequestURITooLong = 414;
-    const UnsupportedMediaType = 415;
-    const RequestedRangeNotSatisfiable = 416;
-    const ExpectationFailed = 417;
-    const ImATeapot = 418;
-    const MisdirectedRequest = 421;
-    const UnprocessableEntity = 422;
-    const Locked = 423;
-    const FailedDependency = 424;
-    const UpgradeRequired = 426;
-    const PreconditionRequired = 428;
-    const TooManyRequests = 429;
-    const RequestHeaderFieldsTooLarge = 431;
-    const ConnectionClosedWithoutResponse = 444;
-    const UnavailableForLegalReasons = 451;
-    const ClientClosedRequest = 499;
-
-    // 5xx Server Error
-    const InternalServerError = 500;
-    const NotImplemented = 501;
-    const BadGateway = 502;
-    const ServiceUnavailable = 503;
-    const GatewayTimeout = 504;
-    const HTTPVersionNotSupported = 505;
-    const VariantAlsoNegotiates = 506;
-    const InsufficientStorage = 507;
-    const LoopDetected = 508;
-    const NotExtended = 510;
-    const NetworkAuthenticationRequired = 511;
-    const NetworkConnectionTimeoutError = 599;
-
     class function GetStatusText(StatusCode: Integer): string;
   end;
 
@@ -88,79 +85,73 @@ implementation
 class function THTTPStatus.GetStatusText(StatusCode: Integer): string;
 begin
   case StatusCode of
-    // 1xx Informational
-    Continue: Result := 'Continue';
-    SwitchingProtocols: Result := 'Switching Protocols';
-    Processing: Result := 'Processing';
+    HTTP_CONTINUE: Result := 'Continue';
+    HTTP_SWITCHING_PROTOCOLS: Result := 'Switching Protocols';
+    HTTP_PROCESSING: Result := 'Processing';
 
-    // 2xx Success
-    OK: Result := 'OK';
-    Created: Result := 'Created';
-    Accepted: Result := 'Accepted';
-    NonAuthoritativeInformation: Result := 'Non-authoritative Information';
-    NoContent: Result := 'No Content';
-    ResetContent: Result := 'Reset Content';
-    PartialContent: Result := 'Partial Content';
-    MultiStatus: Result := 'Multi-Status';
-    AlreadyReported: Result := 'Already Reported';
-    IMUsed: Result := 'IM Used';
+    HTTP_OK: Result := 'OK';
+    HTTP_CREATED: Result := 'Created';
+    HTTP_ACCEPTED: Result := 'Accepted';
+    HTTP_NON_AUTHORITATIVE_INFORMATION: Result := 'Non-authoritative Information';
+    HTTP_NO_CONTENT: Result := 'No Content';
+    HTTP_RESET_CONTENT: Result := 'Reset Content';
+    HTTP_PARTIAL_CONTENT: Result := 'Partial Content';
+    HTTP_MULTI_STATUS: Result := 'Multi-Status';
+    HTTP_ALREADY_REPORTED: Result := 'Already Reported';
+    HTTP_IM_USED: Result := 'IM Used';
 
-    // 3xx Redirection
-    MultipleChoices: Result := 'Multiple Choices';
-    MovedPermanently: Result := 'Moved Permanently';
-    Found: Result := 'Found';
-    SeeOther: Result := 'See Other';
-    NotModified: Result := 'Not Modified';
-    UseProxy: Result := 'Use Proxy';
-    TemporaryRedirect: Result := 'Temporary Redirect';
-    PermanentRedirect: Result := 'Permanent Redirect';
+    HTTP_MULTIPLE_CHOICES: Result := 'Multiple Choices';
+    HTTP_MOVED_PERMANENTLY: Result := 'Moved Permanently';
+    HTTP_FOUND: Result := 'Found';
+    HTTP_SEE_OTHER: Result := 'See Other';
+    HTTP_NOT_MODIFIED: Result := 'Not Modified';
+    HTTP_USE_PROXY: Result := 'Use Proxy';
+    HTTP_TEMPORARY_REDIRECT: Result := 'Temporary Redirect';
+    HTTP_PERMANENT_REDIRECT: Result := 'Permanent Redirect';
 
-    // 4xx Client Error
-    BadRequest: Result := 'Bad Request';
-    Unauthorized: Result := 'Unauthorized';
-    PaymentRequired: Result := 'Payment Required';
-    Forbidden: Result := 'Forbidden';
-    NotFound: Result := 'Not Found';
-    MethodNotAllowed: Result := 'Method Not Allowed';
-    NotAcceptable: Result := 'Not Acceptable';
-    ProxyAuthenticationRequired: Result := 'Proxy Authentication Required';
-    RequestTimeout: Result := 'Request Timeout';
-    Conflict: Result := 'Conflict';
-    Gone: Result := 'Gone';
-    LengthRequired: Result := 'Length Required';
-    PreconditionFailed: Result := 'Precondition Failed';
-    PayloadTooLarge: Result := 'Payload Too Large';
-    RequestURITooLong: Result := 'Request-URI Too Long';
-    UnsupportedMediaType: Result := 'Unsupported Media Type';
-    RequestedRangeNotSatisfiable: Result := 'Requested Range Not Satisfiable';
-    ExpectationFailed: Result := 'Expectation Failed';
-    ImATeapot: Result := 'I''m a teapot';
-    MisdirectedRequest: Result := 'Misdirected Request';
-    UnprocessableEntity: Result := 'Unprocessable Entity';
-    Locked: Result := 'Locked';
-    FailedDependency: Result := 'Failed Dependency';
-    UpgradeRequired: Result := 'Upgrade Required';
-    PreconditionRequired: Result := 'Precondition Required';
-    TooManyRequests: Result := 'Too Many Requests';
-    RequestHeaderFieldsTooLarge: Result := 'Request Header Fields Too Large';
-    ConnectionClosedWithoutResponse: Result := 'Connection Closed Without Response';
-    UnavailableForLegalReasons: Result := 'Unavailable For Legal Reasons';
-    ClientClosedRequest: Result := 'Client Closed Request';
+    HTTP_BAD_REQUEST: Result := 'Bad Request';
+    HTTP_UNAUTHORIZED: Result := 'Unauthorized';
+    HTTP_PAYMENT_REQUIRED: Result := 'Payment Required';
+    HTTP_FORBIDDEN: Result := 'Forbidden';
+    HTTP_NOT_FOUND: Result := 'Not Found';
+    HTTP_METHOD_NOT_ALLOWED: Result := 'Method Not Allowed';
+    HTTP_NOT_ACCEPTABLE: Result := 'Not Acceptable';
+    HTTP_PROXY_AUTHENTICATION_REQUIRED: Result := 'Proxy Authentication Required';
+    HTTP_REQUEST_TIMEOUT: Result := 'Request Timeout';
+    HTTP_CONFLICT: Result := 'Conflict';
+    HTTP_GONE: Result := 'Gone';
+    HTTP_LENGTH_REQUIRED: Result := 'Length Required';
+    HTTP_PRECONDITION_FAILED: Result := 'Precondition Failed';
+    HTTP_PAYLOAD_TOO_LARGE: Result := 'Payload Too Large';
+    HTTP_REQUEST_URI_TOO_LONG: Result := 'Request-URI Too Long';
+    HTTP_UNSUPPORTED_MEDIA_TYPE: Result := 'Unsupported Media Type';
+    HTTP_REQUESTED_RANGE_NOT_SATISFIABLE: Result := 'Requested Range Not Satisfiable';
+    HTTP_EXPECTATION_FAILED: Result := 'Expectation Failed';
+    HTTP_IM_A_TEAPOT: Result := 'I''m a teapot';
+    HTTP_MISDIRECTED_REQUEST: Result := 'Misdirected Request';
+    HTTP_UNPROCESSABLE_ENTITY: Result := 'Unprocessable Entity';
+    HTTP_LOCKED: Result := 'Locked';
+    HTTP_FAILED_DEPENDENCY: Result := 'Failed Dependency';
+    HTTP_UPGRADE_REQUIRED: Result := 'Upgrade Required';
+    HTTP_PRECONDITION_REQUIRED: Result := 'Precondition Required';
+    HTTP_TOO_MANY_REQUESTS: Result := 'Too Many Requests';
+    HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE: Result := 'Request Header Fields Too Large';
+    HTTP_CONNECTION_CLOSED_WITHOUT_RESPONSE: Result := 'Connection Closed Without Response';
+    HTTP_UNAVAILABLE_FOR_LEGAL_REASONS: Result := 'Unavailable For Legal Reasons';
+    HTTP_CLIENT_CLOSED_REQUEST: Result := 'Client Closed Request';
 
-    // 5xx Server Error
-    InternalServerError: Result := 'Internal Server Error';
-    NotImplemented: Result := 'Not Implemented';
-    BadGateway: Result := 'Bad Gateway';
-    ServiceUnavailable: Result := 'Service Unavailable';
-    GatewayTimeout: Result := 'Gateway Timeout';
-    HTTPVersionNotSupported: Result := 'HTTP Version Not Supported';
-    VariantAlsoNegotiates: Result := 'Variant Also Negotiates';
-    InsufficientStorage: Result := 'Insufficient Storage';
-    LoopDetected: Result := 'Loop Detected';
-    NotExtended: Result := 'Not Extended';
-    NetworkAuthenticationRequired: Result := 'Network Authentication Required';
-    NetworkConnectionTimeoutError: Result := 'Network Connection Timeout Error';
-
+    HTTP_INTERNAL_SERVER_ERROR: Result := 'Internal Server Error';
+    HTTP_NOT_IMPLEMENTED: Result := 'Not Implemented';
+    HTTP_BAD_GATEWAY: Result := 'Bad Gateway';
+    HTTP_SERVICE_UNAVAILABLE: Result := 'Service Unavailable';
+    HTTP_GATEWAY_TIMEOUT: Result := 'Gateway Timeout';
+    HTTP_VERSION_NOT_SUPPORTED: Result := 'HTTP Version Not Supported';
+    HTTP_VARIANT_ALSO_NEGOTIATES: Result := 'Variant Also Negotiates';
+    HTTP_INSUFFICIENT_STORAGE: Result := 'Insufficient Storage';
+    HTTP_LOOP_DETECTED: Result := 'Loop Detected';
+    HTTP_NOT_EXTENDED: Result := 'Not Extended';
+    HTTP_NETWORK_AUTHENTICATION_REQUIRED: Result := 'Network Authentication Required';
+    HTTP_NETWORK_CONNECTION_TIMEOUT_ERROR: Result := 'Network Connection Timeout Error';
   else
     Result := 'Unknown';
   end;

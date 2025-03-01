@@ -275,8 +275,8 @@ try
             end
             else
             begin
-              FClientSocket.SendString(BuildHTTPResponse(THTTPStatus.NotFound, 'Not Found', nil, 'text/plain'));
-              FResponseLine := Format('HTTP/1.1 %d', [THTTPStatus.NotFound]);
+              FClientSocket.SendString(BuildHTTPResponse(HTTP_NOT_FOUND, 'Not Found', nil, 'text/plain'));
+              FResponseLine := Format('HTTP/1.1 %d', [HTTP_NOT_FOUND]);
             end;
 
             if Assigned(VLastResponse) then
@@ -292,8 +292,8 @@ try
   except
     on E: Exception do
     begin
-      FClientSocket.SendString(BuildHTTPResponse(THTTPStatus.InternalServerError, 'Internal Server Error: ' + E.Message, nil, 'text/plain'));
-      FResponseLine := Format('HTTP/1.1 %d', [THTTPStatus.InternalServerError]);
+      FClientSocket.SendString(BuildHTTPResponse(HTTP_INTERNAL_SERVER_ERROR, 'Internal Server Error: ' + E.Message, nil, 'text/plain'));
+      FResponseLine := Format('HTTP/1.1 %d', [HTTP_INTERNAL_SERVER_ERROR]);
       if Assigned(VLastResponse) then
         VLastResponse(FResponseLine);
     end;
