@@ -14,11 +14,11 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    procedure upLoad(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
-    procedure downLoad(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
-    procedure rota1(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
-    procedure ping(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
-    procedure AtuImage(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
+    procedure upLoad(Request: THTTPRequest; out Response: THTTPResponse);
+    procedure downLoad(Request: THTTPRequest; out Response: THTTPResponse);
+    procedure rota1(Request: THTTPRequest; out Response: THTTPResponse);
+    procedure ping(Request: THTTPRequest; out Response: THTTPResponse);
+    procedure AtuImage(Request: THTTPRequest; out Response: THTTPResponse);
   end;
 
 implementation
@@ -50,51 +50,64 @@ begin
   inherited;
 end;
 
-procedure TRouteManager.downLoad(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
+procedure TRouteManager.downLoad(Request: THTTPRequest; out Response: THTTPResponse);
 var
   SynClasses: TBadgerMethods;
+  FileName: string;
+  I: Integer;
 begin
   SynClasses := TBadgerMethods.Create;
   try
+    // Procurar o parâmetro 'file' na querystring
+    FileName := '.\master.png'; // Padrão
+    for I := 0 to Request.QueryParams.Count - 1 do
+    begin
+      if Pos('file=', Request.QueryParams[I]) = 1 then
+      begin
+        FileName := 'D:\GoogleDrive\Camera\' + Copy(Request.QueryParams[I], 6, Length(Request.QueryParams[I])); // Remove 'file='
+        Break;
+      end;
+    end;
+
     Response.StatusCode := HTTP_OK;
-    Response.Stream := SynClasses.fDownloadStream('D:\GoogleDrive\Camera\0cc1b8a542673ba65bda4a151228e384.png', Response.ContentType);
+    Response.Stream := SynClasses.fDownloadStream(FileName, Response.ContentType);
   finally
     FreeAndNil(SynClasses);
   end;
 end;
 
-procedure TRouteManager.rota1(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
+procedure TRouteManager.rota1(Request: THTTPRequest; out Response: THTTPResponse);
 begin
   Response.StatusCode := HTTP_OK;
   Response.Body := UTF8Encode('Rota1 executada');
 end;
 
-procedure TRouteManager.upLoad(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
+procedure TRouteManager.upLoad(Request: THTTPRequest; out Response: THTTPResponse);
 var
   SynClasses: TBadgerMethods;
 begin
   SynClasses := TBadgerMethods.Create;
   try
     Response.StatusCode := HTTP_OK;
-    Response.Body := SynClasses.fParserJsonStream(Body);
+    Response.Body := SynClasses.fParserJsonStream(Request.Body);
   finally
     FreeAndNil(SynClasses);
   end;
 end;
 
-procedure TRouteManager.ping(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
+procedure TRouteManager.ping(Request: THTTPRequest; out Response: THTTPResponse);
 begin
   Response.StatusCode := HTTP_OK;
   Response.Body := UTF8Encode('Pong');
 end;
 
-procedure TRouteManager.AtuImage(const URI, Method, RequestLine, Body: string; out Response: THTTPResponse);
+procedure TRouteManager.AtuImage(Request: THTTPRequest; out Response: THTTPResponse);
 var
   SynClasses: TBadgerMethods;
 begin
   SynClasses := TBadgerMethods.Create;
   try
-    SynClasses.AtuImage(Body, Response.StatusCode, Response.Body);
+    SynClasses.AtuImage(Request.Body, Response.StatusCode, Response.Body);
   finally
     FreeAndNil(SynClasses);
   end;

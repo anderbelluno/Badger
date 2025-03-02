@@ -15,27 +15,55 @@ type
     function fParserJsonStream(const Body: string): string;
     function fDownloadStream(const FilePath: string; out MimeType: string): TStream;
     procedure AtuImage(const Body: string; out StatusCode: Integer; out ResponseBody: string);
-    function ExtractMethodAndURI(const RequestLine: string; out Method, URI: string): Boolean;
+    function ExtractMethodAndURI(const RequestLine: string; out Method, URI: string; out QueryParams: TStringList): Boolean;
   end;
 
 implementation
 
-function TBadgerMethods.ExtractMethodAndURI(const RequestLine: string; out Method, URI: string): Boolean;
+function TBadgerMethods.ExtractMethodAndURI(const RequestLine: string; out Method, URI: string; out QueryParams: TStringList): Boolean;
 var
-  SpacePos: Integer;
-  VRequestLine: String;
+  SpacePos, QueryPos: Integer;
+  VRequestLine, QueryString, ParamPair: string;
 begin
   Result := False;
+  QueryParams.Clear; // Limpa os parâmetros anteriores
   VRequestLine := RequestLine;
+
+  // Extrair o método
   SpacePos := Pos(' ', VRequestLine);
   if SpacePos > 0 then
   begin
     Method := Copy(VRequestLine, 1, SpacePos - 1);
     Delete(VRequestLine, 1, SpacePos);
+
+    // Extrair a URI e a querystring
     SpacePos := Pos(' ', VRequestLine);
     if SpacePos > 0 then
     begin
       URI := Copy(VRequestLine, 1, SpacePos - 1);
+      QueryPos := Pos('?', URI);
+      if QueryPos > 0 then
+      begin
+        QueryString := Copy(URI, QueryPos + 1, Length(URI));
+        URI := Copy(URI, 1, QueryPos - 1); // Remove a querystring da URI
+
+        // Separar os parâmetros da querystring
+        while QueryString <> '' do
+        begin
+          SpacePos := Pos('&', QueryString);
+          if SpacePos > 0 then
+          begin
+            ParamPair := Copy(QueryString, 1, SpacePos - 1);
+            Delete(QueryString, 1, SpacePos);
+          end
+          else
+          begin
+            ParamPair := QueryString;
+            QueryString := '';
+          end;
+          QueryParams.Add(ParamPair);
+        end;
+      end;
       Result := True;
     end;
   end;

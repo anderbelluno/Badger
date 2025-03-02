@@ -3,7 +3,7 @@ unit Badger;
 interface
 
 uses
-  blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, BadgerRouteManager, SyUtils, BadgerMethods, BadgerHttpStatus, BadgerTypes, StrUtils;
+  blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, StrUtils, BadgerRouteManager, SyUtils, BadgerMethods, BadgerHttpStatus, BadgerTypes;
 
 type
   TClientThread = class(TThread)
@@ -182,7 +182,7 @@ begin
 end;
 
 procedure TClientThread.Execute;
-  procedure Exec(Index: Integer; const Body: string; out Response: THTTPResponse);
+  procedure Exec(Index: Integer; const Request: THTTPRequest; out Response: THTTPResponse);
   var
     Callback: TRoutingCallback;
     MethodPointer: TMethod;
@@ -190,7 +190,7 @@ procedure TClientThread.Execute;
     MethodPointer.Data := Self;
     MethodPointer.Code := Pointer(FRouteManager.FRoutes.Objects[Index]);
     Callback := TRoutingCallback(MethodPointer);
-    Callback(FURI, FMethod, FRequestLine, Body, Response);
+    Callback(Request, Response);
   end;
 
 var
@@ -202,13 +202,16 @@ var
   Body: string;
   Buffer: array[0..8191] of Byte;
   BytesRead: Integer;
+  QueryParams: TStringList;
 begin
+  QueryParams := TStringList.Create;
+  Req.QueryParams := TStringList.Create; // Inicializa o campo QueryParams
 try
   try
     if FClientSocket.LastError = 0 then
     begin
       FRequestLine := FClientSocket.RecvString(5000);
-      if FMethods.ExtractMethodAndURI(FRequestLine, FMethod, FURI) then
+      if FMethods.ExtractMethodAndURI(FRequestLine, FMethod, FURI, QueryParams) then
       begin
         FCriticalSection.Enter;
         try
@@ -232,6 +235,7 @@ try
             Req.RequestLine := FRequestLine;
             Req.Headers := Headers;
             Req.Body := Body;
+            Req.QueryParams.Assign(QueryParams); // Copia os parâmetros extraídos
 
             for I := 0 to FMiddlewares.Count - 1 do
             begin
@@ -249,7 +253,7 @@ try
                   until BytesRead = 0;
                   FreeAndNil(Resp.Stream);
                 end;
-                FResponseLine := Format('HTTP/1.1 %d', [Resp.StatusCode]);
+                FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
                 if Assigned(VLastResponse) then
                   VLastResponse(FResponseLine);
                 Exit;
@@ -259,7 +263,7 @@ try
             Index := FRouteManager.FRoutes.IndexOf(FURI);
             if Index <> -1 then
             begin
-              Exec(Index, Body, Resp);
+              Exec(Index, Req, Resp);
               FClientSocket.SendString(BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType));
               if Assigned(Resp.Stream) then
               begin
@@ -271,12 +275,12 @@ try
                 until BytesRead = 0;
                 FreeAndNil(Resp.Stream);
               end;
-              FResponseLine := Format('HTTP/1.1 %d', [Resp.StatusCode]);
+              FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
             end
             else
             begin
               FClientSocket.SendString(BuildHTTPResponse(HTTP_NOT_FOUND, 'Not Found', nil, 'text/plain'));
-              FResponseLine := Format('HTTP/1.1 %d', [HTTP_NOT_FOUND]);
+              FResponseLine := Format('HTTP/1.1 %d %s', [HTTP_NOT_FOUND, Resp.Body]);
             end;
 
             if Assigned(VLastResponse) then
@@ -299,6 +303,8 @@ try
     end;
   end;
 finally
+  QueryParams.Free;
+  Req.QueryParams.Free; // Libera a instância criada
   FClientSocket.Free;
 end;
 end;
