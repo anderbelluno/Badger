@@ -205,43 +205,65 @@ var
   QueryParams: TStringList;
 begin
   QueryParams := TStringList.Create;
-  Req.QueryParams := TStringList.Create; // Inicializa o campo QueryParams
-try
   try
-    if FClientSocket.LastError = 0 then
-    begin
-      FRequestLine := FClientSocket.RecvString(5000);
-      if FMethods.ExtractMethodAndURI(FRequestLine, FMethod, FURI, QueryParams) then
+    Req.QueryParams := TStringList.Create; // Inicializa o campo QueryParams
+    try
+      if FClientSocket.LastError = 0 then
       begin
-        FCriticalSection.Enter;
-        try
-          if Assigned(VLastRequest) then
-            VLastRequest(FRequestLine);
-
-          Headers := ParseRequestHeader(FClientSocket);
+        FRequestLine := FClientSocket.RecvString(5000);
+        if FMethods.ExtractMethodAndURI(FRequestLine, FMethod, FURI, QueryParams) then
+        begin
+          FCriticalSection.Enter;
           try
-            ContentLength := FMethods.ParseRequestHeaderInt(Headers, 'Content-Length');
-            if ContentLength > 0 then
-            begin
-              SetLength(Body, ContentLength);
-              FClientSocket.RecvBuffer(PChar(Body), ContentLength);
-            end
-            else
-              Body := '';
+            if Assigned(VLastRequest) then
+              VLastRequest(FRequestLine);
 
-            Req.Socket := FClientSocket;
-            Req.URI := FURI;
-            Req.Method := FMethod;
-            Req.RequestLine := FRequestLine;
-            Req.Headers := Headers;
-            Req.Body := Body;
-            Req.QueryParams.Assign(QueryParams); // Copia os parâmetros extraídos
-
-            for I := 0 to FMiddlewares.Count - 1 do
-            begin
-              MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
-              if not MiddlewareWrapper.Middleware(Req, Resp) then
+            Headers := ParseRequestHeader(FClientSocket);
+            try
+              ContentLength := FMethods.ParseRequestHeaderInt(Headers, 'Content-Length');
+              if ContentLength > 0 then
               begin
+                SetLength(Body, ContentLength);
+                FClientSocket.RecvBuffer(PChar(Body), ContentLength);
+              end
+              else
+                Body := '';
+
+              Req.Socket := FClientSocket;
+              Req.URI := FURI;
+              Req.Method := FMethod;
+              Req.RequestLine := FRequestLine;
+              Req.Headers := Headers;
+              Req.Body := Body;
+              Req.QueryParams.Assign(QueryParams); // Copia os parâmetros extraídos
+
+              for I := 0 to FMiddlewares.Count - 1 do
+              begin
+                MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
+                if not MiddlewareWrapper.Middleware(Req, Resp) then
+                begin
+                  FClientSocket.SendString(BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType));
+                  if Assigned(Resp.Stream) then
+                  begin
+                    Resp.Stream.Position := 0;
+                    repeat
+                      BytesRead := Resp.Stream.Read(Buffer, SizeOf(Buffer));
+                      if BytesRead > 0 then
+                        FClientSocket.SendBuffer(@Buffer, BytesRead);
+                    until BytesRead = 0;
+                    FreeAndNil(Resp.Stream);
+                  end;
+                  FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
+                  if Assigned(VLastResponse) then
+                    VLastResponse(FResponseLine);
+                  Exit;
+                end;
+              end;
+
+              Index := FRouteManager.FRoutes.IndexOf(FURI);
+              if Index <> -1 then
+              begin
+                Exec(Index, Req, Resp);
                 FClientSocket.SendString(BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType));
                 if Assigned(Resp.Stream) then
                 begin
@@ -254,59 +276,43 @@ try
                   FreeAndNil(Resp.Stream);
                 end;
                 FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
-                if Assigned(VLastResponse) then
-                  VLastResponse(FResponseLine);
-                Exit;
-              end;
-            end;
-
-            Index := FRouteManager.FRoutes.IndexOf(FURI);
-            if Index <> -1 then
-            begin
-              Exec(Index, Req, Resp);
-              FClientSocket.SendString(BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType));
-              if Assigned(Resp.Stream) then
+              end
+              else
               begin
-                Resp.Stream.Position := 0;
-                repeat
-                  BytesRead := Resp.Stream.Read(Buffer, SizeOf(Buffer));
-                  if BytesRead > 0 then
-                    FClientSocket.SendBuffer(@Buffer, BytesRead);
-                until BytesRead = 0;
-                FreeAndNil(Resp.Stream);
+                FClientSocket.SendString(BuildHTTPResponse(HTTP_NOT_FOUND, 'Not Found', nil, 'text/plain'));
+                FResponseLine := Format('HTTP/1.1 %d %s', [HTTP_NOT_FOUND, Resp.Body]);
               end;
-              FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
-            end
-            else
-            begin
-              FClientSocket.SendString(BuildHTTPResponse(HTTP_NOT_FOUND, 'Not Found', nil, 'text/plain'));
-              FResponseLine := Format('HTTP/1.1 %d %s', [HTTP_NOT_FOUND, Resp.Body]);
-            end;
 
-            if Assigned(VLastResponse) then
-              VLastResponse(FResponseLine);
+              if Assigned(VLastResponse) then
+                VLastResponse(FResponseLine);
+            finally
+              Headers.Free;
+            end;
           finally
-            Headers.Free;
+            FCriticalSection.Leave;
           end;
-        finally
-          FCriticalSection.Leave;
         end;
       end;
+    except
+      on E: Exception do
+      begin
+        FClientSocket.SendString(BuildHTTPResponse(HTTP_INTERNAL_SERVER_ERROR, 'Internal Server Error: ' + E.Message, nil, 'text/plain'));
+        FResponseLine := Format('HTTP/1.1 %d', [HTTP_INTERNAL_SERVER_ERROR]);
+        if Assigned(VLastResponse) then
+          VLastResponse(FResponseLine);
+      end;
     end;
-  except
-    on E: Exception do
-    begin
-      FClientSocket.SendString(BuildHTTPResponse(HTTP_INTERNAL_SERVER_ERROR, 'Internal Server Error: ' + E.Message, nil, 'text/plain'));
-      FResponseLine := Format('HTTP/1.1 %d', [HTTP_INTERNAL_SERVER_ERROR]);
-      if Assigned(VLastResponse) then
-        VLastResponse(FResponseLine);
-    end;
+  finally
+    if Assigned(QueryParams) then
+       FreeAndNil(QueryParams);
+
+    if Assigned(Req.QueryParams) then
+       FreeAndNil(Req.QueryParams);
+
+    if Assigned(FClientSocket) then
+       FreeAndNil(FClientSocket);
+
   end;
-finally
-  QueryParams.Free;
-  Req.QueryParams.Free; // Libera a instância criada
-  FClientSocket.Free;
-end;
 end;
 
 end.

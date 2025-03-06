@@ -46,7 +46,7 @@ begin
   if btnSyna.Tag = 0 then
   begin
     StartHTTPServer(ServerThread);
-    ServerThread.Port := StrToInt(edtPorta.Text);
+
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
     CBxNonBlockMode.Enabled := False;
@@ -69,48 +69,52 @@ end;
 procedure TForm1.FormCreate(Sender: TObject);
 begin
   ServerThread := nil;
-  BasicAuth := TBasicAuth.Create('andersons', 'fioris'); // Credenciais fixas para teste
+  BasicAuth := TBasicAuth.Create('andersons', 'fioris');
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
   StopHTTPServer(ServerThread);
-  BasicAuth.Free;
+  FreeAndNil(BasicAuth);
 end;
 
 procedure TForm1.onLastRequest(Value: String);
 begin
-if rdLog.IsChecked then
-    Memo1.Lines.Add('Client Request: ' + #13#10 + Value);
+  if rdLog.IsChecked then
+    TThread.Synchronize(nil, procedure
+    begin
+      Memo1.Lines.Add('Client Request: ' + #13#10 + Value);
+    end);
 end;
 
 procedure TForm1.onLastResponse(Value: String);
 begin
-   if rdLog.IsChecked then
-    Memo1.Lines.Add('Server Response: ' + #13#10 + Value);
+  if rdLog.IsChecked then
+    TThread.Synchronize(nil, procedure
+    begin
+      Memo1.Lines.Add('Server Response: ' + #13#10 + Value);
+    end);
 end;
 
 procedure TForm1.StartHTTPServer(var ServerThread: TBadger);
 begin
   ServerThread := TBadger.Create;
+  ServerThread.Port := StrToInt(edtPorta.Text);
   ServerThread.NonBlockMode := CBxNonBlockMode.IsChecked;
   ServerThread.OnLastRequest := onLastRequest;
   ServerThread.OnLastResponse := onLastResponse;
 
   if ComboAuth.ItemIndex = 1 then
-    ServerThread.AddMiddleware(BasicAuth.Check); // Adiciona o middleware de autenticação Basic
+    ServerThread.AddMiddleware(BasicAuth.Check);
 end;
 
 procedure TForm1.StopHTTPServer(var ServerThread: TBadger);
 begin
-     if Assigned(ServerThread) then
+  if Assigned(ServerThread) then
   begin
     ServerThread.Terminate;
-    ServerThread := nil;
+    ServerThread:= nil;
   end;
 end;
-
-initialization
- ReportMemoryLeaksOnShutdown := True;
 
 end.
