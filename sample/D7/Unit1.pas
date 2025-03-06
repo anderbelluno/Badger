@@ -44,7 +44,6 @@ begin
   if btnSyna.Tag = 0 then
   begin
     StartHTTPServer(ServerThread);
-    ServerThread.Port := StrToInt(edtPorta.Text);
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
     CBxNonBlockMode.Enabled := False;
@@ -73,7 +72,7 @@ end;
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
   StopHTTPServer(ServerThread);
-  BasicAuth.Free;
+  FreeAndNil(BasicAuth);
 end;
 
 procedure TForm1.onLastRequest(Value: String);
@@ -91,6 +90,7 @@ end;
 procedure TForm1.StartHTTPServer(var ServerThread: TBadger);
 begin
   ServerThread := TBadger.Create;
+  ServerThread.Port := StrToInt(edtPorta.Text);
   ServerThread.NonBlockMode := CBxNonBlockMode.Checked;
   ServerThread.OnLastRequest := onLastRequest;
   ServerThread.OnLastResponse := onLastResponse;
