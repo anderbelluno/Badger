@@ -3,7 +3,8 @@ unit Badger;
 interface
 
 uses
-  blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, StrUtils, BadgerRouteManager, SyUtils, BadgerMethods, BadgerHttpStatus, BadgerTypes;
+  blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, StrUtils, BadgerRouteManager,
+  SyUtils, BadgerMethods, BadgerHttpStatus, BadgerTypes, Math;
 
 type
   TClientThread = class(TThread)
@@ -46,6 +47,8 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure AddMiddleware(Middleware: TMiddlewareProc);
+    procedure Start;
+    procedure Stop;
 
     property Port: Integer read FPort write FPort;
     property OnLastRequest: TLastRequest read VLastRequest write VLastRequest;
@@ -59,19 +62,22 @@ implementation
 
 constructor TBadger.Create;
 begin
-  inherited Create(False);
+  inherited Create(True);
   FreeOnTerminate := True;
   FCriticalSection := TCriticalSection.Create;
   FServerSocket := TTCPBlockSocket.Create;
   FRouteManager := TRouteManager.Create;
   FMethods := TBadgerMethods.Create;
   FMiddlewares := TList.Create;
+  FPort := 8080;
+  FNonBlockMode := True;
 end;
 
 destructor TBadger.Destroy;
 var
   I: Integer;
 begin
+  Stop;
   FServerSocket.Free;
   FCriticalSection.Free;
   FRouteManager.Free;
@@ -87,15 +93,32 @@ begin
   FMiddlewares.Add(TMiddlewareWrapper.Create(Middleware));
 end;
 
-procedure TBadger.Execute;
-var
-  ClientSocket: TTCPBlockSocket;
+procedure TBadger.Start;
 begin
+  if not Terminated and not Suspended then
+    Exit;
+  FServerSocket.CloseSocket;
   FServerSocket.CreateSocket;
   FServerSocket.NonBlockMode := FNonBlockMode;
   FServerSocket.Bind('0.0.0.0', IntToStr(FPort));
   FServerSocket.Listen;
+  Resume;
+end;
 
+procedure TBadger.Stop;
+begin
+  if Terminated or Suspended then
+    Exit;
+  Terminate;
+  FServerSocket.CloseSocket;
+  Sleep(100);
+end;
+
+procedure TBadger.Execute;
+var
+  ClientSocket: TTCPBlockSocket;
+  ClientThread: TClientThread;
+begin
   while not Terminated do
   begin
     if FServerSocket.CanRead(1000) then
@@ -104,7 +127,9 @@ begin
       try
         ClientSocket.Socket := FServerSocket.Accept;
         if ClientSocket.LastError = 0 then
-          TClientThread.Create(ClientSocket, FRouteManager, FCriticalSection, FMethods, FMiddlewares, VLastRequest, VLastResponse)
+        begin
+          ClientThread := TClientThread.Create(ClientSocket, FRouteManager, FCriticalSection, FMethods, FMiddlewares, VLastRequest, VLastResponse);
+        end
         else
         begin
           if Assigned(VLastResponse) then
@@ -147,6 +172,11 @@ destructor TClientThread.Destroy;
 var
   I: Integer;
 begin
+  if Assigned(FClientSocket) then
+  begin
+    FClientSocket.CloseSocket;
+    FClientSocket.Free;
+  end;
   for I := 0 to FMiddlewares.Count - 1 do
     TObject(FMiddlewares[I]).Free;
   FMiddlewares.Free;
@@ -154,7 +184,7 @@ begin
 end;
 
 function TClientThread.ParseRequestHeader(ClientSocket: TTCPBlockSocket): TStringList;
-var
+{var
   HeaderLine: string;
 begin
   Result := TStringList.Create;
@@ -163,6 +193,36 @@ begin
       HeaderLine := ClientSocket.RecvString(5000);
       if HeaderLine <> '' then
         Result.Add(HeaderLine);
+    until HeaderLine = '';
+  except
+    Result.Free;
+    raise;
+  end;
+end;}
+var
+  HeaderLine: string;
+  SeparatorPos: Integer;
+  Key, Value: string;
+begin
+  Result := TStringList.Create;
+  try
+    repeat
+      HeaderLine := ClientSocket.RecvString(5000);
+      if HeaderLine <> '' then
+      begin
+        SeparatorPos := Pos(':', HeaderLine);
+        if SeparatorPos > 0 then
+        begin
+          Key := Trim(Copy(HeaderLine, 1, SeparatorPos - 1));
+          Value := Trim(Copy(HeaderLine, SeparatorPos + 1, Length(HeaderLine)));
+          Result.Add(Key + '=' + Value); // Adiciona no formato "Key=Value"
+        end
+        else
+        begin
+          // Caso não haja separador, adiciona como está (pode ser uma linha inválida)
+          Result.Add(HeaderLine + '='); // Valor vazio
+        end;
+      end;
     until HeaderLine = '';
   except
     Result.Free;
@@ -194,19 +254,20 @@ procedure TClientThread.Execute;
   end;
 
 var
-  Index, I, ContentLength: Integer;
+  Index, I, ContentLength, BytesReceived, TotalBytes: Integer;
   Req: THTTPRequest;
   Resp: THTTPResponse;
   MiddlewareWrapper: TMiddlewareWrapper;
   Headers: TStringList;
   Body: string;
   Buffer: array[0..8191] of Byte;
+  TempBytes: TBytes;
   BytesRead: Integer;
   QueryParams: TStringList;
 begin
   QueryParams := TStringList.Create;
   try
-    Req.QueryParams := TStringList.Create; // Inicializa o campo QueryParams
+    Req.QueryParams := TStringList.Create;
     try
       if FClientSocket.LastError = 0 then
       begin
@@ -220,11 +281,27 @@ begin
 
             Headers := ParseRequestHeader(FClientSocket);
             try
-              ContentLength := FMethods.ParseRequestHeaderInt(Headers, 'Content-Length');
+              ContentLength := StrToIntDef(Headers.Values['Content-Length'], 0);
               if ContentLength > 0 then
               begin
-                SetLength(Body, ContentLength);
-                FClientSocket.RecvBuffer(PChar(Body), ContentLength);
+                SetLength(TempBytes, ContentLength);
+                TotalBytes := 0;
+                while TotalBytes < ContentLength do
+                begin
+                  BytesReceived := FClientSocket.RecvBufferEx(@Buffer, Min(ContentLength - TotalBytes, SizeOf(Buffer)), 5000);
+                  if BytesReceived <= 0 then
+                  begin
+                    if FClientSocket.LastError <> 0 then
+                      raise Exception.Create('Erro ao ler o corpo: ' + FClientSocket.LastErrorDesc);
+                    Break;
+                  end;
+                  Move(Buffer, TempBytes[TotalBytes], BytesReceived);
+                  Inc(TotalBytes, BytesReceived);
+                end;
+                if TotalBytes > 0 then
+                  Body := TEncoding.UTF8.GetString(TempBytes, 0, TotalBytes)
+                else
+                  Body := '';
               end
               else
                 Body := '';
@@ -235,7 +312,7 @@ begin
               Req.RequestLine := FRequestLine;
               Req.Headers := Headers;
               Req.Body := Body;
-              Req.QueryParams.Assign(QueryParams); // Copia os parâmetros extraídos
+              Req.QueryParams.Assign(QueryParams);
 
               for I := 0 to FMiddlewares.Count - 1 do
               begin
@@ -303,15 +380,13 @@ begin
       end;
     end;
   finally
-    if Assigned(QueryParams) then
-       FreeAndNil(QueryParams);
-
-    if Assigned(Req.QueryParams) then
-       FreeAndNil(Req.QueryParams);
-
+    FreeAndNil(QueryParams);
+    FreeAndNil(Req.QueryParams);
     if Assigned(FClientSocket) then
-       FreeAndNil(FClientSocket);
-
+    begin
+      FClientSocket.CloseSocket;
+      FreeAndNil(FClientSocket);
+    end;
   end;
 end;
 

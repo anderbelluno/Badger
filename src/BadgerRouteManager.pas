@@ -89,7 +89,8 @@ begin
   SynClasses := TBadgerMethods.Create;
   try
     Response.StatusCode := HTTP_OK;
-    Response.Body := SynClasses.fParserJsonStream(Request.Body);
+    Response.ContentType := Request.Headers.Values['Content-Type'];
+    Response.Body := UTF8Encode(SynClasses.fParserJsonStream(Request, Response));
   finally
     FreeAndNil(SynClasses);
   end;

@@ -3,7 +3,8 @@ unit BadgerMethods;
 interface
 
 uses
-  blcksock, SysUtils, Classes, DB, BadgerMultipartDataReader, Contnrs, SyUtils;
+  blcksock, SysUtils, Classes, DB, BadgerMultipartDataReader, Contnrs, SyUtils,
+  BadgerTypes;
 
 type
   TBadgerMethods = class(TObject)
@@ -12,7 +13,7 @@ type
   public
     function ParseRequestHeaderInt(Headers: TStringList; aRequestHeader: String): Integer;
     function ParseRequestHeaderStr(Headers: TStringList; aRequestHeader: String): String;
-    function fParserJsonStream(const Body: string): string;
+    function fParserJsonStream(Request: THTTPRequest; Response : THTTPResponse): string;
     function fDownloadStream(const FilePath: string; out MimeType: string): TStream;
     procedure AtuImage(const Body: string; out StatusCode: Integer; out ResponseBody: string);
     function ExtractMethodAndURI(const RequestLine: string; out Method, URI: string; out QueryParams: TStringList): Boolean;
@@ -26,17 +27,15 @@ var
   VRequestLine, QueryString, ParamPair: string;
 begin
   Result := False;
-  QueryParams.Clear; // Limpa os parâmetros anteriores
+  QueryParams.Clear;
   VRequestLine := RequestLine;
 
-  // Extrair o método
   SpacePos := Pos(' ', VRequestLine);
   if SpacePos > 0 then
   begin
     Method := Copy(VRequestLine, 1, SpacePos - 1);
     Delete(VRequestLine, 1, SpacePos);
 
-    // Extrair a URI e a querystring
     SpacePos := Pos(' ', VRequestLine);
     if SpacePos > 0 then
     begin
@@ -45,9 +44,8 @@ begin
       if QueryPos > 0 then
       begin
         QueryString := Copy(URI, QueryPos + 1, Length(URI));
-        URI := Copy(URI, 1, QueryPos - 1); // Remove a querystring da URI
+        URI := Copy(URI, 1, QueryPos - 1);
 
-        // Separar os parâmetros da querystring
         while QueryString <> '' do
         begin
           SpacePos := Pos('&', QueryString);
@@ -117,10 +115,11 @@ begin
   end;
 end;
 
-function TBadgerMethods.fParserJsonStream(const Body: string): string;
+function TBadgerMethods.fParserJsonStream( Request: THTTPRequest; Response : THTTPResponse ): string;
+
 begin
-  if UpperCase(Body) = 'POST' then
-    Result := '{"status":true, "message":"Recebimento concluído com sucesso"}'
+  if UpperCase(Request.Method) = 'POST' then
+    Result := '{"status":true, "message":"Recebimento concluído com sucesso", "Vc me mandou":"' + Request.Body + '"}'
   else
     Result := '{"status":false, "message":"Método não aceito, usar POST"}';
 end;
@@ -160,7 +159,7 @@ begin
     begin
       Stream.WriteBuffer(Body[1], Length(Body));
       Stream.Position := 0;
-      Files := Reader.ProcessMultipartFormData(Stream, ''); // Boundary precisa ser ajustado
+      Files := Reader.ProcessMultipartFormData(Stream, '');
       for i := 0 to Files.Count - 1 do
       begin
         FormDataFile := TFormDataFile(Files[i]);
