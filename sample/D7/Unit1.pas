@@ -16,6 +16,7 @@ type
     edtPorta: TEdit;
     RadioGroup1: TRadioGroup;
     Panel2: TPanel;
+    Panel1: TPanel;
     procedure btnSynaClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -23,8 +24,6 @@ type
     { Private declarations }
     ServerThread: TBadger;
     BasicAuth: TBasicAuth; // Instância da autenticação Basic
-    procedure StartHTTPServer(var ServerThread: TBadger);
-    procedure StopHTTPServer(var ServerThread: TBadger);
   public
     { Public declarations }
 
@@ -43,7 +42,14 @@ procedure TForm1.btnSynaClick(Sender: TObject);
 begin
   if btnSyna.Tag = 0 then
   begin
-    StartHTTPServer(ServerThread);
+    ServerThread := TBadger.Create;
+    ServerThread.Port := StrToInt(edtPorta.Text);
+    ServerThread.NonBlockMode := CBxNonBlockMode.Checked;
+    ServerThread.OnLastRequest := onLastRequest;
+    ServerThread.OnLastResponse := onLastResponse;
+    if RadioGroup1.ItemIndex = 1 then
+      ServerThread.AddMiddleware(BasicAuth.Check);
+    ServerThread.Start; // Inicia o servidor
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
     CBxNonBlockMode.Enabled := False;
@@ -53,7 +59,8 @@ begin
   end
   else
   begin
-    StopHTTPServer(ServerThread);
+    ServerThread.Stop; // Para o servidor
+    ServerThread := nil; // A thread já se libera com FreeOnTerminate
     btnSyna.Tag := 0;
     btnSyna.Caption := 'Iniciar Servidor';
     edtPorta.Enabled := True;
@@ -71,7 +78,8 @@ end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
-  StopHTTPServer(ServerThread);
+if Assigned(ServerThread) then
+    ServerThread.Stop; // Para o servidor ao destruir o formulário
   FreeAndNil(BasicAuth);
 end;
 
@@ -85,27 +93,6 @@ procedure TForm1.onLastResponse(Value: String);
 begin
    if rdLog.Checked then
     Memo1.Lines.Add('Server Response: ' + #13#10 + Value);
-end;
-
-procedure TForm1.StartHTTPServer(var ServerThread: TBadger);
-begin
-  ServerThread := TBadger.Create;
-  ServerThread.Port := StrToInt(edtPorta.Text);
-  ServerThread.NonBlockMode := CBxNonBlockMode.Checked;
-  ServerThread.OnLastRequest := onLastRequest;
-  ServerThread.OnLastResponse := onLastResponse;
-
-  if RadioGroup1.ItemIndex = 1 then
-    ServerThread.AddMiddleware(BasicAuth.Check); // Adiciona o middleware de autenticação Basic
-end;
-
-procedure TForm1.StopHTTPServer(var ServerThread: TBadger);
-begin
-     if Assigned(ServerThread) then
-  begin
-    ServerThread.Terminate;
-    ServerThread := nil;
-  end;
 end;
 
 end.

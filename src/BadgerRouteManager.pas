@@ -90,7 +90,7 @@ begin
   try
     Response.StatusCode := HTTP_OK;
     Response.ContentType := Request.Headers.Values['Content-Type'];
-    Response.Body := UTF8Encode(SynClasses.fParserJsonStream(Request, Response));
+    Response.Body := (SynClasses.fParserJsonStream(Request, Response));
   finally
     FreeAndNil(SynClasses);
   end;

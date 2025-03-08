@@ -3,7 +3,7 @@ unit Badger;
 interface
 
 uses
-  blcksock, httpsend, synsock, SyncObjs, Classes, sysutils, StrUtils, BadgerRouteManager,
+  blcksock, httpsend, synsock, SyncObjs, synachar, Classes, sysutils, StrUtils, BadgerRouteManager,
   SyUtils, BadgerMethods, BadgerHttpStatus, BadgerTypes, Math;
 
 type
@@ -231,14 +231,39 @@ begin
 end;
 
 function TClientThread.BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string): string;
+var
+  EffectiveContentType: string;
+{$IFDEF VER150} // Delphi 7
+  UTF8Body: string;
+{$ELSE} // Versões mais novas
+  UTF8Body: RawByteString;
+{$ENDIF}
 begin
-  if Assigned(Stream) then
-    Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
-              'Content-Type: ' + ContentType + CRLF +
-              'Content-Length: ' + IntToStr(Stream.Size) + CRLF + CRLF
+  if ContentType = '' then
+    EffectiveContentType := 'text/plain'
   else
+    EffectiveContentType := ContentType;
+
+  if Assigned(Stream) then
+  begin
     Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
-              'Content-Type: ' + IfThen(ContentType = '', 'text/plain', ContentType) + CRLF + CRLF + Body;
+              'Content-Type: ' + EffectiveContentType + CRLF +
+              'Content-Length: ' + IntToStr(Stream.Size) + CRLF + CRLF;
+  end
+  else
+  begin
+{$IFDEF VER150} // Delphi 7
+    UTF8Body := UTF8Encode(Body); // Converte ANSI para UTF-8
+    Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
+              'Content-Type: ' + EffectiveContentType + '; charset=utf-8' + CRLF +
+              'Content-Length: ' + IntToStr(Length(UTF8Body)) + CRLF + CRLF;
+{$ELSE} // Versões mais novas (ex.: Delphi 12)
+    UTF8Body := UTF8Encode(Body); // Converte Unicode para UTF-8
+    Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
+              'Content-Type: ' + EffectiveContentType + '; charset=utf-8' + CRLF +
+              'Content-Length: ' + IntToStr(Length(UTF8Body)) + CRLF + CRLF;
+{$ENDIF}
+  end;
 end;
 
 procedure TClientThread.Execute;
@@ -261,9 +286,19 @@ var
   Headers: TStringList;
   Body: string;
   Buffer: array[0..8191] of Byte;
+{$IFDEF VER150} // Delphi 7
+  TempBytes: array of Byte;
+  ResponseBodyBytes: array of Byte;
+  UTF8Body: string;
+{$ELSE} // Versões mais novas
   TempBytes: TBytes;
+  ResponseBodyBytes: TBytes;
+  UTF8Body: RawByteString;
+{$ENDIF}
   BytesRead: Integer;
   QueryParams: TStringList;
+  ResponseHeader: string;
+  RawString: string;
 begin
   QueryParams := TStringList.Create;
   try
@@ -299,7 +334,15 @@ begin
                   Inc(TotalBytes, BytesReceived);
                 end;
                 if TotalBytes > 0 then
-                  Body := TEncoding.UTF8.GetString(TempBytes, 0, TotalBytes)
+                begin
+{$IFDEF VER150} // Delphi 7
+
+                  SetString(RawString, PChar(@TempBytes[0]), TotalBytes);
+                  Body := CharsetConversion(RawString, UTF_8, GetCurCP);
+{$ELSE} // Versões mais novas
+                  Body := TEncoding.UTF8.GetString(TempBytes, 0, TotalBytes);
+{$ENDIF}
+                end
                 else
                   Body := '';
               end
@@ -319,7 +362,19 @@ begin
                 MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
                 if not MiddlewareWrapper.Middleware(Req, Resp) then
                 begin
-                  FClientSocket.SendString(BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType));
+                  ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType);
+                  FClientSocket.SendString(ResponseHeader); // Envia cabeçalho
+{$IFDEF VER150} // Delphi 7
+                  UTF8Body := UTF8Encode(Resp.Body);
+                  SetLength(ResponseBodyBytes, Length(UTF8Body));
+                  Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
+                  if Length(ResponseBodyBytes) > 0 then
+                    FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes)); // Envia corpo
+{$ELSE} // Versões mais novas
+                  ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
+                  if Length(ResponseBodyBytes) > 0 then
+                    FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes)); // Envia corpo
+{$ENDIF}
                   if Assigned(Resp.Stream) then
                   begin
                     Resp.Stream.Position := 0;
@@ -341,7 +396,19 @@ begin
               if Index <> -1 then
               begin
                 Exec(Index, Req, Resp);
-                FClientSocket.SendString(BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType));
+                ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType);
+                FClientSocket.SendString(ResponseHeader); // Envia cabeçalho
+{$IFDEF VER150} // Delphi 7
+                UTF8Body := UTF8Encode(Resp.Body);
+                SetLength(ResponseBodyBytes, Length(UTF8Body));
+                Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
+                if Length(ResponseBodyBytes) > 0 then
+                  FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes)); // Envia corpo
+{$ELSE} // Versões mais novas
+                ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
+                if Length(ResponseBodyBytes) > 0 then
+                  FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes)); // Envia corpo
+{$ENDIF}
                 if Assigned(Resp.Stream) then
                 begin
                   Resp.Stream.Position := 0;
@@ -356,7 +423,19 @@ begin
               end
               else
               begin
-                FClientSocket.SendString(BuildHTTPResponse(HTTP_NOT_FOUND, 'Not Found', nil, 'text/plain'));
+                ResponseHeader := BuildHTTPResponse(HTTP_NOT_FOUND, 'Not Found', nil, 'text/plain');
+                FClientSocket.SendString(ResponseHeader); // Envia cabeçalho
+{$IFDEF VER150} // Delphi 7
+                UTF8Body := UTF8Encode('Not Found');
+                SetLength(ResponseBodyBytes, Length(UTF8Body));
+                Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
+                if Length(ResponseBodyBytes) > 0 then
+                  FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes)); // Envia corpo
+{$ELSE} // Versões mais novas
+                ResponseBodyBytes := TEncoding.UTF8.GetBytes('Not Found');
+                if Length(ResponseBodyBytes) > 0 then
+                  FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes)); // Envia corpo
+{$ENDIF}
                 FResponseLine := Format('HTTP/1.1 %d %s', [HTTP_NOT_FOUND, Resp.Body]);
               end;
 
@@ -373,7 +452,19 @@ begin
     except
       on E: Exception do
       begin
-        FClientSocket.SendString(BuildHTTPResponse(HTTP_INTERNAL_SERVER_ERROR, 'Internal Server Error: ' + E.Message, nil, 'text/plain'));
+        ResponseHeader := BuildHTTPResponse(HTTP_INTERNAL_SERVER_ERROR, 'Internal Server Error: ' + E.Message, nil, 'text/plain');
+        FClientSocket.SendString(ResponseHeader); // Envia cabeçalho
+{$IFDEF VER150} // Delphi 7
+        UTF8Body := UTF8Encode('Internal Server Error: ' + E.Message);
+        SetLength(ResponseBodyBytes, Length(UTF8Body));
+        Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
+        if Length(ResponseBodyBytes) > 0 then
+          FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes)); // Envia corpo
+{$ELSE} // Versões mais novas
+        ResponseBodyBytes := TEncoding.UTF8.GetBytes('Internal Server Error: ' + E.Message);
+        if Length(ResponseBodyBytes) > 0 then
+          FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes)); // Envia corpo
+{$ENDIF}
         FResponseLine := Format('HTTP/1.1 %d', [HTTP_INTERNAL_SERVER_ERROR]);
         if Assigned(VLastResponse) then
           VLastResponse(FResponseLine);
