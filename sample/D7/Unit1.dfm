@@ -16,9 +16,9 @@ object Form1: TForm1
   PixelsPerInch = 96
   TextHeight = 13
   object Memo1: TMemo
-    Left = 185
+    Left = 217
     Top = 65
-    Width = 1104
+    Width = 1072
     Height = 571
     Align = alClient
     ScrollBars = ssVertical
@@ -44,7 +44,7 @@ object Form1: TForm1
   object Panel1: TPanel
     Left = 0
     Top = 65
-    Width = 185
+    Width = 217
     Height = 571
     Align = alLeft
     TabOrder = 2
@@ -55,6 +55,13 @@ object Form1: TForm1
       Height = 13
       Caption = 'Porta: '
     end
+    object Label2: TLabel
+      Left = 16
+      Top = 120
+      Width = 57
+      Height = 13
+      Caption = 'Timeout(ms)'
+    end
     object CBxNonBlockMode: TCheckBox
       Left = 16
       Top = 48
@@ -64,7 +71,7 @@ object Form1: TForm1
       TabOrder = 0
     end
     object edtPorta: TEdit
-      Left = 56
+      Left = 80
       Top = 80
       Width = 121
       Height = 21
@@ -86,11 +93,19 @@ object Form1: TForm1
     end
     object rdLog: TCheckBox
       Left = 16
-      Top = 112
+      Top = 8
       Width = 97
       Height = 17
       Caption = 'Log'
       TabOrder = 3
+    end
+    object edtTimeOut: TEdit
+      Left = 80
+      Top = 112
+      Width = 121
+      Height = 21
+      TabOrder = 4
+      Text = '10000'
     end
   end
 end

@@ -19,6 +19,8 @@ type
     edtPorta: TEdit;
     ComboAuth: TComboBox;
     Layout2: TLayout;
+    Label2: TLabel;
+    edtTimeOut: TEdit;
     procedure btnSynaClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -47,6 +49,7 @@ begin
   begin
     ServerThread := TBadger.Create;
     ServerThread.Port := StrToInt(edtPorta.Text);
+    ServerThread.Timeout := StrToInt(edtTimeOut.Text);
     ServerThread.NonBlockMode := CBxNonBlockMode.IsChecked;
     ServerThread.OnLastRequest := onLastRequest;
     ServerThread.OnLastResponse := onLastResponse;
@@ -59,6 +62,7 @@ begin
     btnSyna.Tag := 1;
     btnSyna.Text := 'Parar Servidor';
     ComboAuth.Enabled := False;
+    edtTimeOut.Enabled := False;
   end
   else
   begin
@@ -70,6 +74,7 @@ begin
     rdLog.Enabled := True;
     CBxNonBlockMode.Enabled := True;
     ComboAuth.Enabled := True;
+    edtTimeOut.Enabled := True;
   end;
 end;
 

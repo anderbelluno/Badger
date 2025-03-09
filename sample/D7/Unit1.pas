@@ -17,6 +17,8 @@ type
     RadioGroup1: TRadioGroup;
     Panel2: TPanel;
     Panel1: TPanel;
+    Label2: TLabel;
+    edtTimeOut: TEdit;
     procedure btnSynaClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -44,6 +46,7 @@ begin
   begin
     ServerThread := TBadger.Create;
     ServerThread.Port := StrToInt(edtPorta.Text);
+    ServerThread.Timeout := StrToInt(edtTimeOut.Text);
     ServerThread.NonBlockMode := CBxNonBlockMode.Checked;
     ServerThread.OnLastRequest := onLastRequest;
     ServerThread.OnLastResponse := onLastResponse;
