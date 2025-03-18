@@ -336,12 +336,12 @@ begin
                 else
                   Body := '';
 
-                Req.Socket := FClientSocket;
-                Req.URI := FURI;
-                Req.Method := FMethod;
+                Req.Socket      := FClientSocket;
+                Req.URI         := FURI;
+                Req.Method      := FMethod;
                 Req.RequestLine := FRequestLine;
-                Req.Headers := Headers;
-                Req.Body := Body;
+                Req.Headers     := Headers;
+                Req.Body        := Body;
                 Req.QueryParams.Assign(QueryParams);
 
                 CloseConnection := (Headers.Values['Connection'] = 'close') or (Pos('HTTP/1.0', FRequestLine) = 1); // Novo: Verifica se deve fechar a conexão
