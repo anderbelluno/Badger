@@ -3,7 +3,7 @@ unit Badger;
 interface
 
 uses
-  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, Classes, sysutils, StrUtils, BadgerRouteManager,
+  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, Classes, sysutils, StrUtils, uRouteManager,
   SyUtils, BadgerMethods, BadgerHttpStatus, BadgerTypes, Math;
 
 type
@@ -282,8 +282,8 @@ var
   Resp: THTTPResponse;
   MiddlewareWrapper: TMiddlewareWrapper;
   Headers: TStringList;
-  Body: string;
-  CloseConnection: Boolean; // Novo: Para suportar keep-alive
+  BodyStream: TMemoryStream; // Temporário para leitura
+  CloseConnection: Boolean;
 {$IFDEF VER150}
   TempBytes: array of Byte;
   ResponseBodyBytes: array of Byte;
@@ -296,17 +296,21 @@ var
   BytesRead: Integer;
   QueryParams: TStringList;
   ResponseHeader: string;
+  ContentType: string;
   RawString: string;
 begin
   QueryParams := TStringList.Create;
   try
     Req.QueryParams := TStringList.Create;
+    Req.Headers := TStringList.Create; // Inicializa diretamente
+    Req.Body := '';
+    Req.BodyStream := nil; // Inicializa como nil
     try
-      repeat // Novo: Loop para suportar keep-alive
+      repeat
         if FClientSocket.LastError = 0 then
         begin
-          FRequestLine := FClientSocket.RecvString(FTimeout); // Atualizado: Usa FTimeout
-          if FRequestLine = '' then Break; // Sai se não houver mais requisições
+          FRequestLine := FClientSocket.RecvString(FTimeout);
+          if FRequestLine = '' then Break;
           if FMethods.ExtractMethodAndURI(FRequestLine, FMethod, FURI, QueryParams) then
           begin
             FCriticalSection.Enter;
@@ -317,40 +321,93 @@ begin
               Headers := ParseRequestHeader(FClientSocket);
               try
                 ContentLength := StrToIntDef(Headers.Values['Content-Length'], 0);
-                if ContentLength > 0 then
-                begin
-                  SetLength(TempBytes, ContentLength);
-                  TotalBytes := FClientSocket.RecvBufferEx(@TempBytes[0], ContentLength, FTimeout); // Atualizado: Leitura simplificada
-                  if TotalBytes > 0 then
+                ContentType := Headers.Values['Content-Type'];
+                BodyStream := TMemoryStream.Create;
+                try
+                  if ContentLength > 0 then
                   begin
-{$IFDEF VER150}
-                    SetString(RawString, PChar(@TempBytes[0]), TotalBytes);
-                    Body := CharsetConversion(RawString, UTF_8, GetCurCP);
-{$ELSE}
-                    Body := TEncoding.UTF8.GetString(TempBytes, 0, TotalBytes);
-{$ENDIF}
+                    BodyStream.SetSize(ContentLength);
+                    TotalBytes := 0;
+                    while TotalBytes < ContentLength do
+                    begin
+                      BytesRead := FClientSocket.RecvBufferEx(Pointer(Cardinal(BodyStream.Memory) + TotalBytes), ContentLength - TotalBytes, 5000);
+                      if BytesRead <= 0 then Break;
+                      Inc(TotalBytes, BytesRead);
+                    end;
+                    BodyStream.Size := TotalBytes;
+                    BodyStream.Position := 0;
+
+                    if (Pos('application/json', LowerCase(ContentType)) > 0) or
+                       (Pos('text/', LowerCase(ContentType)) > 0) then
+                    begin
+                      // Tratar como texto (JSON ou plain text)
+                      SetLength(TempBytes, TotalBytes);
+                      BodyStream.ReadBuffer(TempBytes[0], TotalBytes);
+                      SetString(Req.Body, PChar(@TempBytes[0]), TotalBytes);
+                      Req.Body := CharsetConversion(Req.Body, UTF_8, GetCurCP); // Opcional
+                      FreeAndNil(BodyStream);
+                    end
+                    else
+                    begin
+                      // Tratar como binário (Dataset ou outro)
+                      Req.BodyStream := BodyStream;
+                      BodyStream := nil; // Evita liberação duplicada
+                    end;
                   end
                   else
-                    Body := '';
-                end
-                else
-                  Body := '';
-
-                Req.Socket      := FClientSocket;
-                Req.URI         := FURI;
-                Req.Method      := FMethod;
-                Req.RequestLine := FRequestLine;
-                Req.Headers     := Headers;
-                Req.Body        := Body;
-                Req.QueryParams.Assign(QueryParams);
-
-                CloseConnection := (Headers.Values['Connection'] = 'close') or (Pos('HTTP/1.0', FRequestLine) = 1); // Novo: Verifica se deve fechar a conexão
-
-                for I := 0 to FMiddlewares.Count - 1 do
-                begin
-                  MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
-                  if not MiddlewareWrapper.Middleware(Req, Resp) then
                   begin
+                    FreeAndNil(BodyStream);
+                  end;
+
+                  Req.Socket := FClientSocket;
+                  Req.URI := FURI;
+                  Req.Method := FMethod;
+                  Req.RequestLine := FRequestLine;
+                  Req.Headers := Headers;
+                  Req.QueryParams.Assign(QueryParams);
+
+                  CloseConnection := (Headers.Values['Connection'] = 'close') or (Pos('HTTP/1.0', FRequestLine) = 1);
+
+                  for I := 0 to FMiddlewares.Count - 1 do
+                  begin
+                    MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
+                    if not MiddlewareWrapper.Middleware(Req, Resp) then
+                    begin
+                      ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection);
+                      FClientSocket.SendString(ResponseHeader);
+{$IFDEF VER150}
+                      UTF8Body := UTF8Encode(Resp.Body);
+                      SetLength(ResponseBodyBytes, Length(UTF8Body));
+                      Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
+                      if Length(ResponseBodyBytes) > 0 then
+                        FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
+{$ELSE}
+                      ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
+                      if Length(ResponseBodyBytes) > 0 then
+                        FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
+{$ENDIF}
+                      if Assigned(Resp.Stream) then
+                      begin
+                        Resp.Stream.Position := 0;
+                        repeat
+                          BytesRead := Resp.Stream.Read(Pointer(ResponseBodyBytes)^, Length(ResponseBodyBytes));
+                          if BytesRead > 0 then
+                            FClientSocket.SendBuffer(@ResponseBodyBytes[0], BytesRead);
+                        until BytesRead = 0;
+                        FreeAndNil(Resp.Stream);
+                      end;
+                      FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
+                      if Assigned(VLastResponse) then
+                        VLastResponse(FResponseLine);
+                      if CloseConnection then Break;
+                      Continue;
+                    end;
+                  end;
+
+                  Index := FRouteManager.FRoutes.IndexOf(FURI);
+                  if Index <> -1 then
+                  begin
+                    Exec(Index, Req, Resp);
                     ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection);
                     FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
@@ -375,63 +432,32 @@ begin
                       FreeAndNil(Resp.Stream);
                     end;
                     FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
-                    if Assigned(VLastResponse) then
-                      VLastResponse(FResponseLine);
-                    if CloseConnection then Break; // Sai do loop se Connection: close
-                    Continue; // Continua para próxima requisição
-                  end;
-                end;
-
-                Index := FRouteManager.FRoutes.IndexOf(FURI);
-                if Index <> -1 then
-                begin
-                  Exec(Index, Req, Resp);
-                  ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection);
-                  FClientSocket.SendString(ResponseHeader);
-{$IFDEF VER150}
-                  UTF8Body := UTF8Encode(Resp.Body);
-                  SetLength(ResponseBodyBytes, Length(UTF8Body));
-                  Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
-                  if Length(ResponseBodyBytes) > 0 then
-                    FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
-{$ELSE}
-                  ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
-                  if Length(ResponseBodyBytes) > 0 then
-                    FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
-{$ENDIF}
-                  if Assigned(Resp.Stream) then
+                  end
+                  else
                   begin
-                    Resp.Stream.Position := 0;
-                    repeat
-                      BytesRead := Resp.Stream.Read(Pointer(ResponseBodyBytes)^, Length(ResponseBodyBytes));
-                      if BytesRead > 0 then
-                        FClientSocket.SendBuffer(@ResponseBodyBytes[0], BytesRead);
-                    until BytesRead = 0;
-                    FreeAndNil(Resp.Stream);
-                  end;
-                  FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
-                end
-                else
-                begin
-                  ResponseHeader := BuildHTTPResponse(HTTP_NOT_FOUND, 'Not Found', nil, 'text/plain', CloseConnection);
-                  FClientSocket.SendString(ResponseHeader);
+                    ResponseHeader := BuildHTTPResponse(HTTP_NOT_FOUND, 'Not Found', nil, 'text/plain', CloseConnection);
+                    FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
-                  UTF8Body := UTF8Encode('Not Found');
-                  SetLength(ResponseBodyBytes, Length(UTF8Body));
-                  Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
-                  if Length(ResponseBodyBytes) > 0 then
-                    FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
+                    UTF8Body := UTF8Encode('Not Found');
+                    SetLength(ResponseBodyBytes, Length(UTF8Body));
+                    Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
+                    if Length(ResponseBodyBytes) > 0 then
+                      FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
 {$ELSE}
-                  ResponseBodyBytes := TEncoding.UTF8.GetBytes('Not Found');
-                  if Length(ResponseBodyBytes) > 0 then
-                    FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
+                    ResponseBodyBytes := TEncoding.UTF8.GetBytes('Not Found');
+                    if Length(ResponseBodyBytes) > 0 then
+                      FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
 {$ENDIF}
-                  FResponseLine := Format('HTTP/1.1 %d %s', [HTTP_NOT_FOUND, Resp.Body]);
-                end;
+                    FResponseLine := Format('HTTP/1.1 %d %s', [HTTP_NOT_FOUND, Resp.Body]);
+                  end;
 
-                if Assigned(VLastResponse) then
-                  VLastResponse(FResponseLine);
-                if CloseConnection then Break; // Sai do loop se Connection: close
+                  if Assigned(VLastResponse) then
+                    VLastResponse(FResponseLine);
+                  if CloseConnection then Break;
+                finally
+                  if Assigned(BodyStream) then
+                    FreeAndNil(BodyStream); // Libera se não foi transferido
+                end;
               finally
                 Headers.Free;
               end;
@@ -442,10 +468,12 @@ begin
         end
         else
           Break;
-      until False; // Continua até erro ou fechamento explícito
+      until False;
     finally
       FreeAndNil(QueryParams);
       FreeAndNil(Req.QueryParams);
+      FreeAndNil(Req.Headers);
+      FreeAndNil(Req.BodyStream); // Libera o BodyStream aqui
       if Assigned(FClientSocket) then
       begin
         FClientSocket.CloseSocket;

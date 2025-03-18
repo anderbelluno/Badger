@@ -15,6 +15,7 @@ type
     Headers: TStringList;
     Body: string;
     QueryParams: TStringList; // Já adicionado anteriormente
+    BodyStream : TMemoryStream;
   end;
   THTTPResponse = record
     StatusCode: Integer;
