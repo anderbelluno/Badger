@@ -363,7 +363,7 @@ begin
                   Req.URI := FURI;
                   Req.Method := FMethod;
                   Req.RequestLine := FRequestLine;
-                  Req.Headers := Headers;
+                  Req.Headers.Assign(Headers);
                   Req.QueryParams.Assign(QueryParams);
 
                   CloseConnection := (Headers.Values['Connection'] = 'close') or (Pos('HTTP/1.0', FRequestLine) = 1);
@@ -470,10 +470,18 @@ begin
           Break;
       until False;
     finally
-      FreeAndNil(QueryParams);
-      FreeAndNil(Req.QueryParams);
-      FreeAndNil(Req.Headers);
-      FreeAndNil(Req.BodyStream); // Libera o BodyStream aqui
+       if Assigned(QueryParams)then
+          FreeAndNil(QueryParams);
+
+       if Assigned(Req.QueryParams)then
+          FreeAndNil(Req.QueryParams);
+
+       if Assigned(Req.Headers)then
+          FreeAndNil(Req.Headers);
+
+       if Assigned(Req.BodyStream)then
+          FreeAndNil(Req.BodyStream); // Libera o BodyStream aqui
+          
       if Assigned(FClientSocket) then
       begin
         FClientSocket.CloseSocket;
