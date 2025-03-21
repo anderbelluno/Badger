@@ -96,7 +96,7 @@ begin
   if rdLog.IsChecked then
     TThread.Synchronize(nil, procedure
     begin
-      Memo1.Lines.Add('Client Request: ' + #13#10 + Value);
+      Memo1.Lines.Add('Client Request: ' + #13#10 + Value + #13#10);
     end);
 end;
 
@@ -105,7 +105,7 @@ begin
   if rdLog.IsChecked then
     TThread.Synchronize(nil, procedure
     begin
-      Memo1.Lines.Add('Server Response: ' + #13#10 + Value);
+      Memo1.Lines.Add('Server Response: ' + #13#10 + Value + #13#10);
     end);
 end;
 

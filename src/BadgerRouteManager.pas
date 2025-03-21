@@ -58,13 +58,12 @@ var
 begin
   SynClasses := TBadgerMethods.Create;
   try
-    // Procurar o parâmetro 'file' na querystring
-    FileName := '.\master.png'; // Padrão
+    FileName := '.\master.png';
     for I := 0 to Request.QueryParams.Count - 1 do
     begin
       if Pos('file=', Request.QueryParams[I]) = 1 then
       begin
-        FileName := 'D:\GoogleDrive\Camera\' + Copy(Request.QueryParams[I], 6, Length(Request.QueryParams[I])); // Remove 'file='
+        FileName := 'D:\GoogleDrive\Camera\' + Copy(Request.QueryParams[I], 6, Length(Request.QueryParams[I]));
         Break;
       end;
     end;

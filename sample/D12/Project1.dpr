@@ -11,7 +11,8 @@ uses
   SyUtils in '..\..\src\SyUtils.pas',
   BadgerBasicAuth in '..\..\src\Auth\BadgerBasicAuth.pas',
   BadgerHttpStatus in '..\..\src\BadgerHttpStatus.pas',
-  BadgerTypes in '..\..\src\BadgerTypes.pas';
+  BadgerTypes in '..\..\src\BadgerTypes.pas',
+  BadgerRequestHandler in '..\..\src\BadgerRequestHandler.pas';
 
 {$R *.res}
 

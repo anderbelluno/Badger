@@ -10,7 +10,8 @@ uses
   BadgerMultipartDataReader in '..\..\src\BadgerMultipartDataReader.pas',
   BadgerRouteManager in '..\..\src\BadgerRouteManager.pas',
   BadgerTypes in '..\..\src\BadgerTypes.pas',
-  SyUtils in '..\..\src\SyUtils.pas';
+  SyUtils in '..\..\src\SyUtils.pas',
+  BadgerRequestHandler in '..\..\src\BadgerRequestHandler.pas';
 
 {$R *.res}
 

@@ -3,7 +3,7 @@ unit BadgerBasicAuth;
 interface
 
 uses
-  SysUtils, Classes, SyUtils, Badger, BadgerTypes; // Inclui SyUtils para DecodeBase64 e Badger para THTTPRequest/THTTPResponse
+  SysUtils, Classes, SyUtils, Badger, BadgerTypes, EncdDecd;
 
 type
   TBasicAuth = class
@@ -36,7 +36,6 @@ begin
   Result := False;
   AuthHeader := '';
 
-  // Procurar o header Authorization nos cabeçalhos da requisição
   for I := 0 to Request.Headers.Count - 1 do
   begin
     if Pos('Authorization:', Request.Headers[I]) > 0 then
@@ -46,19 +45,17 @@ begin
     end;
   end;
 
-  // Verificar se é autenticação Basic
   if Pos('Basic ', AuthHeader) = 1 then
   begin
-    AuthHeader := Copy(AuthHeader, 7, Length(AuthHeader)); // Remove "Basic "
+    AuthHeader := Copy(AuthHeader, 7, Length(AuthHeader));
     try
-      DecodedAuth := TSyUtils.DecodeBase64(AuthHeader); // Decodifica o Base64
+      DecodedAuth := DecodeString(AuthHeader);
       ColonPos := Pos(':', DecodedAuth);
       if ColonPos > 0 then
       begin
         Username := Copy(DecodedAuth, 1, ColonPos - 1);
         Password := Copy(DecodedAuth, ColonPos + 1, Length(DecodedAuth));
 
-        // Comparar com as credenciais configuradas
         if (Username = FUsername) and (Password = FPassword) then
           Result := True
         else

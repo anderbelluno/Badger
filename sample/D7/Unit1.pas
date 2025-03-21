@@ -25,7 +25,7 @@ type
   private
     { Private declarations }
     ServerThread: TBadger;
-    BasicAuth: TBasicAuth; // Instância da autenticação Basic
+    BasicAuth: TBasicAuth;
   public
     { Public declarations }
 
@@ -52,7 +52,7 @@ begin
     ServerThread.OnLastResponse := onLastResponse;
     if RadioGroup1.ItemIndex = 1 then
       ServerThread.AddMiddleware(BasicAuth.Check);
-    ServerThread.Start; // Inicia o servidor
+    ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
     CBxNonBlockMode.Enabled := False;
@@ -63,8 +63,8 @@ begin
   end
   else
   begin
-    ServerThread.Stop; // Para o servidor
-    ServerThread := nil; // A thread já se libera com FreeOnTerminate
+    ServerThread.Stop;
+    ServerThread := nil;
     btnSyna.Tag := 0;
     btnSyna.Caption := 'Iniciar Servidor';
     edtPorta.Enabled := True;
@@ -78,26 +78,26 @@ end;
 procedure TForm1.FormCreate(Sender: TObject);
 begin
   ServerThread := nil;
-  BasicAuth := TBasicAuth.Create('andersons', 'fioris'); // Credenciais fixas para teste
+  BasicAuth := TBasicAuth.Create('andersons', 'fioris');
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
 if Assigned(ServerThread) then
-    ServerThread.Stop; // Para o servidor ao destruir o formulário
+    ServerThread.Stop;
   FreeAndNil(BasicAuth);
 end;
 
 procedure TForm1.onLastRequest(Value: String);
 begin
 if rdLog.Checked then
-    Memo1.Lines.Add('Client Request: ' + #13#10 + Value);
+    Memo1.Lines.Add('Client Request: ' + #13#10 + Value + #13#10);
 end;
 
 procedure TForm1.onLastResponse(Value: String);
 begin
    if rdLog.Checked then
-    Memo1.Lines.Add('Server Response: ' + #13#10 + Value);
+    Memo1.Lines.Add('Server Response: ' + #13#10 + Value + #13#10);
 end;
 
 end.
