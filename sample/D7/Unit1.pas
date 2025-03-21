@@ -59,6 +59,7 @@ begin
     btnSyna.Tag := 1;
     btnSyna.Caption := 'Parar Servidor';
     RadioGroup1.Enabled := False;
+    edtTimeOut.Enabled := False;
   end
   else
   begin
@@ -70,6 +71,7 @@ begin
     rdLog.Enabled := True;
     CBxNonBlockMode.Enabled := True;
     RadioGroup1.Enabled := True;
+    edtTimeOut.Enabled:= True;
   end;
 end;
 

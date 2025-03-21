@@ -4,7 +4,7 @@ interface
 
 uses
   blcksock, SysUtils, Classes, DB, BadgerMultipartDataReader, Contnrs, SyUtils,
-  BadgerTypes;
+  BadgerTypes, BadgerHttpStatus;
 
 type
   TBadgerMethods = class(TObject)
@@ -15,8 +15,9 @@ type
     function ParseRequestHeaderStr(Headers: TStringList; aRequestHeader: String): String;
     function fParserJsonStream(Request: THTTPRequest; Response : THTTPResponse): string;
     function fDownloadStream(const FilePath: string; out MimeType: string): TStream;
-    procedure AtuImage(const Body: string; out StatusCode: Integer; out ResponseBody: string);
+    procedure AtuImage(Request: THTTPRequest; out Response: THTTPResponse);
     function ExtractMethodAndURI(const RequestLine: string; out Method, URI: string; out QueryParams: TStringList): Boolean;
+    function ExtractBoundary(const ContentType: string): string;
   end;
 
 implementation
@@ -116,7 +117,6 @@ begin
 end;
 
 function TBadgerMethods.fParserJsonStream( Request: THTTPRequest; Response : THTTPResponse ): string;
-
 begin
   if UpperCase(Request.Method) = 'POST' then
     Result := '{"status":true, "message":"Recebimento concluído com sucesso", "Vc me mandou":"' + Request.Body + '"}'
@@ -138,46 +138,77 @@ begin
   else
   begin
     Result := TStringStream.Create('File not found');
-    MimeType := 'text/plain';
+    MimeType := TEXT_PLAIN;
   end;
 end;
 
-procedure TBadgerMethods.AtuImage(const Body: string; out StatusCode: Integer; out ResponseBody: string);
+procedure TBadgerMethods.AtuImage(Request: THTTPRequest; out Response: THTTPResponse);
 var
-  Stream: TMemoryStream;
   Reader: TFormDataReader;
   Files: TObjectList;
   i: Integer;
   FormDataFile: TFormDataFile;
   UniqueName: string;
+  V_Boundary    : string;
 begin
-  Stream := TMemoryStream.Create;
   Reader := TFormDataReader.Create;
   Files := nil;
   try
-    if Body <> '' then
+    if (Request.BodyStream <> nil) and (Request.BodyStream.Size > 0)then
     begin
-      Stream.WriteBuffer(Body[1], Length(Body));
-      Stream.Position := 0;
-      Files := Reader.ProcessMultipartFormData(Stream, '');
+      V_Boundary := ExtractBoundary(Request.Headers.Values['Content-Type']);
+      Files := Reader.ProcessMultipartFormData(Request.BodyStream, V_Boundary);
       for i := 0 to Files.Count - 1 do
       begin
         FormDataFile := TFormDataFile(Files[i]);
         UniqueName := Reader.UniqueFileName(FormDataFile.FileName);
         FormDataFile.Stream.SaveToFile(UniqueName);
       end;
-      StatusCode := 200; // OK
-      ResponseBody := 'Image processed successfully';
+      Response.StatusCode := HTTP_OK; // OK
+      Response.Body := 'Image processed successfully';
     end
     else
     begin
-      StatusCode := 400; // Bad Request
-      ResponseBody := 'No image data provided';
+      Response.StatusCode := HTTP_BAD_REQUEST;//   404; // Bad Request
+      Response.Body := 'No image data provided';
     end;
   finally
-    Stream.Free;
     if Assigned(Reader) then Reader.Free;
     if Assigned(Files) then Files.Free;
+  end;
+end;
+
+function PosEx(const SubStr, S: string; Offset: Integer = 1): Integer;
+var
+  I: Integer;
+begin
+  if Offset > Length(S) then
+  begin
+    Result := 0;
+    Exit;
+  end;
+  for I := Offset to Length(S) - Length(SubStr) + 1 do
+    if Copy(S, I, Length(SubStr)) = SubStr then
+    begin
+      Result := I;
+      Exit;
+    end;
+  Result := 0;
+end;
+
+function TBadgerMethods.ExtractBoundary(const ContentType: string): string;
+var
+  BoundaryStart, BoundaryEnd: Integer;
+begin
+  Result := '';
+  BoundaryStart := Pos('boundary=', ContentType);
+  if BoundaryStart > 0 then
+  begin
+    BoundaryStart := BoundaryStart + Length('boundary=');
+    BoundaryEnd := PosEx(' ', ContentType, BoundaryStart);
+    if BoundaryEnd = 0 then
+      BoundaryEnd := Length(ContentType) + 1;
+    Result := Copy(ContentType, BoundaryStart, BoundaryEnd - BoundaryStart);
   end;
 end;
 

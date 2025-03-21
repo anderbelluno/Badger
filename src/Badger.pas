@@ -3,7 +3,7 @@ unit Badger;
 interface
 
 uses
-  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, Classes, sysutils, StrUtils, uRouteManager,
+  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, Classes, sysutils, StrUtils, BadgerRouteManager,
   SyUtils, BadgerMethods, BadgerHttpStatus, BadgerTypes, Math;
 
 type
@@ -332,13 +332,16 @@ begin
                   begin
                     BodyStream.SetSize(ContentLength);
                     TotalBytes := 0;
-                    while TotalBytes < ContentLength do
+
+                    FClientSocket.RecvBufferEx(BodyStream.Memory, ContentLength , 5000);
+                    {while TotalBytes < ContentLength do
                     begin
+
                       BytesRead := FClientSocket.RecvBufferEx(Pointer(Cardinal(BodyStream.Memory) + TotalBytes), ContentLength - TotalBytes, 5000);
                       if BytesRead <= 0 then Break;
                       Inc(TotalBytes, BytesRead);
                     end;
-                    BodyStream.Size := TotalBytes;
+                    BodyStream.Size := TotalBytes;}
                     BodyStream.Position := 0;
 
                     if (Pos('application/json', LowerCase(ContentType)) > 0) or (Pos('text/', LowerCase(ContentType)) > 0) then

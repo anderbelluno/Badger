@@ -96,7 +96,7 @@ begin
   end;
 end;
 
-procedure TRouteManager.ping(Request: THTTPRequest; out Response: THTTPResponse);
+procedure TRouteManager.ping(Request: THTTPRequest;  out Response: THTTPResponse);
 begin
   Response.StatusCode := HTTP_OK;
   Response.Body := UTF8Encode('Pong');
@@ -108,7 +108,7 @@ var
 begin
   SynClasses := TBadgerMethods.Create;
   try
-    SynClasses.AtuImage(Request.Body, Response.StatusCode, Response.Body);
+    SynClasses.AtuImage(Request, Response);
   finally
     FreeAndNil(SynClasses);
   end;
