@@ -2,7 +2,6 @@ unit BadgerHttpStatus;
 
 interface
 
-// Constantes globais para códigos de status HTTP
 const
   HTTP_CONTINUE = 100;
   HTTP_SWITCHING_PROTOCOLS = 101;
@@ -72,7 +71,12 @@ const
   HTTP_NETWORK_AUTHENTICATION_REQUIRED = 511;
   HTTP_NETWORK_CONNECTION_TIMEOUT_ERROR = 599;
 
-type
+  //Content-Type
+  APPLICATION_OCTET_STREAM = 'application/octet-stream';
+  APPLICATION_JSON = 'application/json';
+  TEXT_PLAIN = 'text/plain';
+
+  type
   THTTPStatus = class
   public
     class function GetStatusText(StatusCode: Integer): string;

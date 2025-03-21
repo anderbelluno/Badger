@@ -14,7 +14,7 @@ type
     URI, Method, RequestLine: string;
     Headers: TStringList;
     Body: string;
-    QueryParams: TStringList; // Já adicionado anteriormente
+    QueryParams: TStringList;
     BodyStream : TMemoryStream;
   end;
   THTTPResponse = record
@@ -24,7 +24,7 @@ type
     ContentType: string;
   end;
   TMiddlewareProc = function(Request: THTTPRequest; out Response: THTTPResponse): Boolean of object;
-  TRoutingCallback = procedure(Request: THTTPRequest; out Response: THTTPResponse) of object; // Ajustado
+  TRoutingCallback = procedure(Request: THTTPRequest; out Response: THTTPResponse) of object;
 
   TMiddlewareWrapper = class
   public

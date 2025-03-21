@@ -20,13 +20,13 @@ type
     FCriticalSection: TCriticalSection;
     FMethods: TBadgerMethods;
     FMiddlewares: TList;
-    FTimeout: Integer; // Novo: Timeout configurável
+    FTimeout: Integer;
   protected
     function ParseRequestHeader(ClientSocket: TTCPBlockSocket): TStringList;
     function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean): string; // Atualizado: Adiciona CloseConnection
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager; ACriticalSection: TCriticalSection;
-                       AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer; // Novo: Passa timeout
+                       AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
                        ALastRequest: TLastRequest = nil; ALastResponse: TLastResponse = nil);
     destructor Destroy; override;
     procedure Execute; override;
@@ -43,7 +43,7 @@ type
     FMiddlewares: TList;
     FPort: Integer;
     FNonBlockMode: Boolean;
-    FTimeout: Integer; // Novo: Timeout configurável
+    FTimeout: Integer;
   protected
     procedure Execute; override;
   public
@@ -54,7 +54,7 @@ type
     procedure Stop;
 
     property Port: Integer read FPort write FPort;
-    property Timeout: Integer read FTimeout write FTimeout default 5000; // Novo: Propriedade Timeout
+    property Timeout: Integer read FTimeout write FTimeout default 5000;
     property OnLastRequest: TLastRequest read VLastRequest write VLastRequest;
     property OnLastResponse: TLastResponse read VLastResponse write VLastResponse;
     property NonBlockMode: Boolean read FNonBlockMode write FNonBlockMode;
@@ -75,7 +75,7 @@ begin
   FMiddlewares := TList.Create;
   FPort := 8080;
   FNonBlockMode := True;
-  FTimeout := 5000; // Novo: Timeout padrão de 5 segundos
+  FTimeout := 5000;
 end;
 
 destructor TBadger.Destroy;
@@ -104,7 +104,7 @@ begin
     Exit;
   FServerSocket.CloseSocket;
   FServerSocket.CreateSocket;
-  FServerSocket.setLinger(True, 10000); // Novo: Adiciona setLinger para melhor gerenciamento de conexões
+  FServerSocket.setLinger(True, 10000);
   FServerSocket.NonBlockMode := FNonBlockMode;
   FServerSocket.Bind('0.0.0.0', IntToStr(FPort));
   FServerSocket.Listen;
@@ -169,7 +169,7 @@ begin
   FRouteManager := ARouteManager;
   FMethods := AMethods;
   FMiddlewares := TList.Create;
-  FTimeout := ATimeout; // Novo: Recebe o timeout
+  FTimeout := ATimeout;
   for I := 0 to AMiddlewares.Count - 1 do
     FMiddlewares.Add(TMiddlewareWrapper.Create(TMiddlewareWrapper(AMiddlewares[I]).Middleware));
   Resume;
@@ -199,7 +199,7 @@ begin
   Result := TStringList.Create;
   try
     repeat
-      HeaderLine := ClientSocket.RecvString(FTimeout); // Atualizado: Usa FTimeout
+      HeaderLine := ClientSocket.RecvString(FTimeout);
       if HeaderLine <> '' then
       begin
         SeparatorPos := Pos(':', HeaderLine);
@@ -229,17 +229,11 @@ var
 {$ENDIF}
 begin
   if ContentType = '' then
-    EffectiveContentType := 'text/plain'
+    EffectiveContentType := TEXT_PLAIN
   else
     EffectiveContentType := ContentType;
 
-  if Assigned(Stream) then
-  begin
-    Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
-              'Content-Type: ' + EffectiveContentType + CRLF +
-              'Content-Length: ' + IntToStr(Stream.Size) + CRLF;
-  end
-  else
+  if (EffectiveContentType = TEXT_PLAIN) or (EffectiveContentType = APPLICATION_JSON) then
   begin
 {$IFDEF VER150}
     UTF8Body := UTF8Encode(Body);
@@ -252,10 +246,16 @@ begin
               'Content-Type: ' + EffectiveContentType + '; charset=utf-8' + CRLF +
               'Content-Length: ' + IntToStr(Length(UTF8Body)) + CRLF;
 {$ENDIF}
+  end
+  else
+  if Assigned(Stream) and (Stream.Size > 0)then
+  begin
+     Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
+                 'Content-Type: ' + EffectiveContentType + CRLF +
+                 'Content-Length: ' + IntToStr(Stream.Size) + CRLF;
   end;
 
-  // Novo: Adiciona cabeçalhos padrão e suporte a Connection
-  Result := Result + 'Date: ' + Rfc822DateTime(Now) + CRLF + // Requer Synautil
+  Result := Result + 'Date: ' + Rfc822DateTime(Now) + CRLF +
                     'Server: Badger HTTP Server' + CRLF;
   if CloseConnection then
     Result := Result + 'Connection: close' + CRLF
@@ -276,13 +276,15 @@ procedure TClientThread.Execute;
     Callback(Request, Response);
   end;
 
+const
+  MaxBufferSize = 1048576; // 1MB
 var
   Index, I, ContentLength, TotalBytes: Integer;
   Req: THTTPRequest;
   Resp: THTTPResponse;
   MiddlewareWrapper: TMiddlewareWrapper;
   Headers: TStringList;
-  BodyStream: TMemoryStream; // Temporário para leitura
+  BodyStream: TMemoryStream;
   CloseConnection: Boolean;
 {$IFDEF VER150}
   TempBytes: array of Byte;
@@ -293,6 +295,7 @@ var
   ResponseBodyBytes: TBytes;
   UTF8Body: RawByteString;
 {$ENDIF}
+  BufferSize: Integer;
   BytesRead: Integer;
   QueryParams: TStringList;
   ResponseHeader: string;
@@ -302,9 +305,10 @@ begin
   QueryParams := TStringList.Create;
   try
     Req.QueryParams := TStringList.Create;
-    Req.Headers := TStringList.Create; // Inicializa diretamente
+    Req.Headers := TStringList.Create;
     Req.Body := '';
-    Req.BodyStream := nil; // Inicializa como nil
+    Req.BodyStream := nil;
+    Resp.Stream := TMemoryStream.Create;
     try
       repeat
         if FClientSocket.LastError = 0 then
@@ -337,21 +341,18 @@ begin
                     BodyStream.Size := TotalBytes;
                     BodyStream.Position := 0;
 
-                    if (Pos('application/json', LowerCase(ContentType)) > 0) or
-                       (Pos('text/', LowerCase(ContentType)) > 0) then
+                    if (Pos('application/json', LowerCase(ContentType)) > 0) or (Pos('text/', LowerCase(ContentType)) > 0) then
                     begin
-                      // Tratar como texto (JSON ou plain text)
                       SetLength(TempBytes, TotalBytes);
                       BodyStream.ReadBuffer(TempBytes[0], TotalBytes);
                       SetString(Req.Body, PChar(@TempBytes[0]), TotalBytes);
-                      Req.Body := CharsetConversion(Req.Body, UTF_8, GetCurCP); // Opcional
+                      Req.Body := CharsetConversion(Req.Body, UTF_8, GetCurCP);
                       FreeAndNil(BodyStream);
                     end
                     else
                     begin
-                      // Tratar como binário (Dataset ou outro)
                       Req.BodyStream := BodyStream;
-                      BodyStream := nil; // Evita liberação duplicada
+                      BodyStream := nil;
                     end;
                   end
                   else
@@ -407,6 +408,8 @@ begin
                   Index := FRouteManager.FRoutes.IndexOf(FURI);
                   if Index <> -1 then
                   begin
+                    if not Assigned(Resp.Stream) then
+                      Resp.Stream := TMemoryStream.Create;
                     Exec(Index, Req, Resp);
                     ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection);
                     FClientSocket.SendString(ResponseHeader);
@@ -421,21 +424,31 @@ begin
                     if Length(ResponseBodyBytes) > 0 then
                       FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
 {$ENDIF}
+
                     if Assigned(Resp.Stream) then
                     begin
-                      Resp.Stream.Position := 0;
-                      repeat
-                        BytesRead := Resp.Stream.Read(Pointer(ResponseBodyBytes)^, Length(ResponseBodyBytes));
-                        if BytesRead > 0 then
-                          FClientSocket.SendBuffer(@ResponseBodyBytes[0], BytesRead);
-                      until BytesRead = 0;
+                        BufferSize := Resp.Stream.Size;
+                        if BufferSize > MaxBufferSize then
+                           BufferSize := MaxBufferSize;
+
+                        SetLength(ResponseBodyBytes, BufferSize);
+
+                        if Resp.Stream.Size > 0 then
+                        begin
+                           Resp.Stream.Position := 0;
+                           repeat
+                              BytesRead := Resp.Stream.Read(ResponseBodyBytes[0], Length(ResponseBodyBytes));
+                              if BytesRead > 0 then
+                                 FClientSocket.SendBuffer(@ResponseBodyBytes[0], BytesRead);
+                           until BytesRead = 0;
+                        end;
                       FreeAndNil(Resp.Stream);
                     end;
                     FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
                   end
                   else
                   begin
-                    ResponseHeader := BuildHTTPResponse(HTTP_NOT_FOUND, 'Not Found', nil, 'text/plain', CloseConnection);
+                    ResponseHeader := BuildHTTPResponse(HTTP_NOT_FOUND, 'Not Found', nil, TEXT_PLAIN, CloseConnection);
                     FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
                     UTF8Body := UTF8Encode('Not Found');
@@ -456,7 +469,7 @@ begin
                   if CloseConnection then Break;
                 finally
                   if Assigned(BodyStream) then
-                    FreeAndNil(BodyStream); // Libera se não foi transferido
+                    FreeAndNil(BodyStream);
                 end;
               finally
                 Headers.Free;
@@ -480,8 +493,11 @@ begin
           FreeAndNil(Req.Headers);
 
        if Assigned(Req.BodyStream)then
-          FreeAndNil(Req.BodyStream); // Libera o BodyStream aqui
-          
+          FreeAndNil(Req.BodyStream);
+
+       if Assigned(Resp.Stream) then
+          FreeAndNil(Resp.Stream);
+
       if Assigned(FClientSocket) then
       begin
         FClientSocket.CloseSocket;
@@ -491,7 +507,7 @@ begin
   except
     on E: Exception do
     begin
-      ResponseHeader := BuildHTTPResponse(HTTP_INTERNAL_SERVER_ERROR, 'Internal Server Error: ' + E.Message, nil, 'text/plain', True);
+      ResponseHeader := BuildHTTPResponse(HTTP_INTERNAL_SERVER_ERROR, 'Internal Server Error: ' + E.Message, nil, TEXT_PLAIN, True);
       FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
       UTF8Body := UTF8Encode('Internal Server Error: ' + E.Message);
