@@ -333,15 +333,13 @@ begin
                     BodyStream.SetSize(ContentLength);
                     TotalBytes := 0;
 
-                    FClientSocket.RecvBufferEx(BodyStream.Memory, ContentLength , 5000);
-                    {while TotalBytes < ContentLength do
+                    while TotalBytes < ContentLength do
                     begin
-
-                      BytesRead := FClientSocket.RecvBufferEx(Pointer(Cardinal(BodyStream.Memory) + TotalBytes), ContentLength - TotalBytes, 5000);
+                      BytesRead := FClientSocket.RecvBufferEx(Pointer(NativeUInt(BodyStream.Memory) + TotalBytes), ContentLength - TotalBytes, 5000);
                       if BytesRead <= 0 then Break;
                       Inc(TotalBytes, BytesRead);
                     end;
-                    BodyStream.Size := TotalBytes;}
+                    BodyStream.Size := TotalBytes;
                     BodyStream.Position := 0;
 
                     if (Pos('application/json', LowerCase(ContentType)) > 0) or (Pos('text/', LowerCase(ContentType)) > 0) then
