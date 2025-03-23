@@ -230,7 +230,11 @@ begin
                       SetLength(TempBytes, TotalBytes);
                       BodyStream.ReadBuffer(TempBytes[0], TotalBytes);
                       SetString(Req.Body, PChar(@TempBytes[0]), TotalBytes);
+{$IFDEF VER150}
                       Req.Body := CharsetConversion(Req.Body, UTF_8, GetCurCP);
+{$ELSE}
+                      Req.Body := TEncoding.UTF8.GetString(TempBytes);
+{$ENDIF}
                       FreeAndNil(BodyStream);
                     end
                     else

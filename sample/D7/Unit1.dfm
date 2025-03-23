@@ -97,6 +97,8 @@ object Form1: TForm1
       Width = 97
       Height = 17
       Caption = 'Log'
+      Checked = True
+      State = cbChecked
       TabOrder = 3
     end
     object edtTimeOut: TEdit
