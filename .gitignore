@@ -118,3 +118,4 @@ Mobile/Database/DBPlacarTrumbica.db
 info.plist.TemplateiOS.xml
 Entitlement.TemplateiOS.xml
 Mobile/12_1/dbgout.log
+*.bak
