@@ -9,8 +9,8 @@ uses
 type
   THTTPRequestHandler = class(TThread)
   private
-    VLastRequest: TLastRequest;
-    VLastResponse: TLastResponse;
+    FLastRequest: TLastRequest;
+    FLastResponse: TLastResponse;
     FClientSocket: TTCPBlockSocket;
     FRouteManager: TRouteManager;
     FURI: string;
@@ -48,8 +48,8 @@ begin
   FreeOnTerminate := True;
   FClientSocket := AClientSocket;
   FCriticalSection := ACriticalSection;
-  VLastRequest := ALastRequest;
-  VLastResponse := ALastResponse;
+  FLastRequest := ALastRequest;
+  FLastResponse := ALastResponse;
   FRouteManager := ARouteManager;
   FMethods := AMethods;
   FMiddlewares := TList.Create;
@@ -149,13 +149,13 @@ begin
 end;
 
 procedure THTTPRequestHandler.Execute;
-  procedure Exec(Index: Integer; const Request: THTTPRequest; out Response: THTTPResponse);
+  procedure Exec(LRoute: TObject; const Request: THTTPRequest; out Response: THTTPResponse);
   var
     Callback: TRoutingCallback;
     MethodPointer: TMethod;
   begin
     MethodPointer.Data := Self;
-    MethodPointer.Code := Pointer(FRouteManager.FRoutes.Objects[Index]);
+    MethodPointer.Code := Pointer(LRoute);
     Callback := TRoutingCallback(MethodPointer);
     Callback(Request, Response);
   end;
@@ -166,6 +166,7 @@ var
   Index, I, ContentLength, TotalBytes: Integer;
   Req: THTTPRequest;
   Resp: THTTPResponse;
+  LRoute: TObject;
   MiddlewareWrapper: TMiddlewareWrapper;
   Headers: TStringList;
   BodyStream: TMemoryStream;
@@ -202,8 +203,8 @@ begin
           begin
             FCriticalSection.Enter;
             try
-              if Assigned(VLastRequest) then
-                VLastRequest(FRequestLine);
+              if Assigned(FLastRequest) then
+                FLastRequest(FRequestLine);
 
               Headers := ParseRequestHeader(FClientSocket);
               try
@@ -286,19 +287,29 @@ begin
                         FreeAndNil(Resp.Stream);
                       end;
                       FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
-                      if Assigned(VLastResponse) then
-                        VLastResponse(FResponseLine);
+                      if Assigned(FLastResponse) then
+                        FLastResponse(FResponseLine);
                       if CloseConnection then Break;
                       Continue;
                     end;
                   end;
 
-                  Index := FRouteManager.FRoutes.IndexOf(FURI);
+{$IF CompilerVersion >= 20}
+                  if not FRouteManager.FRoutes.TryGetValue(FURI.ToLower, LRoute) then
+                    LRoute := nil;
+{$ELSE}
+                  Index := FRouteManager.FRoutes.IndexOf(FURI.ToLower);
                   if Index <> -1 then
+                    LRoute := FRouteManager.FRoutes.Objects[Index]
+                  else
+                    LRoute := nil;
+{$ENDIF}
+
+                  if Assigned(LRoute) then
                   begin
                     if not Assigned(Resp.Stream) then
                       Resp.Stream := TMemoryStream.Create;
-                    Exec(Index, Req, Resp);
+                    Exec(LRoute, Req, Resp);
                     ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection);
                     FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
@@ -352,8 +363,8 @@ begin
                     FResponseLine := Format('HTTP/1.1 %d %s', [HTTP_NOT_FOUND, Resp.Body]);
                   end;
 
-                  if Assigned(VLastResponse) then
-                    VLastResponse(FResponseLine);
+                  if Assigned(FLastResponse) then
+                    FLastResponse(FResponseLine);
                   if CloseConnection then Break;
                 finally
                   if Assigned(BodyStream) then
@@ -409,8 +420,8 @@ begin
         FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
 {$ENDIF}
       FResponseLine := Format('HTTP/1.1 %d', [HTTP_INTERNAL_SERVER_ERROR]);
-      if Assigned(VLastResponse) then
-        VLastResponse(FResponseLine);
+      if Assigned(FLastResponse) then
+        FLastResponse(FResponseLine);
     end;
   end;
 end;

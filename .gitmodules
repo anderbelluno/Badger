@@ -1,0 +1,3 @@
+[submodule "ThirdParty/Synapse"]
+	path = ThirdParty/Synapse
+	url = https://github.com/geby/synapse

@@ -23,15 +23,19 @@ type
   public
     constructor Create;
     destructor Destroy; override;
+
     procedure AddMiddleware(Middleware: TMiddlewareProc);
     procedure Start;
     procedure Stop;
 
+    property NonBlockMode: Boolean read FNonBlockMode write FNonBlockMode;
     property Port: Integer read FPort write FPort;
+    property RouteManager: TRouteManager read FRouteManager;
     property Timeout: Integer read FTimeout write FTimeout default 5000;
+
+    // Events
     property OnLastRequest: TLastRequest read VLastRequest write VLastRequest;
     property OnLastResponse: TLastResponse read VLastResponse write VLastResponse;
-    property NonBlockMode: Boolean read FNonBlockMode write FNonBlockMode;
   end;
 
 implementation
