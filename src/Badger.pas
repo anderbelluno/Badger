@@ -8,8 +8,8 @@ uses
 type
   TBadger = class(TThread)
   private
-    VLastRequest: TLastRequest;
-    VLastResponse: TLastResponse;
+    VLastRequestInfo: TRequestInfo;
+    VLastResponseInfo: TResponseInfo;
     FServerSocket: TTCPBlockSocket;
     FRouteManager: TRouteManager;
     FCriticalSection: TCriticalSection;
@@ -18,6 +18,8 @@ type
     FPort: Integer;
     FNonBlockMode: Boolean;
     FTimeout: Integer;
+    FOnRequest: TOnRequest;
+    FOnResponse: TOnResponse;
   protected
     procedure Execute; override;
   public
@@ -33,9 +35,12 @@ type
     property RouteManager: TRouteManager read FRouteManager;
     property Timeout: Integer read FTimeout write FTimeout default 5000;
 
-    // Events
-    property OnLastRequest: TLastRequest read VLastRequest write VLastRequest;
-    property OnLastResponse: TLastResponse read VLastResponse write VLastResponse;
+    // Propriedades
+    property LastRequestInfo: TRequestInfo read VLastRequestInfo;
+    property LastResponseInfo: TResponseInfo read VLastResponseInfo;
+    // Eventos
+    property OnRequest: TOnRequest read FOnRequest write FOnRequest;
+    property OnResponse: TOnResponse read FOnResponse write FOnResponse;
   end;
 
 implementation
@@ -71,6 +76,10 @@ begin
   for I := 0 to FMiddlewares.Count - 1 do
     TObject(FMiddlewares[I]).Free;
   FMiddlewares.Free;
+{  if VLastRequestInfo.IsInitialized then
+    VLastRequestInfo.Clear;
+  if VLastResponseInfo.IsInitialized then
+    VLastResponseInfo.Clear; }
   inherited;
 end;
 
@@ -104,6 +113,7 @@ end;
 procedure TBadger.Execute;
 var
   ClientSocket: TTCPBlockSocket;
+  ResponseInfo: TResponseInfo;
 begin
   while not Terminated do
   begin
@@ -116,18 +126,35 @@ begin
         begin
           THTTPRequestHandler.Create(ClientSocket, FRouteManager, FCriticalSection,
                                      FMethods, FMiddlewares, FTimeout,
-                                     VLastRequest, VLastResponse);
+                                     VLastRequestInfo, VLastResponseInfo,
+                                     FOnRequest, FOnResponse);
         end
         else
         begin
-          if Assigned(VLastResponse) then
-            VLastResponse('Error accepting connection: ' + ClientSocket.LastErrorDesc);
+            ResponseInfo.StatusCode := 500;
+            ResponseInfo.StatusText := 'Internal Server Error';
+            ResponseInfo.Body := 'Error accepting connection: ' + ClientSocket.LastErrorDesc;
+            FCriticalSection.Enter;
+            try
+              if Assigned(FOnResponse) then
+                FOnResponse(ResponseInfo);
+            finally
+              FCriticalSection.Leave;
+            end;
           ClientSocket.Free;
         end;
       except
+          ResponseInfo.StatusCode := 500;
+          ResponseInfo.StatusText := 'Internal Server Error';
+          ResponseInfo.Body := 'Exception in accept: ' + Exception(ExceptObject).Message;
+          FCriticalSection.Enter;
+          try
+            if Assigned(FOnResponse) then
+              FOnResponse(ResponseInfo);
+          finally
+            FCriticalSection.Leave;
+          end;
         ClientSocket.Free;
-        if Assigned(VLastResponse) then
-          VLastResponse('Exception in accept: ' + Exception(ExceptObject).Message);
       end;
     end;
   end;

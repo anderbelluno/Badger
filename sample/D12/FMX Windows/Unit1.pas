@@ -15,7 +15,7 @@ uses
   System.SysUtils, System.Types, System.UITypes, System.Classes, System.Variants,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   FMX.Memo.Types, FMX.ScrollBox, FMX.Memo, FMX.StdCtrls, FMX.Layouts,
-  FMX.Controls.Presentation, FMX.Edit, FMX.ListBox;
+  FMX.Controls.Presentation, FMX.Edit, FMX.ListBox, BadgerTypes;
 
 type
   TForm1 = class(TForm)
@@ -41,8 +41,8 @@ type
   public
     { Public declarations }
 
-    procedure onLastRequest(Value : String);
-    procedure onLastResponse(Value : String);
+    procedure HandleRequest(const RequestInfo: TRequestInfo);
+    procedure HandleResponse(const ResponseInfo: TResponseInfo);
   end;
 
 var
@@ -63,8 +63,8 @@ begin
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
     ServerThread.NonBlockMode := CBxNonBlockMode.IsChecked;
-    ServerThread.OnLastRequest := onLastRequest;
-    ServerThread.OnLastResponse := onLastResponse;
+    ServerThread.OnRequest := HandleRequest;
+    ServerThread.OnResponse := HandleResponse;
     if ComboAuth.ItemIndex = 1 then
       ServerThread.AddMiddleware(BasicAuth.Check);
 
@@ -111,21 +111,25 @@ if Assigned(ServerThread) then
   FreeAndNil(BasicAuth);
 end;
 
-procedure TForm1.onLastRequest(Value: String);
+procedure TForm1.HandleRequest(const RequestInfo: TRequestInfo);
 begin
   if rdLog.IsChecked then
     TThread.Synchronize(nil, procedure
     begin
-      Memo1.Lines.Add('Client Request: ' + #13#10 + Value + #13#10);
+      Memo1.Lines.Add('Client Request: ' + #13#10 + RequestInfo.RequestLine + #13#10);
+      Memo1.Lines.Add('Remote Request IP: ' + #13#10 + RequestInfo.RemoteIP + #13#10);
+      Memo1.GoToTextEnd;
     end);
 end;
 
-procedure TForm1.onLastResponse(Value: String);
+procedure TForm1.HandleResponse(const ResponseInfo: TResponseInfo);
 begin
   if rdLog.IsChecked then
     TThread.Synchronize(nil, procedure
     begin
-      Memo1.Lines.Add('Server Response: ' + #13#10 + Value + #13#10);
+      Memo1.Lines.Add('Server Response: ' + #13#10 + ResponseInfo.StatusCode.ToString + ' ' + ResponseInfo.Body + #13#10
+      + ' ' + DateTimeToStr(ResponseInfo.Timestamp) + #13#10);
+      Memo1.GoToTextEnd;
     end);
 end;
 

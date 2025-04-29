@@ -9,8 +9,10 @@ uses
 type
   THTTPRequestHandler = class(TThread)
   private
-    FLastRequest: TLastRequest;
-    FLastResponse: TLastResponse;
+    FLastRequestInfo: TRequestInfo;
+    FLastResponseInfo: TResponseInfo;
+    FOnRequest: TOnRequest;
+    FOnResponse: TOnResponse;
     FClientSocket: TTCPBlockSocket;
     FRouteManager: TRouteManager;
     FURI: string;
@@ -24,12 +26,13 @@ type
   protected
     function ParseRequestHeader(ClientSocket: TTCPBlockSocket): TStringList;
     function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream;
-                               ContentType: string; CloseConnection: Boolean): string;
+                              ContentType: string; CloseConnection: Boolean): string;
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-                       ACriticalSection: TCriticalSection; AMethods: TBadgerMethods;
-                       AMiddlewares: TList; ATimeout: Integer;
-                       ALastRequest: TLastRequest = nil; ALastResponse: TLastResponse = nil);
+                      ACriticalSection: TCriticalSection; AMethods: TBadgerMethods;
+                      AMiddlewares: TList; ATimeout: Integer;
+                      var ALastRequestInfo: TRequestInfo; var ALastResponseInfo: TResponseInfo;
+                      AOnRequest: TOnRequest; AOnResponse: TOnResponse);
     destructor Destroy; override;
     procedure Execute; override;
   end;
@@ -40,7 +43,8 @@ implementation
 
 constructor THTTPRequestHandler.Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
   ACriticalSection: TCriticalSection; AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
-  ALastRequest: TLastRequest; ALastResponse: TLastResponse);
+  var ALastRequestInfo: TRequestInfo; var ALastResponseInfo: TResponseInfo;
+  AOnRequest: TOnRequest; AOnResponse: TOnResponse);
 var
   I: Integer;
 begin
@@ -48,8 +52,10 @@ begin
   FreeOnTerminate := True;
   FClientSocket := AClientSocket;
   FCriticalSection := ACriticalSection;
-  FLastRequest := ALastRequest;
-  FLastResponse := ALastResponse;
+  FLastRequestInfo := ALastRequestInfo;
+  FLastResponseInfo := ALastResponseInfo;
+  FOnRequest := AOnRequest;
+  FOnResponse := AOnResponse;
   FRouteManager := ARouteManager;
   FMethods := AMethods;
   FMiddlewares := TList.Create;
@@ -185,6 +191,8 @@ var
   QueryParams: TStringList;
   ResponseHeader: string;
   ContentType: string;
+  RequestInfo: TRequestInfo;
+  ResponseInfo: TResponseInfo;
 begin
   QueryParams := TStringList.Create;
   try
@@ -193,6 +201,12 @@ begin
     Req.Body := '';
     Req.BodyStream := nil;
     Resp.Stream := TMemoryStream.Create;
+
+    RequestInfo.Headers := TStringList.Create;
+    RequestInfo.QueryParams := TStringList.Create;
+
+    ResponseInfo.Headers := TStringList.Create;
+
     try
       repeat
         if FClientSocket.LastError = 0 then
@@ -203,10 +217,18 @@ begin
           begin
             FCriticalSection.Enter;
             try
-              if Assigned(FLastRequest) then
-                FLastRequest(FRequestLine);
+                Req.Method := FMethod;
+                Req.URI := FURI;
+                Req.RequestLine := FRequestLine;
 
-              Headers := ParseRequestHeader(FClientSocket);
+
+                RequestInfo.RemoteIP    := FClientSocket.GetRemoteSinIP;
+                RequestInfo.Method      := Req.Method;
+                RequestInfo.URI         := Req.URI;
+                RequestInfo.RequestLine := Req.RequestLine;
+
+                Headers := ParseRequestHeader(FClientSocket);
+
               try
                 ContentLength := StrToIntDef(Headers.Values['Content-Length'], 0);
                 ContentType := Headers.Values['Content-Type'];
@@ -250,11 +272,15 @@ begin
                   end;
 
                   Req.Socket := FClientSocket;
-                  Req.URI := FURI;
-                  Req.Method := FMethod;
-                  Req.RequestLine := FRequestLine;
                   Req.Headers.Assign(Headers);
                   Req.QueryParams.Assign(QueryParams);
+
+                  RequestInfo.Headers.Assign(Headers);
+                  RequestInfo.Body := Req.Body;
+                  RequestInfo.QueryParams.Assign(Req.QueryParams);
+
+                   if Assigned(FOnRequest) then
+                  FOnRequest(RequestInfo);
 
                   CloseConnection := (Headers.Values['Connection'] = 'close') or (Pos('HTTP/1.0', FRequestLine) = 1);
 
@@ -286,9 +312,17 @@ begin
                         until BytesRead = 0;
                         FreeAndNil(Resp.Stream);
                       end;
-                      FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
-                      if Assigned(FLastResponse) then
-                        FLastResponse(FResponseLine);
+
+                      ResponseInfo.StatusCode := Resp.StatusCode;
+                      ResponseInfo.StatusText := THTTPStatus.GetStatusText( Resp.StatusCode );
+                      ResponseInfo.Body       := Resp.Body;
+                      ResponseInfo.ContentType:= Resp.ContentType;
+                      ResponseInfo.Headers.Text := ResponseHeader;
+                      ResponseInfo.Timestamp := Now;
+
+                      if Assigned(FOnResponse) then
+                        FOnResponse(ResponseInfo);
+
                       if CloseConnection then Break;
                       Continue;
                     end;
@@ -343,11 +377,22 @@ begin
                       end;
                       FreeAndNil(Resp.Stream);
                     end;
-                    FResponseLine := Format('HTTP/1.1 %d %s', [Resp.StatusCode, Resp.Body]);
+
+                    ResponseInfo.StatusCode := Resp.StatusCode;
+                    ResponseInfo.StatusText := THTTPStatus.GetStatusText( Resp.StatusCode );
+                    ResponseInfo.Body       := Resp.Body;
+                    ResponseInfo.ContentType:= Resp.ContentType;
+                    ResponseInfo.Headers.Text := ResponseHeader;
+                    ResponseInfo.Timestamp := Now;
+                    if Assigned(FOnResponse) then
+                        FOnResponse(ResponseInfo);
                   end
                   else
                   begin
-                    ResponseHeader := BuildHTTPResponse(HTTP_NOT_FOUND, 'Not Found', nil, TEXT_PLAIN, CloseConnection);
+                    Resp.StatusCode := HTTP_NOT_FOUND;
+                    Resp.Body := 'Not Found';
+                    Resp.ContentType := TEXT_PLAIN;
+                    ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, CloseConnection);
                     FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
                     UTF8Body := UTF8Encode('Not Found');
@@ -360,11 +405,17 @@ begin
                     if Length(ResponseBodyBytes) > 0 then
                       FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
 {$ENDIF}
-                    FResponseLine := Format('HTTP/1.1 %d %s', [HTTP_NOT_FOUND, Resp.Body]);
+
+                    ResponseInfo.StatusCode := Resp.StatusCode;
+                    ResponseInfo.StatusText := THTTPStatus.GetStatusText( Resp.StatusCode );
+                    ResponseInfo.Body       := Resp.Body;
+                    ResponseInfo.ContentType:= Resp.ContentType;
+                    ResponseInfo.Headers.Text := ResponseHeader;
+                    ResponseInfo.Timestamp := Now;
+                    if Assigned(FOnResponse) then
+                        FOnResponse(ResponseInfo);
                   end;
 
-                  if Assigned(FLastResponse) then
-                    FLastResponse(FResponseLine);
                   if CloseConnection then Break;
                 finally
                   if Assigned(BodyStream) then
@@ -397,6 +448,15 @@ begin
       if Assigned(Resp.Stream) then
         FreeAndNil(Resp.Stream);
 
+      if Assigned(RequestInfo.Headers) then
+        FreeAndNil(RequestInfo.Headers);
+
+      if Assigned(RequestInfo.QueryParams) then
+        FreeAndNil(RequestInfo.QueryParams);
+
+      if Assigned(ResponseInfo.Headers) then
+        FreeAndNil(ResponseInfo.Headers);
+
       if Assigned(FClientSocket) then
       begin
         FClientSocket.CloseSocket;
@@ -406,22 +466,37 @@ begin
   except
     on E: Exception do
     begin
-      ResponseHeader := BuildHTTPResponse(HTTP_INTERNAL_SERVER_ERROR, 'Internal Server Error: ' + E.Message, nil, TEXT_PLAIN, True);
+      Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
+      Resp.Body := 'Internal Server Error: ' + E.Message;
+      Resp.ContentType := TEXT_PLAIN;
+      ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, True);
       FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
-      UTF8Body := UTF8Encode('Internal Server Error: ' + E.Message);
+      UTF8Body := UTF8Encode(Resp.Body);
       SetLength(ResponseBodyBytes, Length(UTF8Body));
       Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
       if Length(ResponseBodyBytes) > 0 then
         FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
 {$ELSE}
-      ResponseBodyBytes := TEncoding.UTF8.GetBytes('Internal Server Error: ' + E.Message);
+      ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
       if Length(ResponseBodyBytes) > 0 then
         FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
 {$ENDIF}
-      FResponseLine := Format('HTTP/1.1 %d', [HTTP_INTERNAL_SERVER_ERROR]);
-      if Assigned(FLastResponse) then
-        FLastResponse(FResponseLine);
+
+        ResponseInfo.StatusCode := Resp.StatusCode;
+        ResponseInfo.StatusText := THTTPStatus.GetStatusText( Resp.StatusCode );
+        ResponseInfo.Body       := Resp.Body;
+        ResponseInfo.ContentType:= Resp.ContentType;
+        ResponseInfo.Headers.Text := ResponseHeader;
+        ResponseInfo.Timestamp := Now;
+        FCriticalSection.Enter;
+        try
+          if Assigned(FOnResponse) then
+            FOnResponse(ResponseInfo);
+        finally
+          FCriticalSection.Leave;
+        end;
+
     end;
   end;
 end;
