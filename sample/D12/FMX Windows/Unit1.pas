@@ -30,9 +30,11 @@ type
     Layout2: TLayout;
     Label2: TLabel;
     edtTimeOut: TEdit;
+    btnClearLog: TButton;
     procedure btnSynaClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
+    procedure btnClearLogClick(Sender: TObject);
   private
     { Private declarations }
     ServerThread: TBadger;
@@ -55,6 +57,14 @@ uses
 
 {$R *.fmx}
 
+procedure TForm1.btnClearLogClick(Sender: TObject);
+begin
+   TThread.Synchronize(nil, procedure
+    begin
+      Memo1.Lines.Clear;
+    end);
+end;
+
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
   if btnSyna.Tag = 0 then
@@ -69,11 +79,11 @@ begin
       ServerThread.AddMiddleware(BasicAuth.Check);
 
     ServerThread.RouteManager
-      .&Register('/upload', TSampleRouteManager.upLoad)
-      .&Register('/download', TSampleRouteManager.downLoad)
-      .&Register('/rota1', TSampleRouteManager.rota1)
-      .&Register('/ping', TSampleRouteManager.ping)
-      .&Register('/AtuImage', TSampleRouteManager.AtuImage);
+      .&Add('/upload', TSampleRouteManager.upLoad)
+      .&Add('/download', TSampleRouteManager.downLoad)
+      .&Add('/rota1', TSampleRouteManager.rota1)
+      .&Add('/ping', TSampleRouteManager.ping)
+      .&Add('/AtuImage', TSampleRouteManager.AtuImage);
 
     ServerThread.Start; // Inicia o servidor
     edtPorta.Enabled := False;

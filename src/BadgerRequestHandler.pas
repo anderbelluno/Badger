@@ -332,12 +332,12 @@ begin
                   if not FRouteManager.FRoutes.TryGetValue(FURI.ToLower, LRoute) then
                     LRoute := nil;
 {$ELSE}
-                  Index := FRouteManager.FRoutes.IndexOf(FURI.ToLower);
+                  Index := FRouteManager.FRoutes.IndexOf( LowerCase( FURI ));
                   if Index <> -1 then
                     LRoute := FRouteManager.FRoutes.Objects[Index]
                   else
                     LRoute := nil;
-{$ENDIF}
+{$IFEND}
 
                   if Assigned(LRoute) then
                   begin

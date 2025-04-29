@@ -4,7 +4,8 @@ interface
 
 uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs,  Badger, BadgerBasicAuth, StdCtrls, ExtCtrls;
+  Dialogs,  Badger, BadgerBasicAuth, BadgerTypes, StdCtrls, ExtCtrls,
+  SampleRouteManager;
 
 type
   TForm1 = class(TForm)
@@ -19,9 +20,11 @@ type
     Panel1: TPanel;
     Label2: TLabel;
     edtTimeOut: TEdit;
+    btnClearLog: TButton;
     procedure btnSynaClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
+    procedure btnClearLogClick(Sender: TObject);
   private
     { Private declarations }
     ServerThread: TBadger;
@@ -29,8 +32,8 @@ type
   public
     { Public declarations }
 
-    procedure onLastRequest(Value : String);
-    procedure onLastResponse(Value : String);
+    procedure HandleRequest(const RequestInfo: TRequestInfo);
+    procedure HandleResponse(const ResponseInfo: TResponseInfo);
   end;
 
 var
@@ -48,10 +51,18 @@ begin
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
     ServerThread.NonBlockMode := CBxNonBlockMode.Checked;
-    ServerThread.OnLastRequest := onLastRequest;
-    ServerThread.OnLastResponse := onLastResponse;
+    ServerThread.OnRequest := HandleRequest;
+    ServerThread.OnResponse := HandleResponse;
     if RadioGroup1.ItemIndex = 1 then
       ServerThread.AddMiddleware(BasicAuth.Check);
+
+       ServerThread.RouteManager
+      .Add('/upload', TSampleRouteManager.upLoad)
+      .Add('/download', TSampleRouteManager.downLoad)
+      .Add('/rota1', TSampleRouteManager.rota1)
+      .Add('/ping', TSampleRouteManager.ping)
+      .Add('/AtuImage', TSampleRouteManager.AtuImage);
+
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
@@ -88,16 +99,33 @@ if Assigned(ServerThread) then
   FreeAndNil(BasicAuth);
 end;
 
-procedure TForm1.onLastRequest(Value: String);
+procedure TForm1.HandleRequest(const RequestInfo: TRequestInfo);
 begin
-if rdLog.Checked then
-    Memo1.Lines.Add('Client Request: ' + #13#10 + Value + #13#10);
+  if rdLog.Checked then
+    begin
+      Memo1.Lines.Add('Client Request: ' + #13#10 + RequestInfo.RequestLine + #13#10);
+      Memo1.Lines.Add('Remote Request IP: ' + #13#10 + RequestInfo.RemoteIP + #13#10);
+      Memo1.SelStart := Length(Memo1.Text);
+      Memo1.SelLength := 0;
+      Memo1.Perform(EM_SCROLLCARET, 0, 0);
+    end;
 end;
 
-procedure TForm1.onLastResponse(Value: String);
+procedure TForm1.HandleResponse(const ResponseInfo: TResponseInfo);
 begin
-   if rdLog.Checked then
-    Memo1.Lines.Add('Server Response: ' + #13#10 + Value + #13#10);
+  if rdLog.Checked then
+    begin
+      Memo1.Lines.Add('Server Response: ' + #13#10 + IntToStr(ResponseInfo.StatusCode) + ' ' + ResponseInfo.Body + #13#10
+      + ' ' + DateTimeToStr(ResponseInfo.Timestamp) + #13#10);
+      Memo1.SelStart := Length(Memo1.Text);
+      Memo1.SelLength := 0;
+      Memo1.Perform(EM_SCROLLCARET, 0, 0);
+    end;
+end;
+
+procedure TForm1.btnClearLogClick(Sender: TObject);
+begin
+   Memo1.Lines.Clear;
 end;
 
 end.
