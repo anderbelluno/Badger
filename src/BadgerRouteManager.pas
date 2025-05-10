@@ -8,7 +8,7 @@ uses
 
 {$IF CompilerVersion >= 20} // Delphi 2009+
   System.Generics.Collections,
-{$IFEND}
+{$ENDIF}
 
   BadgerMethods,
   BadgerTypes,
@@ -18,25 +18,19 @@ type
   TRouteManager = class(TObject)
   private
   public
-    FRoutes: {$IF CompilerVersion >= 20}TDictionary<string, TObject>{$ELSE}TStringList{$IFEND};
+    FRoutes: {$IF CompilerVersion >= 20}TDictionary<string, TObject>{$ELSE}TStringList{$ENDIF};
     constructor Create;
     destructor Destroy; override;
-    {$IF CompilerVersion >= 20}
-      function &Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-    {$ELSE}
-      function Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-    {$IFEND}
+
+    function &Register(const Route: string; Callback: TRoutingCallback): TRouteManager;
     function Unregister(const Route: string): TRouteManager;
   end;
 
 implementation
 
 { TRouteManager }
-{$IF CompilerVersion >= 20}
-  function TRouteManager.&Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-{$ELSE}
-  function TRouteManager.Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-{$IFEND}
+
+function TRouteManager.&Register(const Route: string; Callback: TRoutingCallback): TRouteManager;
 var
   Method: TMethod;
 begin
@@ -47,29 +41,29 @@ begin
   FRoutes.AddOrSetValue(Route.ToLower, TObject(Method.Code));
 {$ELSE}
   FRoutes.AddObject(Route, TObject(Method.Code));
-{$IFEND}
+{$ENDIF}
 end;
 
 function TRouteManager.Unregister(const Route: string): TRouteManager;
 {$IF CompilerVersion < 20}
 var
   LIndex: Integer;
-{$IFEND}
+{$ENDIF}
 begin
   Result := Self;
 {$IF CompilerVersion >= 20}
   if FRoutes.ContainsKey(Route.ToLower) then
     FRoutes.Remove(Route.ToLower);
 {$ELSE}
-  LIndex := FRoutes.IndexOf( LowerCase(Route) );
+  LIndex := FRoutes.IndexOf(Route.ToLower);
   if LIndex <> -1 then
-    FRoutes.Delete(LIndex);
-{$IFEND}
+    FRoutes..Delete(LIndex);
+{$ENDIF}
 end;
 
 constructor TRouteManager.Create;
 begin
-  FRoutes := {$IF CompilerVersion >= 20}TDictionary<string, TObject>.Create{$ELSE}TStringList.Create{$IFEND};
+  FRoutes := {$IF CompilerVersion >= 20}TDictionary<string, TObject>.Create{$ELSE}TStringList.Create{$ENDIF};
 end;
 
 destructor TRouteManager.Destroy;

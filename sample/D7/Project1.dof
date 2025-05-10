@@ -94,7 +94,7 @@ OutputDir=
 UnitOutputDir=
 PackageDLLOutputDir=
 PackageDCPOutputDir=
-SearchPath=..\..\src;..\..\src\Auth;..\..\ThirdParty\Synapse
+SearchPath=
 Packages=vcl;rtl;vclx;inet;xmlrtl;vclie;inetdbbde;inetdbxpress;dbrtl;dsnap;dsnapcon;vcldb;soaprtl;VclSmp;dbexpress;dbxcds;inetdb;bdertl;vcldbx;webdsnap;websnap;adortl;ibxpress;teeui;teedb;tee;dss;visualclx;visualdbclx;vclactnband;vclshlctrls;IntrawebDB_50_70;Intraweb_50_70;Rave50CLX;Rave50VCL;dclOfficeXP;ZPlain;ZCore;ZParseSql;gtPDFKitD70ProP;IndyCore70;IndySystem70;IndyProtocols70;rtcSDK;Oauth2Google
 Conditionals=
 DebugSourceDirs=
@@ -134,10 +134,3 @@ OriginalFilename=
 ProductName=
 ProductVersion=1.0.0.0
 Comments=
-[HistoryLists\hlUnitAliases]
-Count=1
-Item0=WinTypes=Windows;WinProcs=Windows;DbiTypes=BDE;DbiProcs=BDE;DbiErrs=BDE;
-[HistoryLists\hlSearchPath]
-Count=2
-Item0=..\..\src;..\..\src\Auth;..\..\ThirdParty\Synapse
-Item1=..\..\..\src;..\..\..\src\Auth;..\..\..\ThirdParty\Synapse

@@ -62,11 +62,11 @@ begin
   FServerThread.Timeout := 10000;
 
   FServerThread.RouteManager
-    .&Add('/upload', TSampleRouteManager.upLoad)
-    .&Add('/download', TSampleRouteManager.downLoad)
-    .&Add('/rota1', TSampleRouteManager.rota1)
-    .&Add('/ping', TSampleRouteManager.ping)
-    .&Add('/AtuImage', TSampleRouteManager.AtuImage);
+    .&Register('/upload', TSampleRouteManager.upLoad)
+    .&Register('/download', TSampleRouteManager.downLoad)
+    .&Register('/rota1', TSampleRouteManager.rota1)
+    .&Register('/ping', TSampleRouteManager.ping)
+    .&Register('/AtuImage', TSampleRouteManager.AtuImage);
 
   FServerThread.Start;
 end;

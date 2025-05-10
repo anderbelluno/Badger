@@ -108,13 +108,5 @@ object Form1: TForm1
       TabOrder = 5
       Text = 'Request Log'
     end
-    object btnClearLog: TButton
-      Position.X = 8.000000000000000000
-      Position.Y = 128.000000000000000000
-      TabOrder = 10
-      Text = 'Clear Log'
-      TextSettings.Trimming = None
-      OnClick = btnClearLogClick
-    end
   end
 end
