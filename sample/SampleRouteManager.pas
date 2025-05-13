@@ -8,17 +8,21 @@ uses
   BadgerHttpStatus,
 
   Classes,
-  SysUtils;
+  SysUtils, superobject, BadgerAuthJWT;
 
 type
   TSampleRouteManager = class(TObject)
   private
+
   public
+    class var FJWT : TBadgerJWTAuth;
     class procedure upLoad(Request: THTTPRequest; out Response: THTTPResponse);
     class procedure downLoad(Request: THTTPRequest; out Response: THTTPResponse);
     class procedure rota1(Request: THTTPRequest; out Response: THTTPResponse);
     class procedure ping(Request: THTTPRequest; out Response: THTTPResponse);
     class procedure AtuImage(Request: THTTPRequest; out Response: THTTPResponse);
+    class procedure Login(Request: THTTPRequest; out Response: THTTPResponse);
+
   end;
 
 implementation
@@ -47,6 +51,33 @@ begin
     Response.Stream := SynClasses.fDownloadStream(FileName, Response.ContentType);
   finally
     FreeAndNil(SynClasses);
+  end;
+end;
+
+class procedure TSampleRouteManager.Login(Request: THTTPRequest; out Response: THTTPResponse);
+var
+  LJSON: ISuperObject;
+  LUser, LPass, LToken: string;
+begin
+  LJSON := SO(Request.Body);
+  LUser := LJSON.S['username'];
+  LPass := LJSON.S['password'];
+
+  // Aqui você valida usuário e senha (exemplo simples)
+  if (LUser = 'usuario') and (LPass = 'senha123') then
+  begin
+    // Gera o token JWT usando JWTAuth (instância global ou passada por parâmetro)
+    LToken := FJWT.GenerateToken(LUser, 'user_role');
+
+    Response.StatusCode := 200;
+    Response.ContentType := APPLICATION_JSON;
+    Response.Body := Format('{"access_token":"%s"}', [LToken]);
+  end
+  else
+  begin
+    Response.StatusCode := 401;
+    Response.ContentType := APPLICATION_JSON;
+    Response.Body := '{"error":"Credenciais inválidas"}';
   end;
 end;
 
