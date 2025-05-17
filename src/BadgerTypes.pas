@@ -14,6 +14,8 @@ type
     QueryParams: TStringList;
     BodyStream: TMemoryStream;
     FRemoteIP: String;
+    UserID   : String;
+    UserRole : String;
   end;
 
   THTTPResponse = record

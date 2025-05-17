@@ -1,9 +1,9 @@
-Ôªøunit BadgerAuthJWT;
+unit BadgerAuthJWT;
 
 interface
 
 uses
-  SysUtils, Classes, Badger, BadgerTypes, BadgerHttpStatus, BadgerJWTClaims, BadgerJWTUtils, EncdDecd, superobject;
+  SysUtils, Classes, Badger, BadgerTypes, BadgerHttpStatus, BadgerJWTClaims, BadgerJWTUtils, superobject;
 
 type
   TBadgerJWTAuth = class
@@ -46,7 +46,7 @@ var
   LClaims: TBadgerJWTClaims;
 begin
   LHeader := '{"alg":"HS256","typ":"JWT"}';
-  LHeader := EncodeString(LHeader);
+  LHeader := CustomEncodeBase64(LHeader, True); // URL-safe
 
   LClaims := TBadgerJWTClaims.Create;
   try
@@ -55,8 +55,9 @@ begin
     LClaims.Iss := DateTimeToUnix(Now);
     LClaims.Exp := DateTimeToUnix(Now + AExpiresInHours / 24);
     LPayload := LClaims.ToJSON.AsJSON;
-    LPayload := EncodeString(LPayload);
-    Result := Trim( LHeader + '.' + LPayload + '.' + CreateSignature(LHeader, LPayload, FSecret) );
+    LPayload := CustomEncodeBase64(LPayload, True); // URL-safe
+
+    Result := LHeader + '.' + LPayload + '.' + CreateSignature(LHeader, LPayload, FSecret);
 
     if FStoragePath <> '' then
       SaveToken(AUserID, Result, FStoragePath);
@@ -70,29 +71,54 @@ var
   LParts: TStringList;
   LHeader, LPayload, LSignature, LExpectedSignature: string;
   LJSON: ISuperObject;
+  LogStream: TFileStream;
+  LogText: string;
+  FToken : string;
 begin
+  if (AToken = '') or (Pos('.', AToken) = 0) then
+    raise Exception.Create('Token inv·lido: formato incorreto');
+
   LParts := TStringList.Create;
   try
     ExtractStrings(['.'], [], PChar(AToken), LParts);
     if LParts.Count <> 3 then
-      raise Exception.Create('Token inv√°lido');
+      raise Exception.Create('Token inv·lido: deve conter 3 partes');
     LHeader := LParts[0];
     LPayload := LParts[1];
     LSignature := LParts[2];
-    LExpectedSignature := CreateSignature(LHeader, LPayload, FSecret);
+
+    LogStream := TFileStream.Create('log.txt', fmCreate or fmOpenWrite);
+    try
+      LogText := 'Token: ' + AToken + #13#10 +
+                 'Header: ' + LHeader + #13#10 +
+                 'Payload: ' + LPayload + #13#10 +
+                 'Signature: ' + LSignature + #13#10 +
+                 'Chave secreta: ' + FSecret + #13#10;
+      LogStream.WriteBuffer(PChar(LogText)^, Length(LogText));
+
+      LExpectedSignature := CreateSignature(LHeader, LPayload, FSecret);
+
+      LogText := 'Expected Signature: ' + LExpectedSignature + #13#10;
+      LogStream.WriteBuffer(PChar(LogText)^, Length(LogText));
+    finally
+      LogStream.Free;
+    end;
+
     if LSignature <> LExpectedSignature then
-      raise Exception.Create('Assinatura inv√°lida');
-    LJSON := SO(DecodeString(LPayload));
+      raise Exception.Create('Assinatura inv·lida');
+
+    LJSON := SO(CustomDecodeBase64(LPayload));
     Result := TBadgerJWTClaims.FromJSON(LJSON);
     if (Result.Exp > 0) and (DateTimeToUnix(Now) > Result.Exp) then
     begin
       Result.Free;
       raise Exception.Create('Token expirado');
     end;
-    if (FStoragePath <> '') and (LoadToken(Result.UserID, FStoragePath) <> AToken) then
+    FToken := LoadToken(Result.UserID, FStoragePath);
+    if (FStoragePath <> '') and (FToken <> AToken) then
     begin
       Result.Free;
-      raise Exception.Create('Token n√£o encontrado');
+      raise Exception.Create('Token n„o encontrado');
     end;
   finally
     LParts.Free;
@@ -122,9 +148,9 @@ begin
 
   LToken := '';
   for I := 0 to Request.Headers.Count - 1 do
-    if Pos('Authorization:', Request.Headers[I]) > 0 then
+    if Pos('Authorization=', Request.Headers[I]) > 0 then
     begin
-      LToken := Trim(Copy(Request.Headers[I], Pos(':', Request.Headers[I]) + 1, Length(Request.Headers[I])));
+      LToken := Trim(Copy(Request.Headers[I], Pos('=', Request.Headers[I]) + 1, Length(Request.Headers[I])));
       if Pos('Bearer ', LToken) = 1 then
         LToken := Copy(LToken, 8, MaxInt);
       Break;
@@ -133,8 +159,7 @@ begin
   if LToken = '' then
   begin
     Response.StatusCode := HTTP_UNAUTHORIZED;
-    //Response.StatusText := 'Unauthorized';
-    Response.Body := '{"error":"Token n√£o fornecido"}';
+    Response.Body := '{"error":"Token n„o fornecido"}';
     Response.ContentType := APPLICATION_JSON;
     Result := False;
     Exit;
@@ -153,7 +178,6 @@ begin
     on E: Exception do
     begin
       Response.StatusCode := HTTP_UNAUTHORIZED;
-      //Response.StatusText := 'Unauthorized';
       Response.Body := '{"error":"' + E.Message + '"}';
       Response.ContentType := APPLICATION_JSON;
       Result := False;
@@ -172,4 +196,3 @@ begin
 end;
 
 end.
-

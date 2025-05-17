@@ -1,11 +1,13 @@
-﻿unit BadgerJWTUtils;
+unit BadgerJWTUtils;
 
 interface
 
 uses
-  SysUtils, Classes, EncdDecd;
+  SysUtils, Classes;
 
 function CreateSignature(const AHeader, APayload, ASecret: string): string;
+function CustomEncodeBase64(const Input: string; URLSafe: Boolean): string;
+function CustomDecodeBase64(const Input: string): string;
 procedure SaveToken(const AUserID, AToken, AStoragePath: string);
 function LoadToken(const AUserID, AStoragePath: string): string;
 function DateTimeToUnix(ADateTime: TDateTime): Int64;
@@ -17,6 +19,15 @@ type
   TDWordArray = array[0..63] of LongWord;
 
 const
+  // Alfabeto Base64
+  Base64Alphabet: array[0..63] of Char = (
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+    'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'
+  );
+
   // Constantes para SHA256
   K: array[0..63] of LongWord = (
     $428A2F98, $71374491, $B5C0FBCF, $E9B5DBA5, $3956C25B, $59F111F1, $923F82A4, $AB1C5ED5,
@@ -41,13 +52,24 @@ procedure SaveToken(const AUserID, AToken, AStoragePath: string);
 var
   LFileName: string;
   FS: TFileStream;
+  {$IFDEF UNICODE}
+    Buffer: TArray<Byte>;
+    {$ELSE}
+  Buffer: TBytes;
+   {$ENDIF}
 begin
   if AStoragePath = '' then Exit;
   ForceDirectories(AStoragePath);
   LFileName := IncludeTrailingPathDelimiter(AStoragePath) + AUserID + '.token';
   FS := TFileStream.Create(LFileName, fmCreate);
   try
-    FS.WriteBuffer(Pointer(AToken)^, Length(AToken));
+    {$IFDEF UNICODE}
+    Buffer := TEncoding.ANSI.GetBytes(AToken);
+    {$ELSE}
+    Buffer := TBytes(AToken);
+    {$ENDIF}
+    if Length(Buffer) > 0 then
+      FS.WriteBuffer(Buffer[0], Length(Buffer));
   finally
     FS.Free;
   end;
@@ -57,26 +79,28 @@ function LoadToken(const AUserID, AStoragePath: string): string;
 var
   LFileName: string;
   FS: TFileStream;
+  Buffer: TBytes;
 begin
   Result := '';
   if AStoragePath = '' then Exit;
   LFileName := IncludeTrailingPathDelimiter(AStoragePath) + AUserID + '.token';
   if not FileExists(LFileName) then Exit;
+
   FS := TFileStream.Create(LFileName, fmOpenRead or fmShareDenyNone);
   try
-    SetLength(Result, FS.Size);
-    FS.ReadBuffer(Pointer(Result)^, FS.Size);
+    if FS.Size > 0 then
+    begin
+      SetLength(Buffer, FS.Size);
+      FS.ReadBuffer(Buffer[0], FS.Size);
+      {$IFDEF UNICODE}
+      Result := TEncoding.ANSI.GetString(Buffer);
+      {$ELSE}
+      SetString(Result, PAnsiChar(@Buffer[0]), Length(Buffer));
+      {$ENDIF}
+    end;
   finally
     FS.Free;
   end;
-end;
-
-function ToBase64URL(const S: string): string;
-begin
-  Result := StringReplace(EncodeString(S), '+', '-', [rfReplaceAll]);
-  Result := StringReplace(Result, '/', '_', [rfReplaceAll]);
-  Result := StringReplace(Result, '=', '', [rfReplaceAll]);
-  Result := StringReplace(Result, CRLF, '', [rfReplaceAll]);
 end;
 
 function RotateRight(Value: LongWord; Bits: Integer): LongWord;
@@ -111,16 +135,12 @@ end;
 
 function Gamma0(x: LongWord): LongWord;
 begin
-  Result := (RotateRight(x, 7) and $FFFFFFFF) xor
-            (RotateRight(x, 18) and $FFFFFFFF) xor
-            ((x shr 3) and $FFFFFFFF);
+  Result := RotateRight(x, 7) xor RotateRight(x, 18) xor (x shr 3);
 end;
 
 function Gamma1(x: LongWord): LongWord;
 begin
-  Result := (RotateRight(x, 17) and $FFFFFFFF) xor
-            (RotateRight(x, 19) and $FFFFFFFF) xor
-            ((x shr 10) and $FFFFFFFF);
+  Result := RotateRight(x, 17) xor RotateRight(x, 19) xor (x shr 10);
 end;
 
 function SHA256(const Data: TBytes): TBytes;
@@ -288,17 +308,135 @@ begin
   Result := SHA256(LMessage);
 end;
 
+function CustomEncodeBase64(const Input: string; URLSafe: Boolean): string;
+var
+  Bytes: TBytes;
+  I, Len, Pos: Integer;
+  OutLen: Integer;
+  Buffer: array[0..3] of Char;
+  RemainingBytes: Integer;
+  TempIndex: Integer;
+begin
+  SetLength(Bytes, Length(Input));
+  for I := 1 to Length(Input) do
+    Bytes[I - 1] := Byte(AnsiChar(Input[I]));
+
+  Len := Length(Bytes);
+  OutLen := ((Len + 2) div 3) * 4;
+  SetLength(Result, OutLen);
+  Pos := 1;
+  I := 0;
+
+  while I < Len do
+  begin
+    RemainingBytes := Len - I;
+
+    Buffer[0] := Base64Alphabet[(Bytes[I] shr 2) and 63];
+
+    if RemainingBytes > 1 then
+      Buffer[1] := Base64Alphabet[((Bytes[I] shl 4) or ((Bytes[I + 1] shr 4) and 15)) and 63]
+    else
+      Buffer[1] := Base64Alphabet[(Bytes[I] shl 4) and 63];
+
+    if RemainingBytes > 1 then
+    begin
+      TempIndex := (Bytes[I + 1] shl 2) and 63;
+      if RemainingBytes > 2 then
+        TempIndex := TempIndex or ((Bytes[I + 2] shr 6) and 3);
+      Buffer[2] := Base64Alphabet[TempIndex and 63];
+    end
+    else
+      Buffer[2] := '=';
+
+    if RemainingBytes > 2 then
+      Buffer[3] := Base64Alphabet[Bytes[I + 2] and 63]
+    else
+      Buffer[3] := '=';
+
+    Result[Pos] := Buffer[0];
+    Result[Pos + 1] := Buffer[1];
+    Result[Pos + 2] := Buffer[2];
+    Result[Pos + 3] := Buffer[3];
+
+    Inc(I, 3);
+    Inc(Pos, 4);
+  end;
+
+  if URLSafe then
+  begin
+    Result := StringReplace(Result, '+', '-', [rfReplaceAll]);
+    Result := StringReplace(Result, '/', '_', [rfReplaceAll]);
+    Result := StringReplace(Result, '=', '', [rfReplaceAll]);
+  end;
+end;
+
+function CustomDecodeBase64(const Input: string): string;
+var
+  Bytes: TBytes;
+  I, Len, Pos: Integer;
+  InBuf: array[0..3] of Byte;
+  OutBuf: array[0..2] of Byte;
+  Base64Table: array[Char] of Byte;
+  CleanInput: string;
+begin
+  FillChar(Base64Table, SizeOf(Base64Table), 255);
+  for I := 0 to 63 do
+    Base64Table[Base64Alphabet[I]] := I;
+  Base64Table['-'] := Base64Table['+'];
+  Base64Table['_'] := Base64Table['/'];
+
+  CleanInput := StringReplace(Input, '-', '+', [rfReplaceAll]);
+  CleanInput := StringReplace(CleanInput, '_', '/', [rfReplaceAll]);
+  case Length(CleanInput) mod 4 of
+    2: CleanInput := CleanInput + '==';
+    3: CleanInput := CleanInput + '=';
+  end;
+
+  Len := Length(CleanInput);
+  SetLength(Bytes, (Len * 3) div 4);
+  Pos := 0;
+
+  I := 1;
+  while I <= Len do
+  begin
+    InBuf[0] := Base64Table[CleanInput[I]];
+    InBuf[1] := Base64Table[CleanInput[I + 1]];
+    InBuf[2] := Base64Table[CleanInput[I + 2]];
+    InBuf[3] := Base64Table[CleanInput[I + 3]];
+
+    OutBuf[0] := (InBuf[0] shl 2) or ((InBuf[1] shr 4) and 3);
+    OutBuf[1] := ((InBuf[1] shl 4) and $F0) or ((InBuf[2] shr 2) and $0F);
+    OutBuf[2] := ((InBuf[2] shl 6) and $C0) or (InBuf[3] and $3F);
+
+    Bytes[Pos] := OutBuf[0];
+    if CleanInput[I + 2] <> '=' then
+      Bytes[Pos + 1] := OutBuf[1];
+    if CleanInput[I + 3] <> '=' then
+      Bytes[Pos + 2] := OutBuf[2];
+
+    Inc(I, 4);
+    Inc(Pos, 3);
+  end;
+
+  if CleanInput[Len] = '=' then
+    Dec(Pos);
+  if CleanInput[Len - 1] = '=' then
+    Dec(Pos);
+  SetLength(Bytes, Pos);
+
+  SetLength(Result, Length(Bytes));
+  for I := 0 to Length(Bytes) - 1 do
+    Result[I + 1] := Chr(Bytes[I]);
+end;
+
 function CreateSignature(const AHeader, APayload, ASecret: string): string;
 var
-  EncHeader, EncPayload, Data: string;
+  Data: string;
   HashBytes: TBytes;
 begin
-  // Codifica header e payload em Base64URL se não estiverem já codificados
-  EncHeader := ToBase64URL(AHeader);
-  EncPayload := ToBase64URL(APayload);
-  Data := EncHeader + '.' + EncPayload;
+  Data := AHeader + '.' + APayload;
   HashBytes := HMAC_SHA256(ASecret, Data);
-  Result := ToBase64URL(EncodeString(BytesToRawString(HashBytes)));
+  Result := CustomEncodeBase64(BytesToRawString(HashBytes), True);
 end;
 
 end.

@@ -82,7 +82,7 @@ begin
      1: ServerThread.AddMiddleware(BasicAuth.Check);
      3: begin
            JWTAuth.RegisterMiddleware(ServerThread, ['/rota1', '/ping']);
-           TSampleRouteManager.FJWT := JWTAuth;
+           SampleRouteManager.FJWT := JWTAuth;
         end;
     end;
 
@@ -121,8 +121,7 @@ procedure TForm1.FormCreate(Sender: TObject);
 begin
   ServerThread := nil;
   BasicAuth := TBasicAuth.Create('andersons', 'fioris');
-  JWTAuth := TBadgerJWTAuth.Create('fiori88092821', 'c:\tokens');
-//JWTAuth := TBadgerJWTAuth.Create('minha-chave-secreta', 'c:\tokens');
+  JWTAuth := TBadgerJWTAuth.Create('fiori88092821', 'c:\tokenss');
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);

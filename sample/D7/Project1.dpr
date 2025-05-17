@@ -11,7 +11,8 @@ uses
   BadgerRouteManager in '..\..\src\BadgerRouteManager.pas',
   BadgerTypes in '..\..\src\BadgerTypes.pas',
   SyUtils in '..\..\src\SyUtils.pas',
-  BadgerRequestHandler in '..\..\src\BadgerRequestHandler.pas';
+  BadgerRequestHandler in '..\..\src\BadgerRequestHandler.pas',
+  SampleRouteManager in '..\SampleRouteManager.pas';
 
 {$R *.res}
 

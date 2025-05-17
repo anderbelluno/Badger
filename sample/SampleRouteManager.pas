@@ -15,7 +15,6 @@ type
   private
 
   public
-    class var FJWT : TBadgerJWTAuth;
     class procedure upLoad(Request: THTTPRequest; out Response: THTTPResponse);
     class procedure downLoad(Request: THTTPRequest; out Response: THTTPResponse);
     class procedure rota1(Request: THTTPRequest; out Response: THTTPResponse);
@@ -24,6 +23,8 @@ type
     class procedure Login(Request: THTTPRequest; out Response: THTTPResponse);
 
   end;
+
+  var FJWT : TBadgerJWTAuth;
 
 implementation
 
@@ -67,7 +68,7 @@ begin
   if (LUser = 'usuario') and (LPass = 'senha123') then
   begin
     // Gera o token JWT usando JWTAuth (instância global ou passada por parâmetro)
-    LToken := FJWT.GenerateToken(LUser, 'user_role');
+    LToken := FJWT.GenerateToken(LUser, 'user_role', 24);
 
     Response.StatusCode := 200;
     Response.ContentType := APPLICATION_JSON;

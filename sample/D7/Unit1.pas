@@ -4,7 +4,8 @@ interface
 
 uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs,  Badger, BadgerBasicAuth, StdCtrls, ExtCtrls;
+  Dialogs,  Badger, BadgerBasicAuth, BadgerAuthJWT, BadgerTypes, SampleRouteManager, ExtCtrls,
+  StdCtrls;
 
 type
   TForm1 = class(TForm)
@@ -19,18 +20,21 @@ type
     Panel1: TPanel;
     Label2: TLabel;
     edtTimeOut: TEdit;
+    btnClearLog: TButton;
     procedure btnSynaClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
+    procedure btnClearLogClick(Sender: TObject);
   private
     { Private declarations }
     ServerThread: TBadger;
     BasicAuth: TBasicAuth;
+    JWTAuth: TBadgerJWTAuth;
   public
     { Public declarations }
 
-    procedure onLastRequest(Value : String);
-    procedure onLastResponse(Value : String);
+    procedure HandleRequest(const RequestInfo: TRequestInfo);
+    procedure HandleResponse(const ResponseInfo: TResponseInfo);
   end;
 
 var
@@ -48,10 +52,25 @@ begin
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
     ServerThread.NonBlockMode := CBxNonBlockMode.Checked;
-    ServerThread.OnLastRequest := onLastRequest;
-    ServerThread.OnLastResponse := onLastResponse;
-    if RadioGroup1.ItemIndex = 1 then
-      ServerThread.AddMiddleware(BasicAuth.Check);
+    ServerThread.OnRequest := HandleRequest;
+    ServerThread.OnResponse := HandleResponse;
+
+   case RadioGroup1.ItemIndex of
+     1: ServerThread.AddMiddleware(BasicAuth.Check);
+     3: begin
+           JWTAuth.RegisterMiddleware(ServerThread, ['/rota1', '/ping']);
+           SampleRouteManager.FJWT := JWTAuth;
+        end;
+    end;
+
+    ServerThread.RouteManager
+      .Add('/upload', TSampleRouteManager.upLoad)
+      .Add('/download', TSampleRouteManager.downLoad)
+      .Add('/rota1', TSampleRouteManager.rota1)
+      .Add('/ping', TSampleRouteManager.ping)
+      .Add('/AtuImage', TSampleRouteManager.AtuImage)
+      .Add('/Login',TSampleRouteManager.Login);
+
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
@@ -79,6 +98,7 @@ procedure TForm1.FormCreate(Sender: TObject);
 begin
   ServerThread := nil;
   BasicAuth := TBasicAuth.Create('andersons', 'fioris');
+  JWTAuth := TBadgerJWTAuth.Create('fiori88092821', 'c:\tokens');
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
@@ -86,18 +106,28 @@ begin
 if Assigned(ServerThread) then
     ServerThread.Stop;
   FreeAndNil(BasicAuth);
+  FreeAndNil(JWTAuth);
 end;
 
-procedure TForm1.onLastRequest(Value: String);
+procedure TForm1.HandleRequest(const RequestInfo: TRequestInfo);
 begin
 if rdLog.Checked then
-    Memo1.Lines.Add('Client Request: ' + #13#10 + Value + #13#10);
+   Memo1.Lines.Add('Client Request: ' + #13#10 + RequestInfo.RequestLine + #13#10);
+      Memo1.Lines.Add('Remote Request IP: ' + #13#10 + RequestInfo.RemoteIP + #13#10);
+      memo1.Perform(WM_VSCROLL, SB_LINEDOWN, 0);
 end;
 
-procedure TForm1.onLastResponse(Value: String);
+procedure TForm1.HandleResponse(const ResponseInfo: TResponseInfo);
 begin
    if rdLog.Checked then
-    Memo1.Lines.Add('Server Response: ' + #13#10 + Value + #13#10);
+     Memo1.Lines.Add('Server Response: ' + #13#10 + IntToStr(ResponseInfo.StatusCode) + ' ' + ResponseInfo.Body + #13#10
+      + ' ' + DateTimeToStr(ResponseInfo.Timestamp) + #13#10);
+      memo1.Perform(WM_VSCROLL, SB_LINEDOWN, 0);
+end;
+
+procedure TForm1.btnClearLogClick(Sender: TObject);
+begin
+  Memo1.Lines.Clear;
 end;
 
 end.
