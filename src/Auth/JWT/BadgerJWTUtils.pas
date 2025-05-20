@@ -95,11 +95,11 @@ begin
     begin
       SetLength(Buffer, FS.Size);
       FS.ReadBuffer(Buffer[0], FS.Size);
-      {$IFDEF UNICODE}
+      {$IF CompilerVersion >= 20}
       Result := TEncoding.ANSI.GetString(Buffer);
       {$ELSE}
       SetString(Result, PAnsiChar(@Buffer[0]), Length(Buffer));
-      {$ENDIF}
+      {$IFEND}
     end;
   finally
     FS.Free;
@@ -124,11 +124,11 @@ begin
     DeleteFile(LFileName);
   FS := TFileStream.Create(LFileName, fmCreate);
   try
-{$IFDEF UNICODE}
+{$IF CompilerVersion >= 20}
     Buffer := TEncoding.ANSI.GetBytes(AToken);
 {$ELSE}
     Buffer := TBytes(AToken);
-{$ENDIF}
+{$IFEND}
     if Length(Buffer) > 0 then
       FS.WriteBuffer(Buffer[0], Length(Buffer));
   finally
@@ -156,11 +156,11 @@ begin
     begin
       SetLength(Buffer, FS.Size);
       FS.ReadBuffer(Buffer[0], FS.Size);
-      {$IFDEF UNICODE}
+      {$IF CompilerVersion >= 20}
       Result := TEncoding.ANSI.GetString(Buffer);
       {$ELSE}
       SetString(Result, PAnsiChar(@Buffer[0]), Length(Buffer));
-      {$ENDIF}
+      {$IFEND}
     end;
   finally
     FS.Free;

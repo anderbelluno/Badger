@@ -150,7 +150,7 @@ begin
     TThread.Synchronize(nil, procedure
     begin
       Memo1.Lines.Add('Server Response: ' + #13#10 + ResponseInfo.StatusCode.ToString + ' ' + ResponseInfo.Body + #13#10
-      + ' ' + DateTimeToStr(ResponseInfo.Timestamp) + #13#10);
+      + DateTimeToStr(ResponseInfo.Timestamp) + #13#10);
       Memo1.GoToTextEnd;
     end);
 end;

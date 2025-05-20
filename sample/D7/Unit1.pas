@@ -122,7 +122,7 @@ procedure TForm1.HandleResponse(const ResponseInfo: TResponseInfo);
 begin
    if rdLog.Checked then
      Memo1.Lines.Add('Server Response: ' + #13#10 + IntToStr(ResponseInfo.StatusCode) + ' ' + ResponseInfo.Body + #13#10
-      + ' ' + DateTimeToStr(ResponseInfo.Timestamp) + #13#10);
+      + DateTimeToStr(ResponseInfo.Timestamp) + #13#10);
       memo1.Perform(WM_VSCROLL, SB_LINEDOWN, 0);
 end;
 
