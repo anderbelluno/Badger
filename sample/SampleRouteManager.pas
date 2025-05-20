@@ -21,16 +21,18 @@ type
     class procedure ping(Request: THTTPRequest; out Response: THTTPResponse);
     class procedure AtuImage(Request: THTTPRequest; out Response: THTTPResponse);
     class procedure Login(Request: THTTPRequest; out Response: THTTPResponse);
-
+    class procedure RefreshToken(Request: THTTPRequest; out Response: THTTPResponse);
   end;
 
-  var FJWT : TBadgerJWTAuth;
+var
+  FJWT: TBadgerJWTAuth;
 
 implementation
 
 { TSampleRouteManager }
 
-class procedure TSampleRouteManager.downLoad(Request: THTTPRequest; out Response: THTTPResponse);
+class procedure TSampleRouteManager.downLoad(Request: THTTPRequest;
+  out Response: THTTPResponse);
 var
   SynClasses: TBadgerMethods;
   FileName: string;
@@ -43,36 +45,38 @@ begin
     begin
       if Pos('file=', Request.QueryParams[I]) = 1 then
       begin
-        FileName := 'D:\GoogleDrive\Camera\' + Copy(Request.QueryParams[I], 6, Length(Request.QueryParams[I]));
+        FileName := 'D:\GoogleDrive\Camera\' + Copy(Request.QueryParams[I], 6,
+          Length(Request.QueryParams[I]));
         Break;
       end;
     end;
 
     Response.StatusCode := HTTP_OK;
-    Response.Stream := SynClasses.fDownloadStream(FileName, Response.ContentType);
+    Response.Stream := SynClasses.fDownloadStream(FileName,
+      Response.ContentType);
   finally
     FreeAndNil(SynClasses);
   end;
 end;
 
-class procedure TSampleRouteManager.Login(Request: THTTPRequest; out Response: THTTPResponse);
+class procedure TSampleRouteManager.Login(Request: THTTPRequest;
+  out Response: THTTPResponse);
 var
-  LJSON: ISuperObject;
-  LUser, LPass, LToken: string;
+  LJSON, LResponseJSON: ISuperObject;
+  LUser, LPass: string;
 begin
   LJSON := SO(Request.Body);
   LUser := LJSON.S['username'];
   LPass := LJSON.S['password'];
 
-  // Aqui você valida usuário e senha (exemplo simples)
   if (LUser = 'usuario') and (LPass = 'senha123') then
   begin
-    // Gera o token JWT usando JWTAuth (instância global ou passada por parâmetro)
-    LToken := FJWT.GenerateToken(LUser, 'user_role', 24);
+
+    LResponseJSON := SO(FJWT.GenerateToken(LUser, 'user_role', 24));
 
     Response.StatusCode := 200;
     Response.ContentType := APPLICATION_JSON;
-    Response.Body := Format('{"access_token":"%s"}', [LToken]);
+    Response.Body := LResponseJSON.AsJSON;
   end
   else
   begin
@@ -82,13 +86,15 @@ begin
   end;
 end;
 
-class procedure TSampleRouteManager.rota1(Request: THTTPRequest; out Response: THTTPResponse);
+class procedure TSampleRouteManager.rota1(Request: THTTPRequest;
+  out Response: THTTPResponse);
 begin
   Response.StatusCode := HTTP_OK;
   Response.Body := UTF8Encode('Rota1 executada');
 end;
 
-class procedure TSampleRouteManager.upLoad(Request: THTTPRequest; out Response: THTTPResponse);
+class procedure TSampleRouteManager.upLoad(Request: THTTPRequest;
+  out Response: THTTPResponse);
 var
   SynClasses: TBadgerMethods;
 begin
@@ -102,13 +108,53 @@ begin
   end;
 end;
 
-class procedure TSampleRouteManager.ping(Request: THTTPRequest;  out Response: THTTPResponse);
+class procedure TSampleRouteManager.ping(Request: THTTPRequest;
+  out Response: THTTPResponse);
 begin
   Response.StatusCode := HTTP_OK;
   Response.Body := UTF8Encode('Pong');
 end;
 
-class procedure TSampleRouteManager.AtuImage(Request: THTTPRequest; out Response: THTTPResponse);
+class procedure TSampleRouteManager.RefreshToken(Request: THTTPRequest;
+  out Response: THTTPResponse);
+var
+  LRefreshToken: string;
+  I: Integer;
+begin
+  LRefreshToken := '';
+  for I := 0 to Request.Headers.Count - 1 do
+    if Pos('Authorization=', Request.Headers[I]) > 0 then
+    begin
+      LRefreshToken := Trim(Copy(Request.Headers[I], Pos('=', Request.Headers[I]) + 1, Length(Request.Headers[I])));
+      if Pos('Bearer ', LRefreshToken) = 1 then
+        LRefreshToken := Copy(LRefreshToken, 8, MaxInt);
+      Break;
+    end;
+
+  if LRefreshToken = '' then
+  begin
+    Response.StatusCode := HTTP_UNAUTHORIZED;
+    Response.Body := '{"error":"Refresh token não fornecido"}';
+    Response.ContentType := APPLICATION_JSON;
+    Exit;
+  end;
+
+  try
+    Response.Body := FJWT.RefreshToken(LRefreshToken);
+    Response.StatusCode := HTTP_OK;
+    Response.ContentType := APPLICATION_JSON;
+  except
+    on E: Exception do
+    begin
+      Response.StatusCode := HTTP_UNAUTHORIZED;
+      Response.Body := '{"error":"' + E.Message + '"}';
+      Response.ContentType := APPLICATION_JSON;
+    end;
+  end;
+end;
+
+class procedure TSampleRouteManager.AtuImage(Request: THTTPRequest;
+  out Response: THTTPResponse);
 var
   SynClasses: TBadgerMethods;
 begin

@@ -69,7 +69,8 @@ begin
       .Add('/rota1', TSampleRouteManager.rota1)
       .Add('/ping', TSampleRouteManager.ping)
       .Add('/AtuImage', TSampleRouteManager.AtuImage)
-      .Add('/Login',TSampleRouteManager.Login);
+      .Add('/Login',TSampleRouteManager.Login)
+      .Add('/RefreshToken',TSampleRouteManager.RefreshToken);
 
     ServerThread.Start;
     edtPorta.Enabled := False;
