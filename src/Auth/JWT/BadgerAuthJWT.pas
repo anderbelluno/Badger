@@ -85,7 +85,7 @@ begin
         {$IFEND}
       {$ELSE}
             LJSONArray := SA([]);
-        {$IFEND}
+        {$ENDIF}
     LAccessTokenObj := SO();
     LAccessTokenObj.S['access_token'] := Result;
 

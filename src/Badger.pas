@@ -1,5 +1,9 @@
 unit Badger;
 
+{$IFDEF FPC}
+  {$mode delphi}{$H+}
+{$ENDIF}
+
 interface
 
 uses
@@ -53,15 +57,15 @@ uses
 constructor TBadger.Create;
 begin
   inherited Create(True);
-  FreeOnTerminate := True;
+  FreeOnTerminate  := True;
   FCriticalSection := TCriticalSection.Create;
-  FServerSocket := TTCPBlockSocket.Create;
-  FRouteManager := TRouteManager.Create;
-  FMethods := TBadgerMethods.Create;
-  FMiddlewares := TList.Create;
-  FPort := 8080;
-  FNonBlockMode := True;
-  FTimeout := 5000;
+  FServerSocket    := TTCPBlockSocket.Create;
+  FRouteManager    := TRouteManager.Create;
+  FMethods         := TBadgerMethods.Create;
+  FMiddlewares     := TList.Create;
+  FPort            := 8080;
+  FNonBlockMode    := True;
+  FTimeout         := 5000;
 end;
 
 destructor TBadger.Destroy;
@@ -108,6 +112,7 @@ begin
   Terminate;
   FServerSocket.CloseSocket;
   Sleep(100);
+
 end;
 
 procedure TBadger.Execute;

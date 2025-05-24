@@ -107,7 +107,7 @@ begin
           {$IFEND}
       {$ELSE}
           SetString(Result, PAnsiChar(@Buffer[0]), Length(Buffer));
-      {$IFEND}
+      {$ENDIF}
     end;
   finally
     FS.Free;
@@ -140,7 +140,7 @@ begin
         {$IFEND}
       {$ELSE}
             Buffer := TBytes(AToken);
-        {$IFEND}
+        {$ENDIF}
     if Length(Buffer) > 0 then
       FS.WriteBuffer(Buffer[0], Length(Buffer));
   finally
@@ -176,7 +176,7 @@ begin
           {$IFEND}
        {$ELSE}
           SetString(Result, PAnsiChar(@Buffer[0]), Length(Buffer));
-          {$IFEND}
+          {$ENDIF}
     end;
   finally
     FS.Free;

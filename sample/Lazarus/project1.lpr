@@ -17,7 +17,6 @@ uses
 
 begin
     RequireDerivedFormResource:=True;
-    Application.Title:='project1';
     Application.Scaled:=True;
     Application.Initialize;
     Application.CreateForm(TForm1, Form1);

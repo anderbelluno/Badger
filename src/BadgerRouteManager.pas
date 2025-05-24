@@ -59,7 +59,7 @@ implementation
   {$IFEND}
 {$ELSE}
   function TRouteManager.Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-{$IFEND}
+{$ENDIF}
 var
   Method: TMethod;
 begin
@@ -74,7 +74,7 @@ begin
     {$IFEND}
   {$ELSE}
       FRoutes.AddObject(Route, TObject(Method.Code));
-    {$IFEND}
+    {$ENDIF}
 end;
 
 function TRouteManager.Unregister(const Route: string): TRouteManager;
@@ -95,7 +95,7 @@ begin
       LIndex := FRoutes.IndexOf( LowerCase(Route) );
       if LIndex <> -1 then
         FRoutes.Delete(LIndex);
-    {$IFEND}
+    {$ENDIF}
 end;
 
 constructor TRouteManager.Create;
@@ -109,7 +109,7 @@ begin
             {$IFEND}
           {$ELSE}
                TStringList.Create
-            {$IFEND}
+            {$ENDIF}
             ;
 end;
 

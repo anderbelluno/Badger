@@ -56,7 +56,7 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="D:\files\BadgerServer\LazTTCPBlockSocket\src\;D:\files\BadgerServer\LazTTCPBlockSocket\src\Auth\Basic\;D:\files\BadgerServer\LazTTCPBlockSocket\src\Auth\JWT\;D:\files\BadgerServer\LazTTCPBlockSocket\sample\;D:\files\BadgerServer\LazTTCPBlockSocket\ThirdParty\Synapse\;C:\Soli\SoliApp\Soli\Componentes\delphi7-json-parser-superobject-master\"/>
+      <OtherUnitFiles Value="..\..\..\TTCPBlockSocket\src;..\..\..\TTCPBlockSocket\src\Auth\Basic;..\..\..\TTCPBlockSocket\src\Auth\JWT;..\..\..\TTCPBlockSocket\sample;..\..\..\TTCPBlockSocket\ThirdParty\Synapse;..\..\ThirdParty\SuperObject\D7_Laz"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Linking>

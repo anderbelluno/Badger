@@ -348,7 +348,7 @@ begin
                      LRoute := FRouteManager.FRoutes.Objects[Index]
                    else
                      LRoute := nil;
-{$IFEND}
+{$ENDIF}
 
                   if Assigned(LRoute) then
                   begin
