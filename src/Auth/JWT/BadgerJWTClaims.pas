@@ -1,5 +1,9 @@
 unit BadgerJWTClaims;
 
+{$IFDEF FPC}
+  {$mode delphi}{$H+}
+{$ENDIF}
+
 interface
 
 uses

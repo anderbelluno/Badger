@@ -1,9 +1,13 @@
 unit SyUtils;
 
+{$IFDEF FPC}
+  {$mode delphi}{$H+}
+{$ENDIF}
+
 interface
 
 uses
-  sysutils, classes , EncdDecd;
+  sysutils, classes {$IFNDEF FPC} , EncdDecd {$ELSE}, base64, Registry {$ENDIF};
 
 type
   TSyUtils = class(TObject)
@@ -551,7 +555,11 @@ end;
 
 class function TSyUtils.DecodeBase64(const a64: String): String;
 begin
+  {$IFNDEF FPC}
     Result := DecodeString(a64);
+  {$ELSE}
+    Result := DecodeStringBase64(a64);
+  {$ENDIF}
 end;
 
 end.

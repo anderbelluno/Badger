@@ -1,9 +1,5 @@
 unit SampleRouteManager;
 
-{$IFDEF FPC}
-  {$mode delphi}{$H+}
-{$ENDIF}
-
 interface
 
 uses

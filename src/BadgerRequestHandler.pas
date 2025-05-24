@@ -1,5 +1,9 @@
 unit BadgerRequestHandler;
 
+{$IFDEF FPC}
+  {$mode delphi}{$H+}
+{$ENDIF}
+
 interface
 
 uses
@@ -327,16 +331,23 @@ begin
                       Continue;
                     end;
                   end;
-
-{$IF CompilerVersion >= 20}
+{$IFNDEF FPC}
+   {$IF CompilerVersion >= 20}
                   if not FRouteManager.FRoutes.TryGetValue(FURI.ToLower, LRoute) then
                     LRoute := nil;
-{$ELSE}
+   {$ELSE}
                   Index := FRouteManager.FRoutes.IndexOf(  LowerCase(FURI) );
                   if Index <> -1 then
                     LRoute := FRouteManager.FRoutes.Objects[Index]
                   else
                     LRoute := nil;
+    {$IFEND}
+{$ELSE}
+                   Index := FRouteManager.FRoutes.IndexOf(  LowerCase(FURI) );
+                   if Index <> -1 then
+                     LRoute := FRouteManager.FRoutes.Objects[Index]
+                   else
+                     LRoute := nil;
 {$IFEND}
 
                   if Assigned(LRoute) then

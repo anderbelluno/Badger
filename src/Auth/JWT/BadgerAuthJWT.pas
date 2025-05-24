@@ -1,4 +1,7 @@
 unit BadgerAuthJWT;
+{$IFDEF FPC}
+  {$mode delphi}{$H+}
+{$ENDIF}
 
 interface
 
@@ -74,11 +77,15 @@ begin
       SaveToken(AUserID, Result, FStoragePath);
 
     LRefreshToken := GenerateRefreshToken(AUserID);
-{$IF CompilerVersion >= 20}  //Necessário pois foi usado versão diferente do SuperObject
-    LJSONArray := SA();
-{$ELSE}
-    LJSONArray := SA([]);
-{$IFEND}
+      {$IFNDEF FPC}
+        {$IF CompilerVersion >= 20}  //Necessário pois foi usado versão diferente do SuperObject
+            LJSONArray := SA();
+        {$ELSE}
+            LJSONArray := SA([]);
+        {$IFEND}
+      {$ELSE}
+            LJSONArray := SA([]);
+        {$IFEND}
     LAccessTokenObj := SO();
     LAccessTokenObj.S['access_token'] := Result;
 
@@ -150,7 +157,7 @@ begin
       Result.Free;
       raise Exception.Create('Token expirado');
     end;
-    FToken :=  LoadToken(Result.UserID, FStoragePath);
+    FToken := Trim (LoadToken(Result.UserID, FStoragePath) );
     if (FStoragePath <> '') and (FToken <> AToken) then
     begin
       Result.Free;
@@ -191,7 +198,7 @@ begin
       Result.Free;
       raise Exception.Create('Refresh token expirado');
     end;
-    FToken :=  LoadRefreshToken(Result.UserID, FStoragePath);
+    FToken := Trim ( LoadRefreshToken(Result.UserID, FStoragePath) );
     if (FStoragePath <> '') and ( FToken <> AToken) then
     begin
       Result.Free;
@@ -286,7 +293,7 @@ begin
   FProtectedRoutes.Clear;
   for I := Low(ProtectedRoutes) to High(ProtectedRoutes) do
     FProtectedRoutes.Add(ProtectedRoutes[I]);
-  Badger.AddMiddleware(MiddlewareProc);
+     Badger.AddMiddleware(MiddlewareProc);
 
 end;
 

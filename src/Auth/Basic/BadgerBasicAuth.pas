@@ -1,10 +1,13 @@
 unit BadgerBasicAuth;
 
+{$IFDEF FPC}
+  {$mode delphi}{$H+}
+{$ENDIF}
+
 interface
 
 uses
-  SysUtils, Classes, SyUtils, Badger, BadgerTypes, EncdDecd;
-
+  SysUtils, Classes, SyUtils, Badger, BadgerTypes {$IFNDEF FPC} , EncdDecd {$ELSE}, base64 {$ENDIF};
 type
   TBasicAuth = class
   private
@@ -30,17 +33,19 @@ end;
 
 function TBasicAuth.Check(Request: THTTPRequest; out Response: THTTPResponse): Boolean;
 var
-  AuthHeader, DecodedAuth, Username, Password: string;
+  AuthHeader, DecodedAuth, vUsername, vPassword: string;
   I, ColonPos: Integer;
+  header : String;
 begin
   Result := False;
   AuthHeader := '';
 
   for I := 0 to Request.Headers.Count - 1 do
   begin
-    if Pos('Authorization:', Request.Headers[I]) > 0 then
+    header := Request.Headers[I] ;
+    if Pos('Authorization=', Request.Headers[I]) > 0 then
     begin
-      AuthHeader := Trim(Copy(Request.Headers[I], Pos(':', Request.Headers[I]) + 1, Length(Request.Headers[I])));
+      AuthHeader := Trim(Copy(Request.Headers[I], Pos('=', Request.Headers[I]) + 1, Length(Request.Headers[I])));
       Break;
     end;
   end;
@@ -49,14 +54,18 @@ begin
   begin
     AuthHeader := Copy(AuthHeader, 7, Length(AuthHeader));
     try
-      DecodedAuth := DecodeString(AuthHeader);
+      {$IFNDEF FPC}
+         DecodedAuth := DecodeString(AuthHeader);
+      {$ELSE}
+         DecodedAuth := DecodeStringBase64(AuthHeader);
+      {$ENDIF}
       ColonPos := Pos(':', DecodedAuth);
       if ColonPos > 0 then
       begin
-        Username := Copy(DecodedAuth, 1, ColonPos - 1);
-        Password := Copy(DecodedAuth, ColonPos + 1, Length(DecodedAuth));
+        vUsername := Copy(DecodedAuth, 1, ColonPos - 1);
+        vPassword := Copy(DecodedAuth, ColonPos + 1, Length(DecodedAuth));
 
-        if (Username = FUsername) and (Password = FPassword) then
+        if (vUsername = FUsername) and (vPassword = FPassword) then
           Result := True
         else
         begin
