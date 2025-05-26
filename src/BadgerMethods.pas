@@ -3,7 +3,7 @@ unit BadgerMethods;
 interface
 
 uses
-  blcksock, SysUtils, Classes, DB, BadgerMultipartDataReader, Contnrs, SyUtils,
+  blcksock, SysUtils, Classes, DB, BadgerMultipartDataReader, Contnrs, BadgerUtils,
   BadgerTypes, BadgerHttpStatus;
 
 type
@@ -70,9 +70,9 @@ end;
 
 function TBadgerMethods.getMime(aFilePath: String): String;
 var
-  sUtils: TSyUtils;
+  sUtils: TBadgerUtils;
 begin
-  sUtils := TSyUtils.Create;
+  sUtils := TBadgerUtils.Create;
   try
     Result := sUtils.GetFileMIMEType(aFilePath);
   finally

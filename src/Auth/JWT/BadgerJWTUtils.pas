@@ -9,14 +9,14 @@ interface
 uses
   SysUtils, Classes;
 
-function CreateSignature(const AHeader, APayload, ASecret: string): string;
-function CustomEncodeBase64(const Input: string; URLSafe: Boolean): string;
-function CustomDecodeBase64(const Input: string): string;
-procedure SaveToken(const AUserID, AToken, AStoragePath: string);
-function LoadToken(const AUserID, AStoragePath: string): string;
-procedure SaveRefreshToken(const AUserID, AToken, AStoragePath: string);
-function LoadRefreshToken(const AUserID, AStoragePath: string): string;
-function DateTimeToUnix(ADateTime: TDateTime): Int64;
+    function CreateSignature(const AHeader, APayload, ASecret: string): string;
+    function CustomEncodeBase64(const Input: string; URLSafe: Boolean): string;
+    function CustomDecodeBase64(const Input: string): string;
+    procedure SaveToken(const AUserID, AToken, AStoragePath: string);
+    function LoadToken(const AUserID, AStoragePath: string): string;
+    procedure SaveRefreshToken(const AUserID, AToken, AStoragePath: string);
+    function LoadRefreshToken(const AUserID, AStoragePath: string): string;
+    function DateTimeToUnix(ADateTime: TDateTime): Int64;
 
 implementation
 

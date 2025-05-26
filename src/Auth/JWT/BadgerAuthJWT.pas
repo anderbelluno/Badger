@@ -27,13 +27,10 @@ type
     function ValidateRefreshToken(const AToken: string): TBadgerJWTClaims;
     function RefreshToken(const ARefreshToken: string): string;
 
-    procedure RegisterMiddleware(Badger: TBadger; const ProtectedRoutes: array of string);
+    procedure RegisterProtectedRoutes(Badger: TBadger; const ProtectedRoutes: array of string);
   end;
 
 implementation
-
-const
-  APPLICATION_JSON = 'application/json';
 
   { TBadgerJWTAuth }
 
@@ -135,33 +132,33 @@ var
   FToken : String;
 begin
   if (AToken = '') or (Pos('.', AToken) = 0) then
-    raise Exception.Create('Token inválido: formato incorreto');
+    raise Exception.Create('Invalid token: incorrect format');
 
   LParts := TStringList.Create;
   try
     ExtractStrings(['.'], [], PChar(AToken), LParts);
     if LParts.Count <> 3 then
-      raise Exception.Create('Token inválido: deve conter 3 partes');
+      raise Exception.Create('Invalid token: must contain 3 parts');
     LHeader := LParts[0];
     LPayload := LParts[1];
     LSignature := LParts[2];
 
     LExpectedSignature := CreateSignature(LHeader, LPayload, FSecret);
     if LSignature <> LExpectedSignature then
-      raise Exception.Create('Assinatura inválida');
+      raise Exception.Create('Invalid signature');
 
     LJSON := SO(CustomDecodeBase64(LPayload));
     Result := TBadgerJWTClaims.FromJSON(LJSON);
     if (Result.Exp > 0) and (DateTimeToUnix(Now) > Result.Exp) then
     begin
       Result.Free;
-      raise Exception.Create('Token expirado');
+      raise Exception.Create('Expired token');
     end;
     FToken := Trim (LoadToken(Result.UserID, FStoragePath) );
     if (FStoragePath <> '') and (FToken <> AToken) then
     begin
       Result.Free;
-      raise Exception.Create('Token não encontrado');
+      raise Exception.Create('Token not found');
     end;
   finally
     LParts.Free;
@@ -176,33 +173,33 @@ var
   FToken : String;
 begin
   if (AToken = '') or (Pos('.', AToken) = 0) then
-    raise Exception.Create('Refresh token inválido: formato incorreto');
+    raise Exception.Create('Invalid refresh token: incorrect format');
 
   LParts := TStringList.Create;
   try
     ExtractStrings(['.'], [], PChar(AToken), LParts);
     if LParts.Count <> 3 then
-      raise Exception.Create('Refresh token inválido: deve conter 3 partes');
+      raise Exception.Create('Invalid refresh token: must contain 3 parts');
     LHeader := LParts[0];
     LPayload := LParts[1];
     LSignature := LParts[2];
 
     LExpectedSignature := CreateSignature(LHeader, LPayload, FSecret);
     if LSignature <> LExpectedSignature then
-      raise Exception.Create('Assinatura inválida');
+      raise Exception.Create('Invalid signature');
 
     LJSON := SO(CustomDecodeBase64(LPayload));
     Result := TBadgerJWTClaims.FromJSON(LJSON);
     if (Result.Exp > 0) and (DateTimeToUnix(Now) > Result.Exp) then
     begin
       Result.Free;
-      raise Exception.Create('Refresh token expirado');
+      raise Exception.Create('Refresh token expired');
     end;
     FToken := Trim ( LoadRefreshToken(Result.UserID, FStoragePath) );
     if (FStoragePath <> '') and ( FToken <> AToken) then
     begin
       Result.Free;
-      raise Exception.Create('Refresh token não encontrado');
+      raise Exception.Create('Refresh token not found');
     end;
   finally
     LParts.Free;
@@ -212,8 +209,7 @@ end;
 function TBadgerJWTAuth.RefreshToken(const ARefreshToken: string): string;
 var
   LClaims: TBadgerJWTClaims;
-  LResponse: ISuperObject;
-  LNewAccessToken, LNewRefreshToken: string;
+  LNewAccessToken: string;
 begin
   LClaims := ValidateRefreshToken(ARefreshToken);
   try
@@ -259,7 +255,7 @@ begin
   if LToken = '' then
   begin
     Response.StatusCode := HTTP_UNAUTHORIZED;
-    Response.Body := '{"error":"Token não fornecido"}';
+    Response.Body := '{"error":"Token not provided"}';
     Response.ContentType := APPLICATION_JSON;
     Result := False;
     Exit;
@@ -286,7 +282,7 @@ begin
 end;
 
 
-procedure TBadgerJWTAuth.RegisterMiddleware(Badger: TBadger; const ProtectedRoutes: array of string);
+procedure TBadgerJWTAuth.RegisterProtectedRoutes(Badger: TBadger; const ProtectedRoutes: array of string);
 var
   I: Integer;
 begin

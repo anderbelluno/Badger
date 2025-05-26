@@ -60,9 +60,9 @@ begin
     ServerThread.OnResponse := HandleResponse;
 
    case RadioGroup1.ItemIndex of
-     1: ServerThread.AddMiddleware(BasicAuth.Check);
+     1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping']);
      3: begin
-           JWTAuth.RegisterMiddleware(ServerThread, ['/rota1', '/ping']);
+           JWTAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping']);
            SampleRouteManager.FJWT := JWTAuth;
         end;
     end;
@@ -122,17 +122,21 @@ end;
 procedure TForm1.HandleRequest(const RequestInfo: TRequestInfo);
 begin
     if rdLog.Checked then
+    begin
        Memo1.Lines.Add('Client Request: ' + #13#10 + RequestInfo.RequestLine + #13#10);
           Memo1.Lines.Add('Remote Request IP: ' + #13#10 + RequestInfo.RemoteIP + #13#10);
           memo1.Perform(WM_VSCROLL, SB_LINEDOWN, 0);
+    end;
 end;
 
 procedure TForm1.HandleResponse(const ResponseInfo: TResponseInfo);
 begin
     if rdLog.Checked then
+    begin
       Memo1.Lines.Add('Server Response: ' + #13#10 + IntToStr(ResponseInfo.StatusCode) + ' ' + ResponseInfo.Body + #13#10
        + DateTimeToStr(ResponseInfo.Timestamp) + #13#10);
        memo1.Perform(WM_VSCROLL, SB_LINEDOWN, 0);
+    end;
 end;
 
 end.

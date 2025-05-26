@@ -79,9 +79,9 @@ begin
     ServerThread.OnResponse := HandleResponse;
 
    case ComboAuth.ItemIndex of
-     1: ServerThread.AddMiddleware(BasicAuth.Check);
+     1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping', '/download']);
      3: begin
-           JWTAuth.RegisterMiddleware(ServerThread, ['/rota1', '/ping']);
+           JWTAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping']);
            SampleRouteManager.FJWT := JWTAuth;
         end;
     end;

@@ -10,9 +10,11 @@ uses
   BadgerMethods,
   BadgerTypes,
   BadgerHttpStatus,
-
+  BadgerUtils,
+  BadgerAuthJWT,
+  SysUtils,
   Classes,
-  SysUtils, superobject, BadgerAuthJWT;
+  superobject;
 
 type
   TSampleRouteManager = class(TObject)
@@ -35,8 +37,7 @@ implementation
 
 { TSampleRouteManager }
 
-class procedure TSampleRouteManager.downLoad(Request: THTTPRequest;
-  out Response: THTTPResponse);
+class procedure TSampleRouteManager.downLoad(Request: THTTPRequest; out Response: THTTPResponse);
 var
   SynClasses: TBadgerMethods;
   FileName: string;
@@ -49,15 +50,13 @@ begin
     begin
       if Pos('file=', Request.QueryParams[I]) = 1 then
       begin
-        FileName := 'D:\GoogleDrive\Camera\' + Copy(Request.QueryParams[I], 6,
-          Length(Request.QueryParams[I]));
+        FileName := 'D:\GoogleDrive\Camera\' + Copy(Request.QueryParams[I], 6, Length(Request.QueryParams[I]));
         Break;
       end;
     end;
 
     Response.StatusCode := HTTP_OK;
-    Response.Stream := SynClasses.fDownloadStream(FileName,
-      Response.ContentType);
+    Response.Stream := SynClasses.fDownloadStream(FileName, Response.ContentType);
   finally
     FreeAndNil(SynClasses);
   end;

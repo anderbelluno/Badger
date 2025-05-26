@@ -8,7 +8,7 @@ interface
 
 uses
   blcksock, httpsend, synsock, SyncObjs, synachar, synautil, Classes, SysUtils, StrUtils,
-  BadgerRouteManager, SyUtils, BadgerMethods, BadgerHttpStatus, BadgerTypes, Math;
+  BadgerRouteManager,  BadgerMethods, BadgerHttpStatus, BadgerTypes, Math;
 
 type
   THTTPRequestHandler = class(TThread)
@@ -22,15 +22,13 @@ type
     FURI: string;
     FMethod: string;
     FRequestLine: string;
-    FResponseLine: string;
     FCriticalSection: TCriticalSection;
     FMethods: TBadgerMethods;
     FMiddlewares: TList;
     FTimeout: Integer;
   protected
     function ParseRequestHeader(ClientSocket: TTCPBlockSocket): TStringList;
-    function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream;
-                              ContentType: string; CloseConnection: Boolean): string;
+    function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean): string;
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
                       ACriticalSection: TCriticalSection; AMethods: TBadgerMethods;
@@ -113,8 +111,7 @@ begin
   end;
 end;
 
-function THTTPRequestHandler.BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream;
-  ContentType: string; CloseConnection: Boolean): string;
+function THTTPRequestHandler.BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean): string;
 var
   EffectiveContentType: string;
 {$IFDEF VER150}
