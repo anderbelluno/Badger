@@ -8,13 +8,11 @@ interface
 
 uses
   blcksock, httpsend, synsock, SyncObjs, synachar, synautil, Classes, SysUtils, StrUtils,
-  BadgerRouteManager,  BadgerMethods, BadgerHttpStatus, BadgerTypes, Math;
+  BadgerRouteManager, BadgerMethods, BadgerHttpStatus, BadgerTypes, Badger, Math, Windows;
 
 type
   THTTPRequestHandler = class(TThread)
   private
-    FLastRequestInfo: TRequestInfo;
-    FLastResponseInfo: TResponseInfo;
     FOnRequest: TOnRequest;
     FOnResponse: TOnResponse;
     FClientSocket: TTCPBlockSocket;
@@ -22,19 +20,21 @@ type
     FURI: string;
     FMethod: string;
     FRequestLine: string;
-    FCriticalSection: TCriticalSection;
     FMethods: TBadgerMethods;
     FMiddlewares: TList;
     FTimeout: Integer;
+    FParentServer: TBadger;
+    FIsParallel: Boolean;
   protected
     function ParseRequestHeader(ClientSocket: TTCPBlockSocket): TStringList;
     function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean): string;
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-                      ACriticalSection: TCriticalSection; AMethods: TBadgerMethods;
-                      AMiddlewares: TList; ATimeout: Integer;
-                      var ALastRequestInfo: TRequestInfo; var ALastResponseInfo: TResponseInfo;
+                      AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
                       AOnRequest: TOnRequest; AOnResponse: TOnResponse);
+    constructor CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
+                              AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
+                              AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger);
     destructor Destroy; override;
     procedure Execute; override;
   end;
@@ -44,8 +44,7 @@ implementation
 { THTTPRequestHandler }
 
 constructor THTTPRequestHandler.Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-  ACriticalSection: TCriticalSection; AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
-  var ALastRequestInfo: TRequestInfo; var ALastResponseInfo: TResponseInfo;
+  AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
   AOnRequest: TOnRequest; AOnResponse: TOnResponse);
 var
   I: Integer;
@@ -53,15 +52,38 @@ begin
   inherited Create(True);
   FreeOnTerminate := True;
   FClientSocket := AClientSocket;
-  FCriticalSection := ACriticalSection;
-  FLastRequestInfo := ALastRequestInfo;
-  FLastResponseInfo := ALastResponseInfo;
   FOnRequest := AOnRequest;
   FOnResponse := AOnResponse;
   FRouteManager := ARouteManager;
   FMethods := AMethods;
   FMiddlewares := TList.Create;
   FTimeout := ATimeout;
+  FParentServer := nil;
+  FIsParallel := False;
+
+  for I := 0 to AMiddlewares.Count - 1 do
+    FMiddlewares.Add(TMiddlewareWrapper.Create(TMiddlewareWrapper(AMiddlewares[I]).Middleware));
+  Resume;
+end;
+
+constructor THTTPRequestHandler.CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
+  AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
+  AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger);
+var
+  I: Integer;
+begin
+  inherited Create(True);
+  FreeOnTerminate := True;
+  FClientSocket := AClientSocket;
+  FOnRequest := AOnRequest;
+  FOnResponse := AOnResponse;
+  FRouteManager := ARouteManager;
+  FMethods := AMethods;
+  FMiddlewares := TList.Create;
+  FTimeout := ATimeout;
+  FParentServer := AParentServer;
+  FIsParallel := True;
+
   for I := 0 to AMiddlewares.Count - 1 do
     FMiddlewares.Add(TMiddlewareWrapper.Create(TMiddlewareWrapper(AMiddlewares[I]).Middleware));
   Resume;
@@ -71,10 +93,33 @@ destructor THTTPRequestHandler.Destroy;
 var
   I: Integer;
 begin
+  if FIsParallel and Assigned(FParentServer) then
+  begin
+    try
+
+        FParentServer.DecActiveConnections;
+
+    except
+      on E: Exception do
+        OutputDebugString(PChar(Format('Error in DecActiveConnections: %s', [E.Message])));
+    end;
+  end;
+
   if Assigned(FClientSocket) then
   begin
-    FClientSocket.CloseSocket;
-    FClientSocket.Free;
+    try
+      FClientSocket.CloseSocket;
+    except
+      on E: Exception do
+        OutputDebugString(PChar(Format('Error closing client socket: %s', [E.Message])));
+    end;
+    try
+      FClientSocket.Free;
+      FClientSocket := nil;
+    except
+      on E: Exception do
+        OutputDebugString(PChar(Format('Error freeing client socket: %s', [E.Message])));
+    end;
   end;
   for I := 0 to FMiddlewares.Count - 1 do
     TObject(FMiddlewares[I]).Free;
@@ -195,41 +240,38 @@ var
   RequestInfo: TRequestInfo;
   ResponseInfo: TResponseInfo;
 begin
-  QueryParams := TStringList.Create;
+  OutputDebugString(PChar(Format('Starting THTTPRequestHandler.Execute for thread %d', [ThreadID])));
   try
-    Req.QueryParams := TStringList.Create;
-    Req.Headers := TStringList.Create;
-    Req.Body := '';
-    Req.BodyStream := nil;
-    Resp.Stream := TMemoryStream.Create;
-
-    RequestInfo.Headers := TStringList.Create;
-    RequestInfo.QueryParams := TStringList.Create;
-
-    ResponseInfo.Headers := TStringList.Create;
-
+    QueryParams := TStringList.Create;
     try
-      repeat
-        if FClientSocket.LastError = 0 then
-        begin
-          FRequestLine := FClientSocket.RecvString(FTimeout);
-          if FRequestLine = '' then Break;
-          if FMethods.ExtractMethodAndURI(FRequestLine, FMethod, FURI, QueryParams) then
+      Req.QueryParams := TStringList.Create;
+      Req.Headers := TStringList.Create;
+      Req.Body := '';
+      Req.BodyStream := nil;
+      Resp.Stream := TMemoryStream.Create;
+
+      RequestInfo.Headers := TStringList.Create;
+      RequestInfo.QueryParams := TStringList.Create;
+      ResponseInfo.Headers := TStringList.Create;
+
+      try
+        repeat
+          if FClientSocket.LastError = 0 then
           begin
-            FCriticalSection.Enter;
-            try
-                Req.Method := FMethod;
-                Req.URI := FURI;
-                Req.RequestLine := FRequestLine;
+            FRequestLine := FClientSocket.RecvString(FTimeout);
+            if FRequestLine = '' then Break;
+            if FMethods.ExtractMethodAndURI(FRequestLine, FMethod, FURI, QueryParams) then
+            begin
+              Req.Method := FMethod;
+              Req.URI := FURI;
+              Req.RequestLine := FRequestLine;
 
+              RequestInfo.RemoteIP := FClientSocket.GetRemoteSinIP;
+              RequestInfo.Method := Req.Method;
+              RequestInfo.URI := Req.URI;
+              RequestInfo.RequestLine := Req.RequestLine;
 
-                RequestInfo.RemoteIP    := FClientSocket.GetRemoteSinIP;
-                RequestInfo.Method      := Req.Method;
-                RequestInfo.URI         := Req.URI;
-                RequestInfo.RequestLine := Req.RequestLine;
-
-                Headers := ParseRequestHeader(FClientSocket);
-
+              Headers := ParseRequestHeader(FClientSocket);
               try
                 ContentLength := StrToIntDef(Headers.Values['Content-Length'], 0);
                 ContentType := Headers.Values['Content-Type'];
@@ -239,7 +281,6 @@ begin
                   begin
                     BodyStream.SetSize(ContentLength);
                     TotalBytes := 0;
-
                     while TotalBytes < ContentLength do
                     begin
                       BytesRead := FClientSocket.RecvBufferEx(Pointer(NativeUInt(BodyStream.Memory) + TotalBytes), ContentLength - TotalBytes, 5000);
@@ -278,10 +319,10 @@ begin
 
                   RequestInfo.Headers.Assign(Headers);
                   RequestInfo.Body := Req.Body;
-                  RequestInfo.QueryParams.Assign(Req.QueryParams);
+                  RequestInfo.QueryParams.Assign(QueryParams);
 
-                   if Assigned(FOnRequest) then
-                  FOnRequest(RequestInfo);
+                  if Assigned(FOnRequest) then
+                    FOnRequest(RequestInfo);
 
                   CloseConnection := (Headers.Values['Connection'] = 'close') or (Pos('HTTP/1.0', FRequestLine) = 1);
 
@@ -315,9 +356,9 @@ begin
                       end;
 
                       ResponseInfo.StatusCode := Resp.StatusCode;
-                      ResponseInfo.StatusText := THTTPStatus.GetStatusText( Resp.StatusCode );
-                      ResponseInfo.Body       := Resp.Body;
-                      ResponseInfo.ContentType:= Resp.ContentType;
+                      ResponseInfo.StatusText := THTTPStatus.GetStatusText(Resp.StatusCode);
+                      ResponseInfo.Body := Resp.Body;
+                      ResponseInfo.ContentType := Resp.ContentType;
                       ResponseInfo.Headers.Text := ResponseHeader;
                       ResponseInfo.Timestamp := Now;
 
@@ -328,23 +369,24 @@ begin
                       Continue;
                     end;
                   end;
+
 {$IFNDEF FPC}
-   {$IF CompilerVersion >= 20}
+  {$IF CompilerVersion >= 20}
                   if not FRouteManager.FRoutes.TryGetValue(FURI.ToLower, LRoute) then
                     LRoute := nil;
-   {$ELSE}
-                  Index := FRouteManager.FRoutes.IndexOf(  LowerCase(FURI) );
+  {$ELSE}
+                  Index := FRouteManager.FRoutes.IndexOf(LowerCase(FURI));
                   if Index <> -1 then
                     LRoute := FRouteManager.FRoutes.Objects[Index]
                   else
                     LRoute := nil;
-    {$IFEND}
+  {$IFEND}
 {$ELSE}
-                   Index := FRouteManager.FRoutes.IndexOf(  LowerCase(FURI) );
-                   if Index <> -1 then
-                     LRoute := FRouteManager.FRoutes.Objects[Index]
-                   else
-                     LRoute := nil;
+                  Index := FRouteManager.FRoutes.IndexOf(LowerCase(FURI));
+                  if Index <> -1 then
+                    LRoute := FRouteManager.FRoutes.Objects[Index]
+                  else
+                    LRoute := nil;
 {$ENDIF}
 
                   if Assigned(LRoute) then
@@ -387,13 +429,13 @@ begin
                     end;
 
                     ResponseInfo.StatusCode := Resp.StatusCode;
-                    ResponseInfo.StatusText := THTTPStatus.GetStatusText( Resp.StatusCode );
-                    ResponseInfo.Body       := Resp.Body;
-                    ResponseInfo.ContentType:= Resp.ContentType;
+                    ResponseInfo.StatusText := THTTPStatus.GetStatusText(Resp.StatusCode);
+                    ResponseInfo.Body := Resp.Body;
+                    ResponseInfo.ContentType := Resp.ContentType;
                     ResponseInfo.Headers.Text := ResponseHeader;
                     ResponseInfo.Timestamp := Now;
                     if Assigned(FOnResponse) then
-                        FOnResponse(ResponseInfo);
+                      FOnResponse(ResponseInfo);
                   end
                   else
                   begin
@@ -415,16 +457,17 @@ begin
 {$ENDIF}
 
                     ResponseInfo.StatusCode := Resp.StatusCode;
-                    ResponseInfo.StatusText := THTTPStatus.GetStatusText( Resp.StatusCode );
-                    ResponseInfo.Body       := Resp.Body;
-                    ResponseInfo.ContentType:= Resp.ContentType;
+                    ResponseInfo.StatusText := THTTPStatus.GetStatusText(Resp.StatusCode);
+                    ResponseInfo.Body := Resp.Body;
+                    ResponseInfo.ContentType := Resp.ContentType;
                     ResponseInfo.Headers.Text := ResponseHeader;
                     ResponseInfo.Timestamp := Now;
                     if Assigned(FOnResponse) then
-                        FOnResponse(ResponseInfo);
+                      FOnResponse(ResponseInfo);
                   end;
 
-                  if CloseConnection then Break;
+                  if CloseConnection then
+                    Break;
                 finally
                   if Assigned(BodyStream) then
                     FreeAndNil(BodyStream);
@@ -432,80 +475,66 @@ begin
               finally
                 Headers.Free;
               end;
-            finally
-              FCriticalSection.Leave;
             end;
-          end;
-        end
-        else
-          Break;
-      until False;
-    finally
-      if Assigned(QueryParams) then
-        FreeAndNil(QueryParams);
-
-      if Assigned(Req.QueryParams) then
-        FreeAndNil(Req.QueryParams);
-
-      if Assigned(Req.Headers) then
-        FreeAndNil(Req.Headers);
-
-      if Assigned(Req.BodyStream) then
-        FreeAndNil(Req.BodyStream);
-
-      if Assigned(Resp.Stream) then
-        FreeAndNil(Resp.Stream);
-
-      if Assigned(RequestInfo.Headers) then
-        FreeAndNil(RequestInfo.Headers);
-
-      if Assigned(RequestInfo.QueryParams) then
-        FreeAndNil(RequestInfo.QueryParams);
-
-      if Assigned(ResponseInfo.Headers) then
-        FreeAndNil(ResponseInfo.Headers);
-
-      if Assigned(FClientSocket) then
-      begin
-        FClientSocket.CloseSocket;
-        FreeAndNil(FClientSocket);
+          end
+          else
+            Break;
+        until False;
+      finally
+        if Assigned(QueryParams) then
+          FreeAndNil(QueryParams);
+        if Assigned(Req.QueryParams) then
+          FreeAndNil(Req.QueryParams);
+        if Assigned(Req.Headers) then
+          FreeAndNil(Req.Headers);
+        if Assigned(Req.BodyStream) then
+          FreeAndNil(Req.BodyStream);
+        if Assigned(Resp.Stream) then
+          FreeAndNil(Resp.Stream);
+        if Assigned(RequestInfo.Headers) then
+          FreeAndNil(RequestInfo.Headers);
+        if Assigned(RequestInfo.QueryParams) then
+          FreeAndNil(RequestInfo.QueryParams);
+        if Assigned(ResponseInfo.Headers) then
+          FreeAndNil(ResponseInfo.Headers);
+        if Assigned(FClientSocket) then
+        begin
+          FClientSocket.CloseSocket;
+          FreeAndNil(FClientSocket);
+        end;
       end;
-    end;
-  except
-    on E: Exception do
-    begin
-      Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-      Resp.Body := 'Internal Server Error: ' + E.Message;
-      Resp.ContentType := TEXT_PLAIN;
-      ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, True);
-      FClientSocket.SendString(ResponseHeader);
+    except
+      on E: Exception do
+      begin
+        Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
+        Resp.Body := 'Internal Server Error: ' + E.Message;
+        Resp.ContentType := TEXT_PLAIN;
+        ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, True);
+        FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
-      UTF8Body := UTF8Encode(Resp.Body);
-      SetLength(ResponseBodyBytes, Length(UTF8Body));
-      Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
-      if Length(ResponseBodyBytes) > 0 then
-        FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
+        UTF8Body := UTF8Encode(Resp.Body);
+        SetLength(ResponseBodyBytes, Length(UTF8Body));
+        Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
+        if Length(ResponseBodyBytes) > 0 then
+          FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
 {$ELSE}
-      ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
-      if Length(ResponseBodyBytes) > 0 then
-        FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
+        ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
+        if Length(ResponseBodyBytes) > 0 then
+          FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
 {$ENDIF}
 
         ResponseInfo.StatusCode := Resp.StatusCode;
-        ResponseInfo.StatusText := THTTPStatus.GetStatusText( Resp.StatusCode );
-        ResponseInfo.Body       := Resp.Body;
-        ResponseInfo.ContentType:= Resp.ContentType;
+        ResponseInfo.StatusText := THTTPStatus.GetStatusText(Resp.StatusCode);
+        ResponseInfo.Body := Resp.Body;
+        ResponseInfo.ContentType := Resp.ContentType;
         ResponseInfo.Headers.Text := ResponseHeader;
         ResponseInfo.Timestamp := Now;
-        FCriticalSection.Enter;
-        try
-          if Assigned(FOnResponse) then
-            FOnResponse(ResponseInfo);
-        finally
-          FCriticalSection.Leave;
-        end;
-
+        if Assigned(FOnResponse) then
+          FOnResponse(ResponseInfo);
+      end;
     end;
+  finally
+    OutputDebugString(PChar(Format('Finished THTTPRequestHandler.Execute for thread %d', [ThreadID])));
   end;
 end;
 

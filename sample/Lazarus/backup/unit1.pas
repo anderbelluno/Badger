@@ -60,7 +60,7 @@ begin
     ServerThread.OnResponse := HandleResponse;
 
    case RadioGroup1.ItemIndex of
-     1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping']);
+     1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping', '/download']);
      3: begin
            JWTAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping']);
            SampleRouteManager.FJWT := JWTAuth;

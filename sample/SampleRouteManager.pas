@@ -92,6 +92,7 @@ end;
 class procedure TSampleRouteManager.rota1(Request: THTTPRequest;
   out Response: THTTPResponse);
 begin
+  Sleep(10000) ;
   Response.StatusCode := HTTP_OK;
   Response.Body := UTF8Encode('Rota1 executada');
 end;

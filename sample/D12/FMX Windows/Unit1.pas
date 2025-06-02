@@ -95,6 +95,8 @@ begin
       .&Add('/Login',TSampleRouteManager.Login)
       .&Add('/RefreshToken',TSampleRouteManager.RefreshToken);
 
+    ServerThread.ParallelProcessing := True;
+
     ServerThread.Start; // Inicia o servidor
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
