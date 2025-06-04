@@ -38,8 +38,8 @@
         <Filename Value="..\..\src\Badger.pas"/>
         <IsVisibleTab Value="True"/>
         <EditorIndex Value="1"/>
-        <TopLine Value="142"/>
-        <CursorPos X="7" Y="168"/>
+        <TopLine Value="58"/>
+        <CursorPos X="105" Y="10"/>
         <UsageCount Value="19"/>
         <Loaded Value="True"/>
       </Unit>
@@ -204,14 +204,10 @@
         <UsageCount Value="9"/>
       </Unit>
     </Units>
-    <JumpHistory HistoryIndex="20">
+    <JumpHistory HistoryIndex="21">
       <Position>
         <Filename Value="unit1.pas"/>
         <Caret Line="77" Column="63"/>
-      </Position>
-      <Position>
-        <Filename Value="..\..\src\Badger.pas"/>
-        <Caret TopLine="19"/>
       </Position>
       <Position>
         <Filename Value="..\..\src\BadgerRequestHandler.pas"/>
@@ -287,6 +283,14 @@
       <Position>
         <Filename Value="..\..\src\Badger.pas"/>
         <Caret Line="135" Column="16" TopLine="106"/>
+      </Position>
+      <Position>
+        <Filename Value="..\..\src\Badger.pas"/>
+        <Caret Line="436" Column="7" TopLine="461"/>
+      </Position>
+      <Position>
+        <Filename Value="..\..\src\Badger.pas"/>
+        <Caret Line="78" Column="35" TopLine="46"/>
       </Position>
     </JumpHistory>
     <RunParams>

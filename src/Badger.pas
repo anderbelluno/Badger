@@ -7,7 +7,7 @@ unit Badger;
 interface
 
 uses
-  blcksock, synsock, SyncObjs, Classes, SysUtils, BadgerRouteManager, BadgerMethods, BadgerTypes, Windows;
+ Windows, blcksock, synsock, SyncObjs, Classes, SysUtils, BadgerRouteManager, BadgerMethods, BadgerTypes;
 
 type
   TClientSocketInfo = class
@@ -436,6 +436,7 @@ end;
 procedure TBadger.Stop;
 var
   TimeoutCounter: Integer;
+  WaitResult: DWORD;
 const
   MaxWaitTime = 15000;
 begin
@@ -471,22 +472,20 @@ begin
   Terminate;
 
   try
+    // Esperar a thread terminar usando WaitForSingleObject
     TimeoutCounter := 0;
-    while not Finished and (TimeoutCounter < MaxWaitTime) do
+    WaitResult := WaitForSingleObject(Handle, 100); // Espera 100ms por iteração
+    while (WaitResult = WAIT_TIMEOUT) and (TimeoutCounter < MaxWaitTime) do
     begin
       Sleep(100);
       Inc(TimeoutCounter, 100);
+      WaitResult := WaitForSingleObject(Handle, 100);
     end;
 
-    if not Finished then
+    if WaitResult <> WAIT_OBJECT_0 then
     begin
       OutputDebugString(PChar('Warning: Thread termination timeout'));
-    end
-    else
-    begin
-      WaitFor;
     end;
-    Free;
   except
     on E: Exception do
       OutputDebugString(PChar(Format('Error waiting for thread: %s', [E.Message])));
@@ -495,6 +494,7 @@ begin
   CleanupClientSockets;
 
   OutputDebugString(PChar('TBadger.Stop: Server stopped successfully'));
+  Free;
 end;
 
 procedure TBadger.Execute;
