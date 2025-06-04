@@ -23,7 +23,7 @@ S=0
 T=0
 U=0
 V=1
-W=0
+W=1
 X=1
 Y=1
 Z=1
@@ -96,7 +96,7 @@ PackageDLLOutputDir=
 PackageDCPOutputDir=
 SearchPath=..\..\src;..\..\src\Auth\Basic;..\..\src\Auth\JWT;..\..\ThirdParty\Synapse
 Packages=vcl;rtl;vclx;inet;xmlrtl;vclie;inetdbbde;inetdbxpress;dbrtl;dsnap;dsnapcon;vcldb;soaprtl;VclSmp;dbexpress;dbxcds;inetdb;bdertl;vcldbx;webdsnap;websnap;adortl;ibxpress;teeui;teedb;tee;dss;visualclx;visualdbclx;vclactnband;vclshlctrls;IntrawebDB_50_70;Intraweb_50_70;Rave50CLX;Rave50VCL;dclOfficeXP;ZPlain;ZCore;ZParseSql;gtPDFKitD70ProP;IndyCore70;IndySystem70;IndyProtocols70;rtcSDK;Oauth2Google
-Conditionals=
+Conditionals=EUREKALOG;EUREKALOG_VER7
 DebugSourceDirs=
 UsePackages=0
 [Parameters]

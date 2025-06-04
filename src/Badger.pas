@@ -70,7 +70,7 @@ constructor TBadger.Create;
 begin
   inherited Create(True);
   FreeOnTerminate := False;
-  FServerSocket := TTCPBlockSocket.Create; // Criar aqui
+  FServerSocket := TTCPBlockSocket.Create;
   FRouteManager := TRouteManager.Create;
   FMethods := TBadgerMethods.Create;
   FMiddlewares := TList.Create;
@@ -390,7 +390,7 @@ begin
   OutputDebugString(PChar('TBadger.Start: Acquiring socket lock'));
   FSocketLock.Acquire;
   try
-    // Fechar socket existente, se necessário
+
     if FServerSocket.Socket <> INVALID_SOCKET then
     begin
       FServerSocket.CloseSocket;
@@ -472,9 +472,9 @@ begin
   Terminate;
 
   try
-    // Esperar a thread terminar usando WaitForSingleObject
+
     TimeoutCounter := 0;
-    WaitResult := WaitForSingleObject(Handle, 100); // Espera 100ms por iteração
+    WaitResult := WaitForSingleObject(Handle, 100);
     while (WaitResult = WAIT_TIMEOUT) and (TimeoutCounter < MaxWaitTime) do
     begin
       Sleep(100);
@@ -538,14 +538,14 @@ begin
                 IncActiveConnections;
                 THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares,
                                                   FTimeout, FOnRequest, FOnResponse, Self);
-                ClientSocket := nil; // Transferir responsabilidade
+                ClientSocket := nil;
               end
               else
               begin
                 THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares,
                                            FTimeout, FOnRequest, FOnResponse);
                 RemoveClientSocket(ClientSocket);
-                ClientSocket := nil; // Transferir responsabilidade
+                ClientSocket := nil;
               end;
             end
             else

@@ -109,8 +109,8 @@ end;
 procedure TForm1.FormCreate(Sender: TObject);
 begin
    ServerThread := nil;
-   BasicAuth := TBasicAuth.Create('andersons', 'fioris');
-   JWTAuth := TBadgerJWTAuth.Create('fiori88092821', 'c:\tokens');
+   BasicAuth := TBasicAuth.Create('username', 'password');
+   JWTAuth := TBadgerJWTAuth.Create('secretekey', 'c:\tokenss');  //save token to file
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);

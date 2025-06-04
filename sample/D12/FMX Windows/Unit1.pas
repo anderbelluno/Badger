@@ -40,7 +40,7 @@ type
   private
     { Private declarations }
     ServerThread: TBadger;
-    BasicAuth: TBasicAuth; // Instância da autenticação Basic
+    BasicAuth: TBasicAuth;
     JWTAuth: TBadgerJWTAuth;
   public
     { Public declarations }
@@ -96,8 +96,9 @@ begin
       .&Add('/RefreshToken',TSampleRouteManager.RefreshToken);
 
     ServerThread.ParallelProcessing := True;
+    ServerThread.MaxConcurrentConnections := 500;
 
-    ServerThread.Start; // Inicia o servidor
+    ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
     CBxNonBlockMode.Enabled := False;
@@ -108,8 +109,8 @@ begin
   end
   else
   begin
-    ServerThread.Stop; // Para o servidor
-    ServerThread := nil; // A thread já se libera com FreeOnTerminate
+    ServerThread.Stop;
+    ServerThread := nil;
     btnSyna.Tag := 0;
     btnSyna.Text := 'Iniciar Servidor';
     edtPorta.Enabled := True;
@@ -123,14 +124,14 @@ end;
 procedure TForm1.FormCreate(Sender: TObject);
 begin
   ServerThread := nil;
-  BasicAuth := TBasicAuth.Create('andersons', 'fioris');
-  JWTAuth := TBadgerJWTAuth.Create('fiori88092821', 'c:\tokenss');
+  BasicAuth := TBasicAuth.Create('username', 'password');
+  JWTAuth := TBadgerJWTAuth.Create('secretekey', 'c:\tokenss');  //save token to file
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
 if Assigned(ServerThread) then
-    ServerThread.Stop; // Para o servidor ao destruir o formulário
+    ServerThread.Stop;
   FreeAndNil(BasicAuth);
   FreeAndNil(JWTAuth);
 end;

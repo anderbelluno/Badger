@@ -10,7 +10,7 @@
         <IsPartOfProject Value="True"/>
         <EditorIndex Value="-1"/>
         <CursorPos Y="18"/>
-        <UsageCount Value="50"/>
+        <UsageCount Value="51"/>
       </Unit>
       <Unit>
         <Filename Value="unit1.pas"/>
@@ -21,7 +21,7 @@
         <UnitName Value="Unit1"/>
         <TopLine Value="56"/>
         <CursorPos X="43" Y="79"/>
-        <UsageCount Value="50"/>
+        <UsageCount Value="51"/>
         <Loaded Value="True"/>
         <LoadedDesigner Value="True"/>
       </Unit>
@@ -30,8 +30,8 @@
         <IsPartOfProject Value="True"/>
         <EditorIndex Value="3"/>
         <TopLine Value="116"/>
-        <CursorPos X="27" Y="121"/>
-        <UsageCount Value="50"/>
+        <CursorPos Y="121"/>
+        <UsageCount Value="51"/>
         <Loaded Value="True"/>
       </Unit>
       <Unit>
@@ -39,7 +39,7 @@
         <IsVisibleTab Value="True"/>
         <EditorIndex Value="1"/>
         <TopLine Value="58"/>
-        <CursorPos X="105" Y="10"/>
+        <CursorPos X="27" Y="77"/>
         <UsageCount Value="19"/>
         <Loaded Value="True"/>
       </Unit>
