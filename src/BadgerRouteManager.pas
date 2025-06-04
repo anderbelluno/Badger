@@ -49,6 +49,9 @@ type
 
 implementation
 
+uses
+  Windows;
+
 { TRouteManager }
 
 {$IFNDEF FPC}
@@ -111,11 +114,24 @@ begin
                TStringList.Create
             {$ENDIF}
             ;
+
+            OutputDebugString(PChar('TRouteManager created'));
+
 end;
 
 destructor TRouteManager.Destroy;
 begin
-  FRoutes.Free;
+  try
+    if Assigned(FRoutes) then
+    begin
+      FreeAndNil(FRoutes);
+      OutputDebugString(PChar('FRoutes freed'));
+    end;
+  except
+    on E: Exception do
+      OutputDebugString(PChar(Format('Error freeing FRoutes: %s', [E.Message])));
+  end;
+  OutputDebugString(PChar('TRouteManager destroyed'));
   inherited;
 end;
 
