@@ -23,6 +23,7 @@ type
     Body: string;
     Stream: TStream;
     ContentType: string;
+    HeadersCustom: TStringList;
   end;
 
   // Record para armazenar detalhes da última requisição

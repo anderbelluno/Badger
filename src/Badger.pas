@@ -33,6 +33,7 @@ type
     FShutdownEvent: TEvent;
     FIsShuttingDown: Boolean;
     FClientSockets: TList;
+    FIsRunning: Boolean;
   protected
     procedure Execute; override;
     function CanAcceptNewConnection: Boolean;
@@ -57,6 +58,7 @@ type
     property MaxConcurrentConnections: Integer read FMaxConcurrentConnections write FMaxConcurrentConnections default 100;
     property OnRequest: TOnRequest read FOnRequest write FOnRequest;
     property OnResponse: TOnResponse read FOnResponse write FOnResponse;
+    property IsRunning: Boolean read FIsRunning;
   end;
 
 implementation
@@ -503,94 +505,98 @@ var
   ResponseInfo: TResponseInfo;
 begin
   OutputDebugString(PChar('TBadger.Execute: Server thread started'));
-
-  while not Terminated and not FIsShuttingDown do
-  begin
-    try
-      if not Assigned(FSocketLock) or not Assigned(FServerSocket) then Break;
-
-      FSocketLock.Acquire;
+  FIsRunning := True;
+  try
+    while not Terminated and not FIsShuttingDown do
+    begin
       try
-        if Terminated or FIsShuttingDown then Break;
+        if not Assigned(FSocketLock) or not Assigned(FServerSocket) then Break;
 
-        if Assigned(FServerSocket) and (FServerSocket.Socket <> INVALID_SOCKET) and
-           FServerSocket.CanRead(100) then
-        begin
-          if FParallelProcessing and not CanAcceptNewConnection then
+        FSocketLock.Acquire;
+        try
+          if Terminated or FIsShuttingDown then Break;
+
+          if Assigned(FServerSocket) and (FServerSocket.Socket <> INVALID_SOCKET) and
+             FServerSocket.CanRead(100) then
           begin
-            OutputDebugString(PChar(Format('TBadger.Execute: Max concurrent connections reached: %d', [FActiveConnections])));
-            Sleep(10);
-            Continue;
-          end;
-
-          OutputDebugString(PChar('TBadger.Execute: Creating client socket'));
-          ClientSocket := TTCPBlockSocket.Create;
-          try
-            OutputDebugString(PChar('TBadger.Execute: Accepting connection'));
-            ClientSocket.Socket := FServerSocket.Accept;
-            if ClientSocket.LastError = 0 then
+            if FParallelProcessing and not CanAcceptNewConnection then
             begin
-              OutputDebugString(PChar(Format('TBadger.Execute: New connection accepted. Active connections: %d', [FActiveConnections + 1])));
-              AddClientSocket(ClientSocket);
+              OutputDebugString(PChar(Format('TBadger.Execute: Max concurrent connections reached: %d', [FActiveConnections])));
+              Sleep(10);
+              Continue;
+            end;
 
-              if FParallelProcessing then
+            OutputDebugString(PChar('TBadger.Execute: Creating client socket'));
+            ClientSocket := TTCPBlockSocket.Create;
+            try
+              OutputDebugString(PChar('TBadger.Execute: Accepting connection'));
+              ClientSocket.Socket := FServerSocket.Accept;
+              if ClientSocket.LastError = 0 then
               begin
-                IncActiveConnections;
-                THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares,
-                                                  FTimeout, FOnRequest, FOnResponse, Self);
-                ClientSocket := nil;
+                OutputDebugString(PChar(Format('TBadger.Execute: New connection accepted. Active connections: %d', [FActiveConnections + 1])));
+                AddClientSocket(ClientSocket);
+
+                if FParallelProcessing then
+                begin
+                  IncActiveConnections;
+                  THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares,
+                                                    FTimeout, FOnRequest, FOnResponse, Self);
+                  ClientSocket := nil;
+                end
+                else
+                begin
+                  THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares,
+                                             FTimeout, FOnRequest, FOnResponse);
+                  RemoveClientSocket(ClientSocket);
+                  ClientSocket := nil;
+                end;
               end
               else
               begin
-                THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares,
-                                           FTimeout, FOnRequest, FOnResponse);
-                RemoveClientSocket(ClientSocket);
-                ClientSocket := nil;
+                OutputDebugString(PChar(Format('TBadger.Execute: Error accepting connection: %s', [ClientSocket.LastErrorDesc])));
+                if Assigned(FOnResponse) then
+                begin
+                  ResponseInfo.StatusCode := 500;
+                  ResponseInfo.StatusText := 'Internal Server Error';
+                  ResponseInfo.Body := 'Error accepting connection: ' + ClientSocket.LastErrorDesc;
+                  FOnResponse(ResponseInfo);
+                end;
               end;
-            end
-            else
-            begin
-              OutputDebugString(PChar(Format('TBadger.Execute: Error accepting connection: %s', [ClientSocket.LastErrorDesc])));
-              if Assigned(FOnResponse) then
+            finally
+              if Assigned(ClientSocket) then
               begin
-                ResponseInfo.StatusCode := 500;
-                ResponseInfo.StatusText := 'Internal Server Error';
-                ResponseInfo.Body := 'Error accepting connection: ' + ClientSocket.LastErrorDesc;
-                FOnResponse(ResponseInfo);
-              end;
-            end;
-          finally
-            if Assigned(ClientSocket) then
-            begin
-              RemoveClientSocket(ClientSocket);
-              try
-                ClientSocket.CloseSocket;
-                FreeAndNil(ClientSocket);
-                OutputDebugString(PChar('TBadger.Execute: ClientSocket freed due to error'));
-              except
-                on E: Exception do
-                  OutputDebugString(PChar(Format('TBadger.Execute: Error freeing ClientSocket: %s', [E.Message])));
+                RemoveClientSocket(ClientSocket);
+                try
+                  ClientSocket.CloseSocket;
+                  FreeAndNil(ClientSocket);
+                  OutputDebugString(PChar('TBadger.Execute: ClientSocket freed due to error'));
+                except
+                  on E: Exception do
+                    OutputDebugString(PChar(Format('TBadger.Execute: Error freeing ClientSocket: %s', [E.Message])));
+                end;
               end;
             end;
           end;
+        finally
+          FSocketLock.Release;
         end;
-      finally
-        FSocketLock.Release;
-      end;
 
-      if Terminated or FIsShuttingDown then Break;
-      Sleep(10);
-    except
-      on E: Exception do
-      begin
-        OutputDebugString(PChar(Format('TBadger.Execute: Unexpected exception: %s', [E.Message])));
-        Break;
+        if Terminated or FIsShuttingDown then Break;
+        Sleep(10);
+      except
+        on E: Exception do
+        begin
+          OutputDebugString(PChar(Format('TBadger.Execute: Unexpected exception: %s', [E.Message])));
+          Break;
+        end;
       end;
     end;
-  end;
 
-  OutputDebugString(PChar('TBadger.Execute: Server thread terminated'));
-  SafeCloseSocket;
+    OutputDebugString(PChar('TBadger.Execute: Server thread terminated'));
+    SafeCloseSocket;
+  finally
+    FIsRunning := False;
+  end;
 end;
 
 end.

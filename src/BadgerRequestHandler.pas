@@ -27,7 +27,7 @@ type
     FIsParallel: Boolean;
   protected
     function ParseRequestHeader(ClientSocket: TTCPBlockSocket): TStringList;
-    function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean): string;
+    function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean; HeaderCustom: TStringList): string;
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
                       AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
@@ -156,9 +156,12 @@ begin
   end;
 end;
 
-function THTTPRequestHandler.BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean): string;
+function THTTPRequestHandler.BuildHTTPResponse(StatusCode: Integer;
+  Body: string; Stream: TStream; ContentType: string;
+  CloseConnection: Boolean; HeaderCustom: TStringList): string;
 var
   EffectiveContentType: string;
+  i: Integer;
 {$IFDEF VER150}
   UTF8Body: string;
 {$ELSE}
@@ -197,6 +200,15 @@ begin
     Result := Result + 'Connection: close' + CRLF
   else
     Result := Result + 'Connection: keep-alive' + CRLF;
+
+  if (Assigned(HeaderCustom)) and (HeaderCustom.Count > 0) then
+  begin
+    for i := 0 to Pred(HeaderCustom.Count) do
+    begin
+      Result := Result + HeaderCustom.KeyNames[i] + ':' + HeaderCustom.ValueFromIndex[i]+ CRLF;
+    end;
+  end;
+
   Result := Result + CRLF;
 end;
 
@@ -249,6 +261,7 @@ begin
       Req.Body := '';
       Req.BodyStream := nil;
       Resp.Stream := TMemoryStream.Create;
+      Resp.HeadersCustom := TStringList.Create;
 
       RequestInfo.Headers := TStringList.Create;
       RequestInfo.QueryParams := TStringList.Create;
@@ -258,6 +271,7 @@ begin
         repeat
           if FClientSocket.LastError = 0 then
           begin
+            Resp.HeadersCustom.Clear;
             FRequestLine := FClientSocket.RecvString(FTimeout);
             if FRequestLine = '' then Break;
             if FMethods.ExtractMethodAndURI(FRequestLine, FMethod, FURI, QueryParams) then
@@ -265,8 +279,9 @@ begin
               Req.Method := FMethod;
               Req.URI := FURI;
               Req.RequestLine := FRequestLine;
+              Req.FRemoteIP :=FClientSocket.GetRemoteSinIP;
 
-              RequestInfo.RemoteIP := FClientSocket.GetRemoteSinIP;
+              RequestInfo.RemoteIP := Req.FRemoteIP;
               RequestInfo.Method := Req.Method;
               RequestInfo.URI := Req.URI;
               RequestInfo.RequestLine := Req.RequestLine;
@@ -331,7 +346,7 @@ begin
                     MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
                     if not MiddlewareWrapper.Middleware(Req, Resp) then
                     begin
-                      ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection);
+                      ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection, Resp.HeadersCustom);
                       FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
                       UTF8Body := UTF8Encode(Resp.Body);
@@ -394,7 +409,7 @@ begin
                     if not Assigned(Resp.Stream) then
                       Resp.Stream := TMemoryStream.Create;
                     Exec(LRoute, Req, Resp);
-                    ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection);
+                    ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection, Resp.HeadersCustom);
                     FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
                     UTF8Body := UTF8Encode(Resp.Body);
@@ -442,7 +457,7 @@ begin
                     Resp.StatusCode := HTTP_NOT_FOUND;
                     Resp.Body := 'Not Found';
                     Resp.ContentType := TEXT_PLAIN;
-                    ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, CloseConnection);
+                    ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, CloseConnection, Resp.HeadersCustom);
                     FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
                     UTF8Body := UTF8Encode('Not Found');
@@ -491,6 +506,8 @@ begin
           FreeAndNil(Req.BodyStream);
         if Assigned(Resp.Stream) then
           FreeAndNil(Resp.Stream);
+        if Assigned(Resp.HeadersCustom) then
+          FreeAndNil(Resp.HeadersCustom);
         if Assigned(RequestInfo.Headers) then
           FreeAndNil(RequestInfo.Headers);
         if Assigned(RequestInfo.QueryParams) then
@@ -509,7 +526,7 @@ begin
         Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
         Resp.Body := 'Internal Server Error: ' + E.Message;
         Resp.ContentType := TEXT_PLAIN;
-        ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, True);
+        ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, True, Resp.HeadersCustom);
         FClientSocket.SendString(ResponseHeader);
 {$IFDEF VER150}
         UTF8Body := UTF8Encode(Resp.Body);
