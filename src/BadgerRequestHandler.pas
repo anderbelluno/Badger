@@ -1,8 +1,6 @@
 unit BadgerRequestHandler;
 
-{$IFDEF FPC}
-  {$mode delphi}{$H+}
-{$ENDIF}
+{$I BadgerDefines.inc}
 
 interface
 
@@ -213,7 +211,12 @@ begin
 end;
 
 procedure THTTPRequestHandler.Execute;
-  procedure Exec(LRoute: TObject; const Request: THTTPRequest; out Response: THTTPResponse);
+  procedure Exec(LRoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF}; const Request: THTTPRequest; out Response: THTTPResponse);
+{$IFDEF Delphi2009Plus}
+  begin
+    LRoute(Request, Response);
+  end;
+{$ELSE}
   var
     Callback: TRoutingCallback;
     MethodPointer: TMethod;
@@ -223,6 +226,7 @@ procedure THTTPRequestHandler.Execute;
     Callback := TRoutingCallback(MethodPointer);
     Callback(Request, Response);
   end;
+{$ENDIF}
 
 const
   MaxBufferSize = 1048576; // 1MB
@@ -230,7 +234,7 @@ var
   Index, I, ContentLength, TotalBytes: Integer;
   Req: THTTPRequest;
   Resp: THTTPResponse;
-  LRoute: TObject;
+  LRoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF};
   MiddlewareWrapper: TMiddlewareWrapper;
   Headers: TStringList;
   BodyStream: TMemoryStream;
@@ -385,17 +389,9 @@ begin
                     end;
                   end;
 
-{$IFNDEF FPC}
-  {$IF CompilerVersion >= 20}
+{$IFDEF Delphi2009Plus}
                   if not FRouteManager.FRoutes.TryGetValue(FURI.ToLower, LRoute) then
                     LRoute := nil;
-  {$ELSE}
-                  Index := FRouteManager.FRoutes.IndexOf(LowerCase(FURI));
-                  if Index <> -1 then
-                    LRoute := FRouteManager.FRoutes.Objects[Index]
-                  else
-                    LRoute := nil;
-  {$IFEND}
 {$ELSE}
                   Index := FRouteManager.FRoutes.IndexOf(LowerCase(FURI));
                   if Index <> -1 then
@@ -495,59 +491,59 @@ begin
           else
             Break;
         until False;
-      finally
-        if Assigned(QueryParams) then
-          FreeAndNil(QueryParams);
-        if Assigned(Req.QueryParams) then
-          FreeAndNil(Req.QueryParams);
-        if Assigned(Req.Headers) then
-          FreeAndNil(Req.Headers);
-        if Assigned(Req.BodyStream) then
-          FreeAndNil(Req.BodyStream);
-        if Assigned(Resp.Stream) then
-          FreeAndNil(Resp.Stream);
-        if Assigned(Resp.HeadersCustom) then
-          FreeAndNil(Resp.HeadersCustom);
-        if Assigned(RequestInfo.Headers) then
-          FreeAndNil(RequestInfo.Headers);
-        if Assigned(RequestInfo.QueryParams) then
-          FreeAndNil(RequestInfo.QueryParams);
-        if Assigned(ResponseInfo.Headers) then
-          FreeAndNil(ResponseInfo.Headers);
-        if Assigned(FClientSocket) then
+      except
+        on E: Exception do
         begin
-          FClientSocket.CloseSocket;
-          FreeAndNil(FClientSocket);
+          Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
+          Resp.Body := 'Internal Server Error: ' + E.Message;
+          Resp.ContentType := TEXT_PLAIN;
+          ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, True, Resp.HeadersCustom);
+          FClientSocket.SendString(ResponseHeader);
+  {$IFDEF VER150}
+          UTF8Body := UTF8Encode(Resp.Body);
+          SetLength(ResponseBodyBytes, Length(UTF8Body));
+          Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
+          if Length(ResponseBodyBytes) > 0 then
+            FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
+  {$ELSE}
+          ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
+          if Length(ResponseBodyBytes) > 0 then
+            FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
+  {$ENDIF}
+
+          ResponseInfo.StatusCode := Resp.StatusCode;
+          ResponseInfo.StatusText := THTTPStatus.GetStatusText(Resp.StatusCode);
+          ResponseInfo.Body := Resp.Body;
+          ResponseInfo.ContentType := Resp.ContentType;
+          ResponseInfo.Headers.Text := ResponseHeader;
+          ResponseInfo.Timestamp := Now;
+          if Assigned(FOnResponse) then
+            FOnResponse(ResponseInfo);
         end;
       end;
-    except
-      on E: Exception do
+    finally
+      if Assigned(QueryParams) then
+        FreeAndNil(QueryParams);
+      if Assigned(Req.QueryParams) then
+        FreeAndNil(Req.QueryParams);
+      if Assigned(Req.Headers) then
+        FreeAndNil(Req.Headers);
+      if Assigned(Req.BodyStream) then
+        FreeAndNil(Req.BodyStream);
+      if Assigned(Resp.Stream) then
+        FreeAndNil(Resp.Stream);
+      if Assigned(Resp.HeadersCustom) then
+        FreeAndNil(Resp.HeadersCustom);
+      if Assigned(RequestInfo.Headers) then
+        FreeAndNil(RequestInfo.Headers);
+      if Assigned(RequestInfo.QueryParams) then
+        FreeAndNil(RequestInfo.QueryParams);
+      if Assigned(ResponseInfo.Headers) then
+        FreeAndNil(ResponseInfo.Headers);
+      if Assigned(FClientSocket) then
       begin
-        Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-        Resp.Body := 'Internal Server Error: ' + E.Message;
-        Resp.ContentType := TEXT_PLAIN;
-        ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, True, Resp.HeadersCustom);
-        FClientSocket.SendString(ResponseHeader);
-{$IFDEF VER150}
-        UTF8Body := UTF8Encode(Resp.Body);
-        SetLength(ResponseBodyBytes, Length(UTF8Body));
-        Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
-        if Length(ResponseBodyBytes) > 0 then
-          FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
-{$ELSE}
-        ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
-        if Length(ResponseBodyBytes) > 0 then
-          FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
-{$ENDIF}
-
-        ResponseInfo.StatusCode := Resp.StatusCode;
-        ResponseInfo.StatusText := THTTPStatus.GetStatusText(Resp.StatusCode);
-        ResponseInfo.Body := Resp.Body;
-        ResponseInfo.ContentType := Resp.ContentType;
-        ResponseInfo.Headers.Text := ResponseHeader;
-        ResponseInfo.Timestamp := Now;
-        if Assigned(FOnResponse) then
-          FOnResponse(ResponseInfo);
+        FClientSocket.CloseSocket;
+        FreeAndNil(FClientSocket);
       end;
     end;
   finally
