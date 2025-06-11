@@ -55,6 +55,8 @@ begin
     ServerThread.OnRequest := HandleRequest;
     ServerThread.OnResponse := HandleResponse;
 
+
+
    case RadioGroup1.ItemIndex of
      1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping', '/download']);
      3: begin
@@ -62,6 +64,8 @@ begin
            SampleRouteManager.FJWT := JWTAuth;
         end;
     end;
+
+    ServerThread.UseCORS := True;
 
     ServerThread.RouteManager
       .AddPost('/upload', TSampleRouteManager.upLoad)
@@ -72,7 +76,7 @@ begin
       .AddPost('/Login',TSampleRouteManager.Login)
       .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken);
 
-      ServerThread.ParallelProcessing := True;
+      ServerThread.ParallelProcessing := False;
 
     ServerThread.Start;
     edtPorta.Enabled := False;

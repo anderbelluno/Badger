@@ -171,7 +171,7 @@ begin
   else
     EffectiveContentType := ContentType;
 
-  if (ContainsText(LowerCase(EffectiveContentType), TEXT_PLAIN)) or (ContainsText(LowerCase(EffectiveContentType), APPLICATION_JSON)) then
+  if (AnsiContainsText(LowerCase(EffectiveContentType), TEXT_PLAIN)) or (AnsiContainsText(LowerCase(EffectiveContentType), APPLICATION_JSON)) then
   begin
 {$IFDEF VER150}
     UTF8Body := UTF8Encode(Body);
@@ -203,7 +203,7 @@ begin
   begin
     for i := 0 to Pred(HeaderCustom.Count) do
     begin
-      Result := Result + HeaderCustom.KeyNames[i] + ':' + HeaderCustom.ValueFromIndex[i]+ CRLF;
+      Result := Result + HeaderCustom.Names[i] + ':' + HeaderCustom.ValueFromIndex[i]+ CRLF;
     end;
   end;
 

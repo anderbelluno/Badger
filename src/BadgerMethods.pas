@@ -22,14 +22,17 @@ type
 
 implementation
 
+uses StrUtils;
+
 function TBadgerMethods.ExtractMethodAndURI(const RequestLine: string; out Method, URI: string; out QueryParams: TStringList): Boolean;
 var
   SpacePos, QueryPos: Integer;
-  VRequestLine, QueryString, ParamPair: string;
+  VRequestLine, QueryString, ParamPair, DoubleSlash: string;
 begin
   Result := False;
   QueryParams.Clear;
   VRequestLine := RequestLine;
+  DoubleSlash := '//';
 
   SpacePos := Pos(' ', VRequestLine);
   if SpacePos > 0 then
@@ -41,8 +44,8 @@ begin
     if SpacePos > 0 then
     begin
       URI := Copy(VRequestLine, 1, SpacePos - 1);
-      while URI.Contains('//') do
-        URI := StringReplace(URI, '//', '/', [rfReplaceAll]);
+      while Pos(DoubleSlash, URI)>0 do
+        URI := StringReplace(URI, DoubleSlash, '/', [rfReplaceAll]);
 
       QueryPos := Pos('?', URI);
       if QueryPos > 0 then

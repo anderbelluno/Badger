@@ -68,13 +68,13 @@ begin
     end;
 
     ServerThread.RouteManager
-      .Add('/upload',       TSampleRouteManager.upLoad)
-      .Add('/download',     TSampleRouteManager.downLoad)
-      .Add('/rota1',        TSampleRouteManager.rota1)
-      .Add('/ping',         TSampleRouteManager.ping)
-      .Add('/AtuImage',     TSampleRouteManager.AtuImage)
-      .Add('/Login',        TSampleRouteManager.Login)
-      .Add('/RefreshToken', TSampleRouteManager.RefreshToken);
+      .AddPost('/upload',       TSampleRouteManager.upLoad)
+      .AddGet('/download',     TSampleRouteManager.downLoad)
+      .AddGet('/rota1',        TSampleRouteManager.rota1)
+      .AddGet('/ping',         TSampleRouteManager.ping)
+      .AddGet('/AtuImage',     TSampleRouteManager.AtuImage)
+      .AddGet('/Login',        TSampleRouteManager.Login)
+      .AddPost('/RefreshToken', TSampleRouteManager.RefreshToken);
 
     ServerThread.ParallelProcessing:= True;
 

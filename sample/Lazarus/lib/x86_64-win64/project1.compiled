@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Compiler Value="C:\lazarus40\fpc\3.2.2\bin\x86_64-win64\fpc.exe" Date="1520657216"/>
+  <Params Value="-MObjFPC -Scghi -O1 -gw3 -gl -gh -WG -l -vewnhibq -FiD:\files\BadgerServer\TTCPBlockSocket\sample\Lazarus\lib\x86_64-win64 -FuD:\files\BadgerServer\TTCPBlockSocket\sample\Lazarus\ -FuD:\files\BadgerServer\TTCPBlockSocket\src -FuD:\files\BadgerServer\TTCPBlockSocket\src\Auth\Basic -FuD:\files\BadgerServer\TTCPBlockSocket\src\Auth\JWT -FuD:\files\BadgerServer\TTCPBlockSocket\sample -FuD:\files\BadgerServer\TTCPBlockSocket\ThirdParty\Synapse -FuD:\files\BadgerServer\TTCPBlockSocket\ThirdParty\SuperObject\D7_Laz -FuC:\lazarus40\lcl\units\x86_64-win64\win32 -FuC:\lazarus40\lcl\units\x86_64-win64 -FuC:\lazarus40\components\freetype\lib\x86_64-win64 -FuC:\lazarus40\components\lazutils\lib\x86_64-win64 -FuC:\lazarus40\packager\units\x86_64-win64 -FUD:\files\BadgerServer\TTCPBlockSocket\sample\Lazarus\lib\x86_64-win64\ -FED:\files\BadgerServer\TTCPBlockSocket\sample\Lazarus\ -oD:\files\BadgerServer\TTCPBlockSocket\sample\Lazarus\project1.exe -dLCL -dLCLwin32 project1.lpr"/>
+</CONFIG>

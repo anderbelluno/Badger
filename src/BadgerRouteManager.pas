@@ -82,7 +82,7 @@ var
 {$ENDIF}
 begin
   Result := Self;
-  LRoute := AVerb.ToUpper + ' ' + ARoute.ToLower;
+  LRoute := UpperCase(AVerb) + ' ' + LowerCase(ARoute);
 {$IFDEF Delphi2009Plus}
   if Assigned(ACallback) then
     FRoutes.AddOrSetValue(LRoute, ACallback);
