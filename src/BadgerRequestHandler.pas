@@ -211,10 +211,10 @@ begin
 end;
 
 procedure THTTPRequestHandler.Execute;
-  procedure Exec(LRoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF}; const Request: THTTPRequest; out Response: THTTPResponse);
+  procedure Exec(ARoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF}; const ARequest: THTTPRequest; out Response: THTTPResponse);
 {$IFDEF Delphi2009Plus}
   begin
-    LRoute(Request, Response);
+    ARoute(ARequest, Response);
   end;
 {$ELSE}
   var
@@ -222,9 +222,9 @@ procedure THTTPRequestHandler.Execute;
     MethodPointer: TMethod;
   begin
     MethodPointer.Data := Self;
-    MethodPointer.Code := Pointer(LRoute);
+    MethodPointer.Code := Pointer(ARoute);
     Callback := TRoutingCallback(MethodPointer);
-    Callback(Request, Response);
+    Callback(ARequest, Response);
   end;
 {$ENDIF}
 
@@ -234,6 +234,7 @@ var
   Index, I, ContentLength, TotalBytes: Integer;
   Req: THTTPRequest;
   Resp: THTTPResponse;
+  LRouteStr: string;
   LRoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF};
   MiddlewareWrapper: TMiddlewareWrapper;
   Headers: TStringList;
@@ -284,6 +285,7 @@ begin
               Req.URI := FURI;
               Req.RequestLine := FRequestLine;
               Req.FRemoteIP :=FClientSocket.GetRemoteSinIP;
+              LRouteStr := UpperCase(Req.Method) + ' ' + LowerCase(Req.URI);
 
               RequestInfo.RemoteIP := Req.FRemoteIP;
               RequestInfo.Method := Req.Method;
@@ -390,10 +392,10 @@ begin
                   end;
 
 {$IFDEF Delphi2009Plus}
-                  if not FRouteManager.FRoutes.TryGetValue(FURI.ToLower, LRoute) then
+                  if not FRouteManager.FRoutes.TryGetValue(LRouteStr, LRoute) then
                     LRoute := nil;
 {$ELSE}
-                  Index := FRouteManager.FRoutes.IndexOf(LowerCase(FURI));
+                  Index := FRouteManager.FRoutes.IndexOf(LRouteStr);
                   if Index <> -1 then
                     LRoute := FRouteManager.FRoutes.Objects[Index]
                   else

@@ -27,6 +27,9 @@ type
     { Private declarations }
   public
     function GetServiceController: TServiceController; override;
+
+    procedure BadgerStart;
+    procedure BadgerStop;
     { Public declarations }
   end;
 
@@ -45,6 +48,27 @@ begin
   FBadgerService.Controller(CtrlCode);
 end;
 
+procedure TFBadgerService.BadgerStart;
+begin
+  FServerThread := TBadger.Create;
+  FServerThread.Port := 8080;
+  FServerThread.Timeout := 10000;
+
+  FServerThread.RouteManager
+    .AddPost('/upload', TSampleRouteManager.upLoad)
+    .AddGet('/download', TSampleRouteManager.downLoad)
+    .AddGet('/rota1', TSampleRouteManager.rota1)
+    .AddGet('/ping', TSampleRouteManager.ping)
+    .AddPatch('/AtuImage', TSampleRouteManager.AtuImage);
+
+  FServerThread.Start;
+end;
+
+procedure TFBadgerService.BadgerStop;
+begin
+  FServerThread.Stop;
+end;
+
 function TFBadgerService.GetServiceController: TServiceController;
 begin
   Result := ServiceController;
@@ -57,23 +81,12 @@ end;
 
 procedure TFBadgerService.ServiceStart(Sender: TService; var Started: Boolean);
 begin
-  FServerThread := TBadger.Create;
-  FServerThread.Port := 8080;
-  FServerThread.Timeout := 10000;
-
-  FServerThread.RouteManager
-    .&Register('/upload', TSampleRouteManager.upLoad)
-    .&Register('/download', TSampleRouteManager.downLoad)
-    .&Register('/rota1', TSampleRouteManager.rota1)
-    .&Register('/ping', TSampleRouteManager.ping)
-    .&Register('/AtuImage', TSampleRouteManager.AtuImage);
-
-  FServerThread.Start;
+  BadgerStart
 end;
 
 procedure TFBadgerService.ServiceStop(Sender: TService; var Stopped: Boolean);
 begin
-  FServerThread.Stop;
+  BadgerStop;
 end;
 
 end.

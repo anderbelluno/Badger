@@ -1,23 +1,11 @@
 # Add any directories, files, or patterns you don't want to be tracked by version control
 Win32/
-OSX32/
-iOSSimulator/
-iOSDevice64/
-LaunchScreen.TemplateiOS/
-*.db-journal
-Certificados/*
-DB/IBNFeDB1.db
-Android/
-Erros/
+Win64/
 templates/
 js/
 images/
 css/
-DB/Backup
-modules/
-modules1/
 Android64/
-Win64/
 Linux64/
 LaunchScreen.TemplateiOS/*
 
@@ -84,6 +72,7 @@ LaunchScreen.TemplateiOS/*
 *.projdata
 *.tvsconfig
 *.dsk
+*.skincfg
 
 # Delphi history and backups
 __history/
@@ -98,26 +87,6 @@ modules/
 
 # End of https://www.gitignore.io/api/delphi
 *.deployproj
-
-Entitlement.TemplateiOS.xml
-info.plist.TemplateiOS.xml
-play-services-basement-18.1.0-Manifest.merge.xml
-
-Server Horse/Database/PLACAR.FDB
-Server Horse/Database/PLACAR.FBK
-Mobile/Database/DBPlacarTrumbica.db
-Mobile/Database/DBPlacarTrumbica.zip
-Mobile/Database/Remvoer qnd Possivel DBPlacarTrumbica.s3db
-Mobile/Database/DBPlacarTrumbica.db
-Mobile/Database/Remvoer qnd Possivel DBPlacarTrumbica.s3db
-Mobile/Database/DBPlacarTrumbica.db
-/Mobile/Database
-/Mobile/Lib/Third Party/WinSoft OCR for FireMonkey v5.7
-/Mobile/12_1/Lib
-/Mobile/12_1/Resources
-info.plist.TemplateiOS.xml
-Entitlement.TemplateiOS.xml
-Mobile/12_1/dbgout.log
 *.bak
 *.ppu
 *.mes

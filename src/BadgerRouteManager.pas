@@ -26,11 +26,13 @@ type
 {$ENDIF};
     constructor Create;
     destructor Destroy; override;
-{$IFDEF Delphi2009Plus}
-      function &Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-{$ELSE}
-      function Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-{$ENDIF}
+    function AddMethod(const AVerb, ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    function AddDel(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    function AddGet(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    function AddPatch(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    function AddPost(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    function AddPut(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+
 
     function Unregister(const Route: string): TRouteManager;
   end;
@@ -42,24 +44,7 @@ uses
 
 { TRouteManager }
 
-{$IFDEF Delphi2009Plus}
-function TRouteManager.&Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-begin
-  Result := Self;
-  if Assigned(Callback) then
-    FRoutes.AddOrSetValue(Route.ToLower, Callback);
-end;
-{$ELSE}
-function TRouteManager.Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-var
-  Method: TMethod;
-begin
-  Result := Self;
-  Method.Data := Self;
-  Method.Code := @Callback;
-  FRoutes.AddObject(Route, TObject(Method.Code));
-end;
-{$ENDIF}
+
 
 function TRouteManager.Unregister(const Route: string): TRouteManager;
 var
@@ -74,6 +59,56 @@ begin
   if LIndex <> -1 then
     FRoutes.Delete(LIndex);
 {$ENDIF}
+end;
+
+function TRouteManager.AddDel(const ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+begin
+  Result := AddMethod('DELETE', ARoute, ACallback);
+end;
+
+function TRouteManager.AddGet(const ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+begin
+  Result := AddMethod('GET', ARoute, ACallback);
+end;
+
+function TRouteManager.AddMethod(const AVerb, ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+var
+  LRoute: string;
+{$IFnDEF Delphi2009Plus}
+  LMethod: TMethod;
+{$ENDIF}
+begin
+  Result := Self;
+  LRoute := AVerb.ToUpper + ' ' + ARoute.ToLower;
+{$IFDEF Delphi2009Plus}
+  if Assigned(ACallback) then
+    FRoutes.AddOrSetValue(LRoute, ACallback);
+{$ELSE}
+  LMethod.Data := Self;
+  LMethod.Code := @ACallback;
+  FRoutes.AddObject(LRoute, TObject(LMethod.Code));
+{$ENDIF}
+end;
+
+function TRouteManager.AddPatch(const ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+begin
+  Result := AddMethod('PATCH', ARoute, ACallback);
+end;
+
+function TRouteManager.AddPost(const ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+begin
+  Result := AddMethod('POST', ARoute, ACallback);
+end;
+
+function TRouteManager.AddPut(const ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+begin
+  Result := AddMethod('PUT', ARoute, ACallback);
 end;
 
 constructor TRouteManager.Create;
