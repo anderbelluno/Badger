@@ -7,7 +7,7 @@ images/
 css/
 Android64/
 Linux64/
-LaunchScreen.TemplateiOS/*
+LaunchScreen.TemplateiOS/* 
 
 # Created by https://www.gitignore.io/api/delphi
 # Edit at https://www.gitignore.io/?templates=delphi
