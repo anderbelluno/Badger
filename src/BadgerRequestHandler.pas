@@ -171,7 +171,7 @@ begin
   else
     EffectiveContentType := ContentType;
 
-  if (EffectiveContentType = TEXT_PLAIN) or (EffectiveContentType = APPLICATION_JSON) then
+  if (ContainsText(LowerCase(EffectiveContentType), TEXT_PLAIN)) or (ContainsText(LowerCase(EffectiveContentType), APPLICATION_JSON)) then
   begin
 {$IFDEF VER150}
     UTF8Body := UTF8Encode(Body);

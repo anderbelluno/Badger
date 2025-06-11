@@ -41,6 +41,9 @@ begin
     if SpacePos > 0 then
     begin
       URI := Copy(VRequestLine, 1, SpacePos - 1);
+      while URI.Contains('//') do
+        URI := StringReplace(URI, '//', '/', [rfReplaceAll]);
+
       QueryPos := Pos('?', URI);
       if QueryPos > 0 then
       begin
