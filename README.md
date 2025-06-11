@@ -25,4 +25,4 @@ https://github.com/geby/synapse
 
 ## ⚠️ License
 
-`Badger` is free and open-source software licensed under the [MIT License](https://github.com/anderbelluno/Badger/blob/master/LICENSE). 
+`1Badger` is free and open-source software licensed under the [MIT License](https://github.com/anderbelluno/Badger/blob/master/LICENSE). 
