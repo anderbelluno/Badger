@@ -18,6 +18,13 @@ type
   TRouteManager = class(TObject)
   private
   public
+    const
+    CDEL = 'DELETE';
+    CGET = 'GET';
+    CPATCH = 'PATCH';
+    CPOST = 'POST';
+    CPUT = 'PUT';
+    var
     FRoutes:
 {$IFDEF Delphi2009Plus}
     TDictionary<string, TRoutingCallback>
@@ -64,13 +71,13 @@ end;
 function TRouteManager.AddDel(const ARoute: string;
   ACallback: TRoutingCallback): TRouteManager;
 begin
-  Result := AddMethod('DELETE', ARoute, ACallback);
+  Result := AddMethod(CDEL, ARoute, ACallback);
 end;
 
 function TRouteManager.AddGet(const ARoute: string;
   ACallback: TRoutingCallback): TRouteManager;
 begin
-  Result := AddMethod('GET', ARoute, ACallback);
+  Result := AddMethod(CGET, ARoute, ACallback);
 end;
 
 function TRouteManager.AddMethod(const AVerb, ARoute: string;
@@ -96,19 +103,19 @@ end;
 function TRouteManager.AddPatch(const ARoute: string;
   ACallback: TRoutingCallback): TRouteManager;
 begin
-  Result := AddMethod('PATCH', ARoute, ACallback);
+  Result := AddMethod(CPATCH, ARoute, ACallback);
 end;
 
 function TRouteManager.AddPost(const ARoute: string;
   ACallback: TRoutingCallback): TRouteManager;
 begin
-  Result := AddMethod('POST', ARoute, ACallback);
+  Result := AddMethod(CPOST, ARoute, ACallback);
 end;
 
 function TRouteManager.AddPut(const ARoute: string;
   ACallback: TRoutingCallback): TRouteManager;
 begin
-  Result := AddMethod('PUT', ARoute, ACallback);
+  Result := AddMethod(CPUT, ARoute, ACallback);
 end;
 
 constructor TRouteManager.Create;
