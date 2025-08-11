@@ -1,19 +1,15 @@
 unit BadgerRouteManager;
 
-{$IFDEF FPC}
-  {$mode delphi}{$H+}
-{$ENDIF}
+{$I BadgerDefines.inc}
 
 interface
 
 uses
   Classes,
   SysUtils,
- {$IFNDEF FPC}
-    {$IF CompilerVersion >= 20} // Delphi 2009+
-      System.Generics.Collections,
-    {$IFEND}
- {$ENDIF}
+{$IFDEF Delphi2009Plus}
+  System.Generics.Collections,
+{$ENDIF}
   BadgerMethods,
   BadgerTypes,
   BadgerHttpStatus;
@@ -23,29 +19,30 @@ type
   private
   public
     FRoutes:
-            {$IFNDEF FPC}
-             {$IF CompilerVersion >= 20}
-                TDictionary<string, TObject>
-             {$ELSE}
-                TStringList
-             {$IFEND}
-            {$ELSE}
-                TStringList
-            {$ENDIF};
+{$IFDEF Delphi2009Plus}
+    TDictionary<string, TRoutingCallback>
+{$ELSE}
+    TStringList
+{$ENDIF};
     constructor Create;
     destructor Destroy; override;
-   {$IFNDEF FPC}
-    {$IF CompilerVersion >= 20}
-      function &Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-    {$ELSE}
-      function Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-    {$IFEND}
-   {$ELSE}
-      function Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-    {$ENDIF}
+    function AddMethod(const AVerb, ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    function AddDel(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    function AddGet(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    function AddPatch(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    function AddPost(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    function AddPut(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+
 
     function Unregister(const Route: string): TRouteManager;
   end;
+
+   const
+    CDEL = 'DELETE';
+    CGET = 'GET';
+    CPATCH = 'PATCH';
+    CPOST = 'POST';
+    CPUT = 'PUT';
 
 implementation
 
@@ -54,69 +51,84 @@ uses
 
 { TRouteManager }
 
-{$IFNDEF FPC}
-  {$IF CompilerVersion >= 20}
-     function TRouteManager.&Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-  {$ELSE}
-     function TRouteManager.Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-  {$IFEND}
-{$ELSE}
-  function TRouteManager.Add(const Route: string; Callback: TRoutingCallback): TRouteManager;
-{$ENDIF}
-var
-  Method: TMethod;
-begin
-  Result := Self;
-  Method.Data := Self;
-  Method.Code := @Callback;
-  {$IFNDEF FPC}
-    {$IF CompilerVersion >= 20}
-      FRoutes.AddOrSetValue(Route.ToLower, TObject(Method.Code));
-    {$ELSE}
-      FRoutes.AddObject(Route, TObject(Method.Code));
-    {$IFEND}
-  {$ELSE}
-      FRoutes.AddObject(Route, TObject(Method.Code));
-    {$ENDIF}
-end;
+
 
 function TRouteManager.Unregister(const Route: string): TRouteManager;
 var
   LIndex: Integer;
 begin
   Result := Self;
-  {$IFNDEF FPC}
-    {$IF CompilerVersion >= 20}
-      if FRoutes.ContainsKey(Route.ToLower) then
-        FRoutes.Remove(Route.ToLower);
-    {$ELSE}
-      LIndex := FRoutes.IndexOf( LowerCase(Route) );
-      if LIndex <> -1 then
-        FRoutes.Delete(LIndex);
-    {$IFEND}
-  {$ELSE}
-      LIndex := FRoutes.IndexOf( LowerCase(Route) );
-      if LIndex <> -1 then
-        FRoutes.Delete(LIndex);
-    {$ENDIF}
+{$IFDEF Delphi2009Plus}
+  if FRoutes.ContainsKey(Route.ToLower) then
+    FRoutes.Remove(Route.ToLower);
+{$ELSE}
+  LIndex := FRoutes.IndexOf( LowerCase(Route) );
+  if LIndex <> -1 then
+    FRoutes.Delete(LIndex);
+{$ENDIF}
+end;
+
+function TRouteManager.AddDel(const ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+begin
+  Result := AddMethod(CDEL, ARoute, ACallback);
+end;
+
+function TRouteManager.AddGet(const ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+begin
+  Result := AddMethod(CGET, ARoute, ACallback);
+end;
+
+function TRouteManager.AddMethod(const AVerb, ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+var
+  LRoute: string;
+{$IFnDEF Delphi2009Plus}
+  LMethod: TMethod;
+{$ENDIF}
+begin
+  Result := Self;
+  LRoute := UpperCase(AVerb) + ' ' + LowerCase(ARoute);
+{$IFDEF Delphi2009Plus}
+  if Assigned(ACallback) then
+    FRoutes.AddOrSetValue(LRoute, ACallback);
+{$ELSE}
+  LMethod.Data := Self;
+  LMethod.Code := @ACallback;
+  FRoutes.AddObject(LRoute, TObject(LMethod.Code));
+{$ENDIF}
+end;
+
+function TRouteManager.AddPatch(const ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+begin
+  Result := AddMethod(CPATCH, ARoute, ACallback);
+end;
+
+function TRouteManager.AddPost(const ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+begin
+  Result := AddMethod(CPOST, ARoute, ACallback);
+end;
+
+function TRouteManager.AddPut(const ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+begin
+  Result := AddMethod(CPUT, ARoute, ACallback);
 end;
 
 constructor TRouteManager.Create;
 begin
   FRoutes :=
-          {$IFNDEF FPC}
-            {$IF CompilerVersion >= 20}
-               TDictionary<string, TObject>.Create
-            {$ELSE}
-               TStringList.Create
-            {$IFEND}
-          {$ELSE}
-               TStringList.Create
-            {$ENDIF}
-            ;
+{$IFDEF Delphi2009Plus}
+   TDictionary<string, TRoutingCallback>.Create
+{$ELSE}
+   TStringList.Create
+{$ENDIF}
+  ;
 
-            OutputDebugString(PChar('TRouteManager created'));
-
+  OutputDebugString(PChar('TRouteManager created'));
 end;
 
 destructor TRouteManager.Destroy;

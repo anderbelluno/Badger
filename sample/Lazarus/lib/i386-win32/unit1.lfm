@@ -6,9 +6,9 @@ object Form1: TForm1
   Caption = 'Form1'
   ClientHeight = 574
   ClientWidth = 626
+  LCLVersion = '4.3.0.0'
   OnCreate = FormCreate
   OnDestroy = FormDestroy
-  LCLVersion = '3.4.0.0'
   object Panel2: TPanel
     Left = 0
     Height = 73

@@ -1,8 +1,6 @@
 unit BadgerRequestHandler;
 
-{$IFDEF FPC}
-  {$mode delphi}{$H+}
-{$ENDIF}
+{$I BadgerDefines.inc}
 
 interface
 
@@ -201,16 +199,22 @@ begin
 end;
 
 procedure THTTPRequestHandler.Execute;
-  procedure Exec(LRoute: TObject; const Request: THTTPRequest; out Response: THTTPResponse);
+  procedure Exec(ARoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF}; const ARequest: THTTPRequest; out Response: THTTPResponse);
+{$IFDEF Delphi2009Plus}
+  begin
+    ARoute(ARequest, Response);
+  end;
+{$ELSE}
   var
     Callback: TRoutingCallback;
     MethodPointer: TMethod;
   begin
     MethodPointer.Data := Self;
-    MethodPointer.Code := Pointer(LRoute);
+    MethodPointer.Code := Pointer(ARoute);
     Callback := TRoutingCallback(MethodPointer);
-    Callback(Request, Response);
+    Callback(ARequest, Response);
   end;
+{$ENDIF}
 
 const
   MaxBufferSize = 1048576; // 1MB
@@ -218,7 +222,8 @@ var
   Index, I, ContentLength, TotalBytes: Integer;
   Req: THTTPRequest;
   Resp: THTTPResponse;
-  LRoute: TObject;
+  LRouteStr: string;
+  LRoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF};
   MiddlewareWrapper: TMiddlewareWrapper;
   Headers: TStringList;
   BodyStream: TMemoryStream;
@@ -265,6 +270,8 @@ begin
               Req.Method := FMethod;
               Req.URI := FURI;
               Req.RequestLine := FRequestLine;
+
+              LRouteStr := UpperCase(Req.Method) + ' ' + LowerCase(Req.URI);
 
               RequestInfo.RemoteIP := FClientSocket.GetRemoteSinIP;
               RequestInfo.Method := Req.Method;
@@ -370,24 +377,17 @@ begin
                     end;
                   end;
 
-{$IFNDEF FPC}
-  {$IF CompilerVersion >= 20}
-                  if not FRouteManager.FRoutes.TryGetValue(FURI.ToLower, LRoute) then
+{$IFDEF Delphi2009Plus}
+                  if not FRouteManager.FRoutes.TryGetValue(LRouteStr, LRoute) then
                     LRoute := nil;
-  {$ELSE}
-                  Index := FRouteManager.FRoutes.IndexOf(LowerCase(FURI));
-                  if Index <> -1 then
-                    LRoute := FRouteManager.FRoutes.Objects[Index]
-                  else
-                    LRoute := nil;
-  {$IFEND}
 {$ELSE}
-                  Index := FRouteManager.FRoutes.IndexOf(LowerCase(FURI));
+                  Index := FRouteManager.FRoutes.IndexOf(LRouteStr);
                   if Index <> -1 then
                     LRoute := FRouteManager.FRoutes.Objects[Index]
                   else
                     LRoute := nil;
 {$ENDIF}
+
 
                   if Assigned(LRoute) then
                   begin

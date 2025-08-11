@@ -64,15 +64,15 @@ begin
     end;
 
     ServerThread.RouteManager
-      .Add('/upload', TSampleRouteManager.upLoad)
-      .Add('/download', TSampleRouteManager.downLoad)
-      .Add('/rota1', TSampleRouteManager.rota1)
-      .Add('/ping', TSampleRouteManager.ping)
-      .Add('/AtuImage', TSampleRouteManager.AtuImage)
-      .Add('/Login',TSampleRouteManager.Login)
-      .Add('/RefreshToken',TSampleRouteManager.RefreshToken);
+      .AddPost('/upload', TSampleRouteManager.upLoad)
+      .AddGet('/download', TSampleRouteManager.downLoad)
+      .AddGet('/rota1', TSampleRouteManager.rota1)
+      .AddGet('/ping', TSampleRouteManager.ping)
+      .AddPost('/AtuImage', TSampleRouteManager.AtuImage)
+      .AddPost('/Login',TSampleRouteManager.Login)
+      .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken);
 
-      ServerThread.ParallelProcessing := True;
+      //ServerThread.ParallelProcessing := True;
 
     ServerThread.Start;
     edtPorta.Enabled := False;
