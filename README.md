@@ -128,3 +128,6 @@ See `sample/Lazarus/unit1.pas` and `sample/D7/Unit1.pas` for complete working ex
 ## ⚖️ License
 
 Badger is free and open-source software licensed under the [MIT License](https://github.com/anderbelluno/Badger/blob/master/LICENSE).
+
+
+**Join our community on Telegram:** [https://t.me/badgerbrasil](https://t.me/badgerbrasil)
