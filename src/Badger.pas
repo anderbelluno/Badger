@@ -7,7 +7,7 @@ unit Badger;
 interface
 
 uses
- Windows, blcksock, synsock, SyncObjs, Classes, SysUtils, BadgerRouteManager, BadgerMethods, BadgerTypes;
+ Windows, blcksock, synsock, SyncObjs, Classes, SysUtils, BadgerRouteManager, BadgerMethods, BadgerTypes, BadgerLogger;
 
 type
   TClientSocketInfo = class
@@ -84,7 +84,10 @@ begin
   FMaxConcurrentConnections := 100;
   FActiveConnections := 0;
   FIsShuttingDown := False;
-  OutputDebugString(PChar('TBadger created'));
+
+
+  
+  Logger.Info('TBadger created');
 end;
 
 destructor TBadger.Destroy;
@@ -94,22 +97,23 @@ var
 const
   MaxWaitTime = 15000;
 begin
-  OutputDebugString(PChar('TBadger.Destroy started'));
+    Logger.Info('TBadger.Destroy started');
+  //OutputDebugString(PChar('TBadger.Destroy started'));
 
   if not FIsShuttingDown then
   begin
     try
       Stop;
-      OutputDebugString(PChar('Stop called in Destroy'));
+      Logger.Info('Stop called in Destroy');
     except
       on E: Exception do
-        OutputDebugString(PChar(Format('Error in Stop during Destroy: %s', [E.Message])));
+        Logger.Error(Format('Error in Stop during Destroy: %s', [E.Message]));
     end;
   end;
 
   if FParallelProcessing then
   begin
-    OutputDebugString(PChar(Format('Waiting for active connections: %d', [FActiveConnections])));
+    Logger.Info(Format('Waiting for active connections: %d', [FActiveConnections]));
     TimeoutCounter := 0;
     while (FActiveConnections > 0) and (TimeoutCounter < MaxWaitTime) do
     begin
@@ -117,15 +121,15 @@ begin
       Inc(TimeoutCounter, 100);
     end;
     if FActiveConnections > 0 then
-      OutputDebugString(PChar(Format('Warning: %d active connections remaining', [FActiveConnections])));
+      Logger.Info(Format('Warning: %d active connections remaining', [FActiveConnections]));
   end;
 
   try
     CleanupClientSockets;
-    OutputDebugString(PChar('CleanupClientSockets completed'));
+    Logger.Info('CleanupClientSockets completed');
   except
     on E: Exception do
-      OutputDebugString(PChar(Format('Error in CleanupClientSockets: %s', [E.Message])));
+      Logger.Error(Format('Error in CleanupClientSockets: %s', [E.Message]));
   end;
 
   try

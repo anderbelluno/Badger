@@ -4,7 +4,8 @@ interface
 
 uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs,  Badger, BadgerBasicAuth, BadgerAuthJWT, BadgerTypes, SampleRouteManager, ExtCtrls,
+  Dialogs,  Badger, BadgerBasicAuth, BadgerAuthJWT, BadgerTypes, SampleRouteManager,
+  BadgerLogger, ExtCtrls,
   StdCtrls;
 
 type
@@ -46,12 +47,14 @@ implementation
 
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
+  Logger.isActive := True;
+  Logger.LogToConsole := False;
+  
   if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
-    ServerThread.NonBlockMode := CBxNonBlockMode.Checked;
     ServerThread.OnRequest := HandleRequest;
     ServerThread.OnResponse := HandleResponse;
 
@@ -72,7 +75,7 @@ begin
       .AddPost('/Login',TSampleRouteManager.Login)
       .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken);
 
-      //ServerThread.ParallelProcessing := True;
+     // ServerThread.ParallelProcessing := True;
 
     ServerThread.Start;
     edtPorta.Enabled := False;

@@ -7,6 +7,7 @@ interface
 uses
   Classes,
   SysUtils,
+  IniFiles,
 {$IFDEF Delphi2009Plus}
   System.Generics.Collections,
 {$ENDIF}
@@ -120,13 +121,13 @@ end;
 
 constructor TRouteManager.Create;
 begin
-  FRoutes :=
-{$IFDEF Delphi2009Plus}
-   TDictionary<string, TRoutingCallback>.Create
-{$ELSE}
-   TStringList.Create
-{$ENDIF}
-  ;
+  {$IFDEF Delphi2009Plus}
+  FRoutes := TDictionary<string, TRoutingCallback>.Create;
+  {$ELSE}
+  FRoutes := THashedStringList.Create; 
+  FRoutes.Sorted := False;
+  FRoutes.CaseSensitive := False;
+  {$ENDIF}
 
   OutputDebugString(PChar('TRouteManager created'));
 end;
