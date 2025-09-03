@@ -5,8 +5,8 @@ unit BadgerLogger;
 interface
 
 uses
-  SysUtils, SyncObjs, Classes
-  {$IFDEF MSWINDOWS}, Windows{$ENDIF};
+  {$IFDEF MSWINDOWS} Windows,{$ENDIF}SysUtils, SyncObjs, Classes
+  ;
 
 type
   TLogLevel = (llDebug, llInfo, llWarning, llError, llCritical);

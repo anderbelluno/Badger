@@ -13,6 +13,7 @@ uses
   BadgerBasicAuth,
   BadgerAuthJWT,
   BadgerTypes,
+  BadgerLogger,
 
   System.SysUtils, System.Types, System.UITypes, System.Classes, System.Variants,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
@@ -69,6 +70,9 @@ end;
 
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
+  Logger.isActive := True;
+  Logger.LogToConsole := False;
+
   if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;

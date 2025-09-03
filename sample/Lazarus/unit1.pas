@@ -6,7 +6,7 @@ interface
 
 uses
     Windows, Messages, Classes, SysUtils, Forms, Controls, Graphics, Dialogs, ExtCtrls, StdCtrls,
-    Badger, BadgerBasicAuth, BadgerAuthJWT, BadgerTypes, SampleRouteManager;
+    Badger, BadgerBasicAuth, BadgerAuthJWT, BadgerTypes, BadgerLogger, SampleRouteManager;
 
 type
 
@@ -49,6 +49,9 @@ implementation
 
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
+  Logger.isActive := True;
+  Logger.LogToConsole := False;
+
     if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
