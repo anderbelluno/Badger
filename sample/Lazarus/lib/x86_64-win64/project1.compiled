@@ -2,4 +2,5 @@
 <CONFIG>
   <Compiler Value="C:\lazarus40\fpc\3.2.2\bin\x86_64-win64\fpc.exe" Date="1520657216"/>
   <Params Value="-MObjFPC -Scghi -O1 -gw3 -gl -gh -WG -l -vewnhibq -FiD:\files\Badger\sample\Lazarus\lib\x86_64-win64 -FuD:\files\Badger\sample\Lazarus\ -FuD:\files\Badger\src -FuD:\files\Badger\src\Auth\Basic -FuD:\files\Badger\src\Auth\JWT -FuD:\files\Badger\sample -FuD:\files\Badger\ThirdParty\Synapse -FuD:\files\Badger\ThirdParty\SuperObject\D_Plus_Laz_Linux -FuC:\lazarus40\lcl\units\x86_64-win64\win32 -FuC:\lazarus40\lcl\units\x86_64-win64 -FuC:\lazarus40\components\freetype\lib\x86_64-win64 -FuC:\lazarus40\components\lazutils\lib\x86_64-win64 -FuC:\lazarus40\packager\units\x86_64-win64 -FUD:\files\Badger\sample\Lazarus\lib\x86_64-win64\ -FED:\files\Badger\sample\Lazarus\ -oD:\files\Badger\sample\Lazarus\project1.exe -dLCL -dLCLwin32 project1.lpr"/>
+  <Complete Value="False"/>
 </CONFIG>

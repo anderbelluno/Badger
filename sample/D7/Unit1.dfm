@@ -78,14 +78,6 @@ object Form1: TForm1
     Height = 563
     Align = alLeft
     TabOrder = 2
-    object CBxNonBlockMode: TCheckBox
-      Left = 16
-      Top = 48
-      Width = 97
-      Height = 17
-      Caption = 'NonBlockMode'
-      TabOrder = 0
-    end
     object RadioGroup1: TRadioGroup
       Left = 8
       Top = 80
@@ -98,7 +90,7 @@ object Form1: TForm1
         'Basic'
         'Token'
         'JWT')
-      TabOrder = 1
+      TabOrder = 0
     end
     object rdLog: TCheckBox
       Left = 16
@@ -108,7 +100,7 @@ object Form1: TForm1
       Caption = 'Request Log'
       Checked = True
       State = cbChecked
-      TabOrder = 2
+      TabOrder = 1
     end
     object btnClearLog: TButton
       Left = 24
@@ -116,7 +108,7 @@ object Form1: TForm1
       Width = 75
       Height = 25
       Caption = 'Clear Log'
-      TabOrder = 3
+      TabOrder = 2
       OnClick = btnClearLogClick
     end
   end

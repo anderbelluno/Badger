@@ -25,7 +25,6 @@ type
     Layout1: TLayout;
     btnSyna: TButton;
     rdLog: TCheckBox;
-    CBxNonBlockMode: TCheckBox;
     Memo1: TMemo;
     Label1: TLabel;
     edtPorta: TEdit;
@@ -78,7 +77,6 @@ begin
     ServerThread := TBadger.Create;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
-    ServerThread.NonBlockMode := CBxNonBlockMode.IsChecked;
     ServerThread.OnRequest := HandleRequest;
     ServerThread.OnResponse := HandleResponse;
 
@@ -105,7 +103,6 @@ begin
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
-    CBxNonBlockMode.Enabled := False;
     btnSyna.Tag := 1;
     btnSyna.Text := 'Parar Servidor';
     ComboAuth.Enabled := False;
@@ -119,7 +116,6 @@ begin
     btnSyna.Text := 'Iniciar Servidor';
     edtPorta.Enabled := True;
     rdLog.Enabled := True;
-    CBxNonBlockMode.Enabled := True;
     ComboAuth.Enabled := True;
     edtTimeOut.Enabled := True;
   end;

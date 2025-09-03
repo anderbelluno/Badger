@@ -15,7 +15,6 @@ type
     TForm1 = class(TForm)
         btnClearLog: TButton;
         btnSyna: TButton;
-        CBxNonBlockMode: TCheckBox;
         edtPorta: TEdit;
         edtTimeOut: TEdit;
         Label1: TLabel;
@@ -49,12 +48,14 @@ implementation
 
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
+  Logger.isActive := True;
+  Logger.LogToConsole := False;
+
     if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
-    ServerThread.NonBlockMode := CBxNonBlockMode.Checked;
 
     ServerThread.OnRequest  := HandleRequest;
     ServerThread.OnResponse := HandleResponse;

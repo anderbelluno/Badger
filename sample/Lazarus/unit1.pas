@@ -15,7 +15,6 @@ type
     TForm1 = class(TForm)
         btnClearLog: TButton;
         btnSyna: TButton;
-        CBxNonBlockMode: TCheckBox;
         edtPorta: TEdit;
         edtTimeOut: TEdit;
         Label1: TLabel;
@@ -57,7 +56,6 @@ begin
     ServerThread := TBadger.Create;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
-    ServerThread.NonBlockMode := CBxNonBlockMode.Checked;
 
     ServerThread.OnRequest  := HandleRequest;
     ServerThread.OnResponse := HandleResponse;
@@ -84,7 +82,6 @@ begin
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
-    CBxNonBlockMode.Enabled := False;
     btnSyna.Tag := 1;
     btnSyna.Caption := 'Parar Servidor';
     RadioGroup1.Enabled := False;

@@ -94,7 +94,7 @@ OutputDir=
 UnitOutputDir=
 PackageDLLOutputDir=
 PackageDCPOutputDir=
-SearchPath=..\..\src;..\..\src\Auth\Basic;..\..\src\Auth\JWT;..\..\ThirdParty\Synapse;..\..\ThirdParty\SuperObject\D7_Laz
+SearchPath=..\..\src;..\..\src\Auth\Basic;..\..\src\Auth\JWT;..\..\ThirdParty\Synapse;..\..\ThirdParty\SuperObject\D7
 Packages=vcl;rtl;vclx;inet;xmlrtl;vclie;inetdbbde;inetdbxpress;dbrtl;dsnap;dsnapcon;vcldb;soaprtl;VclSmp;dbexpress;dbxcds;inetdb;bdertl;vcldbx;webdsnap;websnap;adortl;ibxpress;teeui;teedb;tee;dss;visualclx;visualdbclx;vclactnband;vclshlctrls;IntrawebDB_50_70;Intraweb_50_70;Rave50CLX;Rave50VCL;dclOfficeXP;ZPlain;ZCore;ZParseSql;gtPDFKitD70ProP;IndyCore70;IndySystem70;IndyProtocols70;rtcSDK;Oauth2Google
 Conditionals=EUREKALOG_VER7
 DebugSourceDirs=
@@ -141,8 +141,9 @@ Item0=EUREKALOG_VER7
 Count=1
 Item0=WinTypes=Windows;WinProcs=Windows;DbiTypes=BDE;DbiProcs=BDE;DbiErrs=BDE;
 [HistoryLists\hlSearchPath]
-Count=4
-Item0=..\..\src;..\..\src\Auth\Basic;..\..\src\Auth\JWT;..\..\ThirdParty\Synapse;..\..\ThirdParty\SuperObject\D7_Laz
-Item1=..\..\src;..\..\src\Auth\Basic;..\..\src\Auth\JWT;..\..\ThirdParty\Synapse
-Item2=..\..\src;..\..\src\Auth;..\..\ThirdParty\Synapse
-Item3=..\..\..\src;..\..\..\src\Auth;..\..\..\ThirdParty\Synapse
+Count=5
+Item0=..\..\src;..\..\src\Auth\Basic;..\..\src\Auth\JWT;..\..\ThirdParty\Synapse;..\..\ThirdParty\SuperObject\D7
+Item1=..\..\src;..\..\src\Auth\Basic;..\..\src\Auth\JWT;..\..\ThirdParty\Synapse;..\..\ThirdParty\SuperObject\D7_Laz
+Item2=..\..\src;..\..\src\Auth\Basic;..\..\src\Auth\JWT;..\..\ThirdParty\Synapse
+Item3=..\..\src;..\..\src\Auth;..\..\ThirdParty\Synapse
+Item4=..\..\..\src;..\..\..\src\Auth;..\..\..\ThirdParty\Synapse
