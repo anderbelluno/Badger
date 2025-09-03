@@ -6,7 +6,7 @@
 
 # Badger
 
-**Badger** is an open-source library designed for Delphi and Lazarus (Object Pascal) environments to help you quickly build HTTP servers and REST APIs. It includes support for features like authentication (Basic and JWT), route management, MIME type handling, and more, making it ideal for developing modern web backends or embedded HTTP services.
+**Badger** is an open-source library designed for Delphi and Lazarus (Object Pascal) environments to help you quickly build HTTP servers and REST APIs. It includes support for features like authentication, route management, and more.
 
 ---
 
@@ -17,6 +17,44 @@
 - **Authentication**: Built-in support for Basic Auth and JWT (JSON Web Token) authentication.
 - **MIME Type Handling**: Utility functions for recognizing MIME types of files.
 - **Cross-Platform**: Designed to work with both Delphi and Lazarus (FPC).
+- **Logger**: Flexible and thread-safe logging via `BadgerLogger`.
+
+---
+
+## 📝 BadgerLogger
+
+`BadgerLogger` is a built-in, thread-safe logging utility for Badger. It supports logging at multiple levels (Debug, Info, Warning, Error, Critical), with output options for console, file, and (on Windows) the debugger. You can configure what to log and where to log it.
+
+### Key Features
+
+- Multiple log levels: Debug, Info, Warning, Error, Critical.
+- Thread-safe logging.
+- Output to console and/or file (configurable).
+- Optional output to Windows debugger (`OutputDebugString`).
+- Easy to use: just call `Logger.Info('message')`, etc.
+
+### Usage Example
+
+```pascal
+uses
+  BadgerLogger;
+
+begin
+  Logger.isActive := True;
+  Logger.LogToConsole := True; // Enable console output
+  Logger.LogToFile := True;    // Enable file output
+  Logger.LogFileName := 'server.log'; // Set log file name
+  Logger.LogLevel := llDebug;  // Log everything from Debug up
+
+  Logger.Info('Server starting...');
+  Logger.Warning('Low disk space!');
+  Logger.Error('Failed to bind port');
+  Logger.Debug('Debug details here');
+  Logger.Critical('Unexpected shutdown!');
+end;
+```
+
+By default, logging to the console is enabled, and logging to file is disabled. You can adjust these behaviors at runtime using the provided properties.
 
 ---
 
