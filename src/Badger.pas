@@ -450,6 +450,13 @@ begin
 
   if Terminated or Suspended then
   begin
+    if not Terminated then
+    begin
+       SafeCloseSocket;
+       Terminate;
+       CleanupClientSockets;
+       Free;
+    end;
     OutputDebugString(PChar('Server already stopped or suspended'));
     Exit;
   end;
