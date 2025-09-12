@@ -13,7 +13,8 @@ uses
 {$ENDIF}
   BadgerMethods,
   BadgerTypes,
-  BadgerHttpStatus;
+  BadgerHttpStatus,
+  BadgerLogger;
 
 type
   TRouteManager = class(TObject)
@@ -47,8 +48,8 @@ type
 
 implementation
 
-uses
-  Windows;
+{uses
+  Windows;}
 
 { TRouteManager }
 
@@ -129,7 +130,7 @@ begin
   FRoutes.CaseSensitive := False;
   {$ENDIF}
 
-  OutputDebugString(PChar('TRouteManager created'));
+  Logger.Info('TRouteManager created');
 end;
 
 destructor TRouteManager.Destroy;
@@ -138,13 +139,13 @@ begin
     if Assigned(FRoutes) then
     begin
       FreeAndNil(FRoutes);
-      OutputDebugString(PChar('FRoutes freed'));
+      Logger.Info('FRoutes freed');
     end;
   except
     on E: Exception do
-      OutputDebugString(PChar(Format('Error freeing FRoutes: %s', [E.Message])));
+      Logger.Error(Format('Error freeing FRoutes: %s', [E.Message]));
   end;
-  OutputDebugString(PChar('TRouteManager destroyed'));
+  Logger.Info('TRouteManager destroyed');
   inherited;
 end;
 

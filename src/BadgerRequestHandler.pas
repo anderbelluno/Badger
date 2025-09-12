@@ -5,8 +5,8 @@ unit BadgerRequestHandler;
 interface
 
 uses
-  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, Classes, SysUtils, StrUtils,
-  BadgerRouteManager, BadgerMethods, BadgerHttpStatus, BadgerTypes, Badger, Math, Windows;
+  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, Math, Classes, SysUtils, StrUtils,
+  BadgerRouteManager, BadgerMethods, BadgerHttpStatus, BadgerTypes, Badger, BadgerLogger{, Windows };
 
 type
   THTTPRequestHandler = class(TThread)
@@ -99,7 +99,7 @@ begin
 
     except
       on E: Exception do
-        OutputDebugString(PChar(Format('Error in DecActiveConnections: %s', [E.Message])));
+        Logger.Error(Format('Error in DecActiveConnections: %s', [E.Message]));
     end;
   end;
 
@@ -109,14 +109,14 @@ begin
       FClientSocket.CloseSocket;
     except
       on E: Exception do
-        OutputDebugString(PChar(Format('Error closing client socket: %s', [E.Message])));
+        Logger.Error(Format('Error closing client socket: %s', [E.Message]));
     end;
     try
       FClientSocket.Free;
       FClientSocket := nil;
     except
       on E: Exception do
-        OutputDebugString(PChar(Format('Error freeing client socket: %s', [E.Message])));
+        Logger.Error(Format('Error freeing client socket: %s', [E.Message]));
     end;
   end;
   for I := 0 to FMiddlewares.Count - 1 do
@@ -189,7 +189,7 @@ begin
               'Content-Length: ' + IntToStr(Stream.Size) + CRLF;
   end;
 
-  Result := Result + 'Date: ' + Rfc822DateTime(Now) + CRLF +
+  Result := Result + 'Date: ' +{ Rfc822DateTime(Now) + CRLF +}
                     'Server: Badger HTTP Server' + CRLF;
   if CloseConnection then
     Result := Result + 'Connection: close' + CRLF
@@ -245,7 +245,7 @@ var
   RequestInfo: TRequestInfo;
   ResponseInfo: TResponseInfo;
 begin
-  OutputDebugString(PChar(Format('Starting THTTPRequestHandler.Execute for thread %d', [ThreadID])));
+  Logger.Error(Format('Starting THTTPRequestHandler.Execute for thread %d', [ThreadID]));
   try
     QueryParams := TStringList.Create;
     try
@@ -286,7 +286,7 @@ begin
                 try
                   if ContentLength > 0 then
                   begin
-                    BodyStream.SetSize(ContentLength);
+                    BodyStream.SetSize(int64(ContentLength));
                     TotalBytes := 0;
                     while TotalBytes < ContentLength do
                     begin
@@ -534,7 +534,7 @@ begin
       end;
     end;
   finally
-    OutputDebugString(PChar(Format('Finished THTTPRequestHandler.Execute for thread %d', [ThreadID])));
+    Logger.Info(Format('Finished THTTPRequestHandler.Execute for thread %d', [ThreadID]));
   end;
 end;
 

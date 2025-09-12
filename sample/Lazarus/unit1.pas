@@ -95,7 +95,6 @@ begin
     btnSyna.Caption := 'Iniciar Servidor';
     edtPorta.Enabled := True;
     rdLog.Enabled := True;
-    CBxNonBlockMode.Enabled := True;
     RadioGroup1.Enabled := True;
     edtTimeOut.Enabled:= True;
   end;

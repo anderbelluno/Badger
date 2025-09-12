@@ -8,7 +8,8 @@ interface
 
 uses
   SysUtils, Classes
-  {$IFDEF WINDOWS}, Registry {$ENDIF};
+  {$IFDEF MSWINDOWS}, Registry {$ENDIF}  ;
+
 
 type
   TBytes = array of Byte;
@@ -699,5 +700,6 @@ begin
   if Len > 0 then
     Move(S[1], Result[0], Len * SizeOf(Char));
 end;
+
 
 end.
