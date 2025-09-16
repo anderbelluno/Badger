@@ -1463,7 +1463,11 @@ uses
   //{$ENDIF}
   {.$IFDEF NEXTGEN}
   {$IFDEF LINUX} // Kylix3
-  ,Libc
+      {$IFNDEF FPC}
+        ,Posix.SysSocket
+      {$ELSE}
+       ,Libc
+      {$ENDIF}
   {$ELSE}
     {$IFDEF POSIX}
     ,Posix.SysTypes

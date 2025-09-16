@@ -1,4 +1,6 @@
-unit Badger;
+﻿unit Badger;
+
+{$I BadgerDefines.inc}
 
 {$IFDEF FPC}
   {$mode delphi}{$H+}
@@ -7,7 +9,11 @@ unit Badger;
 interface
 
 uses
-Windows,  blcksock, synsock, SyncObjs, Classes, SysUtils, BadgerRouteManager, BadgerMethods, BadgerTypes, BadgerLogger, BadgerUtils;
+  {$IFDEF MSWINDOWS}Windows, {$ENDIF}
+  {$IFDEF FPC}
+    {$IFDEF UNIX}BaseUnix, Unix, {$ENDIF}
+  {$ENDIF}
+  blcksock, synsock, SyncObjs, Classes, SysUtils, BadgerRouteManager, BadgerMethods, BadgerTypes, BadgerLogger, BadgerUtils;
 
 type
   TClientSocketInfo = class
@@ -41,6 +47,9 @@ type
     procedure AddClientSocket(Socket: TTCPBlockSocket);
     procedure RemoveClientSocket(Socket: TTCPBlockSocket);
     procedure CleanupClientSockets;
+    {$IFDEF UNIX}
+    function WaitForThreadTermination(TimeoutMs: Integer): Boolean;
+    {$ENDIF}
   public
     constructor Create;
     destructor Destroy; override;
@@ -85,8 +94,6 @@ begin
   FActiveConnections := 0;
   FIsShuttingDown := False;
 
-
-  
   Logger.Info('TBadger created');
 end;
 
@@ -97,14 +104,13 @@ var
 const
   MaxWaitTime = 15000;
 begin
-    Logger.Info('TBadger.Destroy started');
-  //OutputDebugString(PChar('TBadger.Destroy started'));
+ // Logger.Info('TBadger.Destroy started');
 
   if not FIsShuttingDown then
   begin
     try
       Stop;
-      Logger.Info('Stop called in Destroy');
+     // Logger.Info('Stop called in Destroy');
     except
       on E: Exception do
         Logger.Error(Format('Error in Stop during Destroy: %s', [E.Message]));
@@ -113,7 +119,7 @@ begin
 
   if FParallelProcessing then
   begin
-    Logger.Info(Format('Waiting for active connections: %d', [FActiveConnections]));
+   // Logger.Info(Format('Waiting for active connections: %d', [FActiveConnections]));
     TimeoutCounter := 0;
     while (FActiveConnections > 0) and (TimeoutCounter < MaxWaitTime) do
     begin
@@ -121,12 +127,12 @@ begin
       Inc(TimeoutCounter, 100);
     end;
     if FActiveConnections > 0 then
-      Logger.Info(Format('Warning: %d active connections remaining', [FActiveConnections]));
+   //   Logger.Info(Format('Warning: %d active connections remaining', [FActiveConnections]));
   end;
 
   try
     CleanupClientSockets;
-    Logger.Info('CleanupClientSockets completed');
+   // Logger.Info('CleanupClientSockets completed');
   except
     on E: Exception do
       Logger.Error(Format('Error in CleanupClientSockets: %s', [E.Message]));
@@ -138,10 +144,10 @@ begin
       if FServerSocket.Socket <> INVALID_SOCKET then
       begin
         FServerSocket.CloseSocket;
-        Logger.info('Server socket closed in Destroy');
+      //  Logger.info('Server socket closed in Destroy');
       end;
       FreeAndNil(FServerSocket);
-      Logger.info('FServerSocket freed in Destroy');
+     // Logger.info('FServerSocket freed in Destroy');
     end;
   except
     on E: Exception do
@@ -152,7 +158,7 @@ begin
     if Assigned(FRouteManager) then
     begin
       FreeAndNil(FRouteManager);
-      Logger.info('FRouteManager freed');
+     // Logger.info('FRouteManager freed');
     end;
   except
     on E: Exception do
@@ -163,7 +169,7 @@ begin
     if Assigned(FMethods) then
     begin
       FreeAndNil(FMethods);
-      Logger.info('FMethods freed');
+     // Logger.info('FMethods freed');
     end;
   except
     on E: Exception do
@@ -173,14 +179,14 @@ begin
   try
     if Assigned(FMiddlewares) then
     begin
-      Logger.info(Format('Freeing %d middlewares', [FMiddlewares.Count]));
+     // Logger.info(Format('Freeing %d middlewares', [FMiddlewares.Count]));
       for I := 0 to FMiddlewares.Count - 1 do
       begin
         if Assigned(FMiddlewares[I]) then
         begin
           try
             TObject(FMiddlewares[I]).Free;
-            Logger.info(Format('Freed middleware %d', [I]));
+     //       Logger.info(Format('Freed middleware %d', [I]));
           except
             on E: Exception do
               Logger.Error(Format('Error freeing middleware %d: %s', [I, E.Message]));
@@ -188,7 +194,7 @@ begin
         end;
       end;
       FreeAndNil(FMiddlewares);
-      Logger.info('FMiddlewares freed');
+    //  Logger.info('FMiddlewares freed');
     end;
   except
     on E: Exception do
@@ -199,7 +205,7 @@ begin
     if Assigned(FClientSockets) then
     begin
       FreeAndNil(FClientSockets);
-      Logger.info('FClientSockets freed');
+  //    Logger.info('FClientSockets freed');
     end;
   except
     on E: Exception do
@@ -210,7 +216,7 @@ begin
     if Assigned(FShutdownEvent) then
     begin
       FreeAndNil(FShutdownEvent);
-      Logger.info('FShutdownEvent freed');
+    //  Logger.info('FShutdownEvent freed');
     end;
   except
     on E: Exception do
@@ -221,7 +227,7 @@ begin
     if Assigned(FSocketLock) then
     begin
       FreeAndNil(FSocketLock);
-      Logger.info('FSocketLock freed');
+   //   Logger.info('FSocketLock freed');
     end;
   except
     on E: Exception do
@@ -241,7 +247,7 @@ begin
     if FServerSocket.Socket <> INVALID_SOCKET then
     try
       FServerSocket.CloseSocket;
-      Logger.info('Server socket closed safely');
+     // Logger.info('Server socket closed safely');
     except
       on E: Exception do
         Logger.Error(Format('Error in SafeCloseSocket: %s', [E.Message]));
@@ -263,7 +269,7 @@ begin
     SocketInfo.Socket := Socket;
     SocketInfo.InUse := True;
     FClientSockets.Add(SocketInfo);
-    Logger.info(Format('Added client socket. Total: %d', [FClientSockets.Count]));
+  //  Logger.info(Format('Added client socket. Total: %d', [FClientSockets.Count]));
   finally
     FSocketLock.Release;
   end;
@@ -285,7 +291,7 @@ begin
       begin
         FClientSockets.Delete(I);
         SocketInfo.Free;
-        Logger.info(Format('Removed client socket. Total: %d', [FClientSockets.Count]));
+    //    Logger.info(Format('Removed client socket. Total: %d', [FClientSockets.Count]));
         Break;
       end;
     end;
@@ -301,7 +307,7 @@ var
 begin
   if not Assigned(FClientSockets) or not Assigned(FSocketLock) then Exit;
 
-  Logger.info(Format('Cleaning up %d client sockets', [FClientSockets.Count]));
+//  Logger.info(Format('Cleaning up %d client sockets', [FClientSockets.Count]));
 
   FSocketLock.Acquire;
   try
@@ -314,7 +320,7 @@ begin
           if not SocketInfo.InUse and (SocketInfo.Socket.Socket <> INVALID_SOCKET) then
           begin
             SocketInfo.Socket.CloseSocket;
-            Logger.info(Format('Closed client socket %d', [I]));
+  //          Logger.info(Format('Closed client socket %d', [I]));
           end;
         except
           on E: Exception do
@@ -322,7 +328,7 @@ begin
         end;
         try
           SocketInfo.Free;
-          Logger.info(Format('Freed client socket info %d', [I]));
+ //         Logger.info(Format('Freed client socket info %d', [I]));
         except
           on E: Exception do
             Logger.Error(Format('Error freeing client socket info %d: %s', [I, E.Message]));
@@ -334,8 +340,27 @@ begin
     FSocketLock.Release;
   end;
 
-  Logger.info('Client sockets cleanup completed');
+//  Logger.info('Client sockets cleanup completed');
 end;
+
+{$IFDEF UNIX}
+function TBadger.WaitForThreadTermination(TimeoutMs: Integer): Boolean;
+var
+  StartTime: TDateTime;
+  ElapsedMs: Integer;
+begin
+  Result := False;
+  StartTime := Now;
+
+  while not Finished and (ElapsedMs < TimeoutMs) do
+  begin
+    Sleep(10);
+    ElapsedMs := Trunc((Now - StartTime) * 24 * 60 * 60 * 1000);
+  end;
+
+  Result := Finished;
+end;
+{$ENDIF}
 
 function TBadger.CanAcceptNewConnection: Boolean;
 begin
@@ -344,16 +369,26 @@ end;
 
 procedure TBadger.IncActiveConnections;
 begin
+{$IFDEF Delphi2009Plus}
+  TInterlocked.Increment(FActiveConnections)
+{$ELSE}
   InterlockedIncrement(FActiveConnections);
-  Logger.info(Format('Incremented active connections: %d', [FActiveConnections]));
+{$ENDIF}
+
+//  Logger.info(Format('Incremented active connections: %d', [FActiveConnections]));
 end;
 
 procedure TBadger.DecActiveConnections;
 begin
   if not FIsShuttingDown then
   begin
-    InterlockedDecrement(FActiveConnections);
-    Logger.info(Format('Decremented active connections: %d', [FActiveConnections]));
+    {$IFDEF Delphi2009Plus}
+      TInterlocked.Decrement(FActiveConnections)
+    {$ELSE}
+      InterlockedDecrement(FActiveConnections);
+    {$ENDIF}
+
+ //   Logger.info(Format('Decremented active connections: %d', [FActiveConnections]));
   end
   else
     Logger.Warning('Warning: Server is shutting down, skipping DecActiveConnections');
@@ -375,62 +410,62 @@ procedure TBadger.Start;
 begin
   if FIsShuttingDown then
   begin
-    Logger.Info('Cannot start: server is shutting down');
+//    Logger.Info('Cannot start: server is shutting down');
     Exit;
   end;
 
   if not Terminated and not Suspended then
   begin
-    Logger.Info('Server already running, skipping Start');
+ //   Logger.Info('Server already running, skipping Start');
     Exit;
   end;
 
   if not Assigned(FSocketLock) or not Assigned(FServerSocket) then
   begin
-    Logger.Info('Cannot start: resources not available');
+ //   Logger.Info('Cannot start: resources not available');
     Exit;
   end;
 
-  Logger.Info('TBadger.Start: Acquiring socket lock');
+//  Logger.Info('TBadger.Start: Acquiring socket lock');
   FSocketLock.Acquire;
   try
 
     if FServerSocket.Socket <> INVALID_SOCKET then
     begin
       FServerSocket.CloseSocket;
-     Logger.Info('Previous server socket closed');
+//     Logger.Info('Previous server socket closed');
     end;
 
-   Logger.Info('TBadger.Start: Configuring socket');
+ //  Logger.Info('TBadger.Start: Configuring socket');
     try
       FServerSocket.CreateSocket;
       FServerSocket.setLinger(True, 10000);
       FServerSocket.NonBlockMode := FNonBlockMode;
-      Logger.Info(Format('TBadger.Start: Binding to port %d', [FPort]));
+//      Logger.Info(Format('TBadger.Start: Binding to port %d', [FPort]));
       FServerSocket.Bind('0.0.0.0', IntToStr(FPort));
       if FServerSocket.LastError = 0 then
       begin
-        Logger.Info('TBadger.Start: Starting listen');
+//        Logger.Info('TBadger.Start: Starting listen');
         FServerSocket.Listen;
-        Logger.Info(Format('Server started on port %d', [FPort]));
+//        Logger.Info(Format('Server started on port %d', [FPort]));
       end
       else
       begin
-        Logger.Info(Format('Failed to bind port %d: %s', [FPort, FServerSocket.LastErrorDesc]));
+ //       Logger.Info(Format('Failed to bind port %d: %s', [FPort, FServerSocket.LastErrorDesc]));
         FServerSocket.CloseSocket;
         Exit;
       end;
     except
       on E: Exception do
       begin
-        Logger.Info(Format('Error configuring FServerSocket: %s', [E.Message]));
+ //       Logger.Info(Format('Error configuring FServerSocket: %s', [E.Message]));
         FServerSocket.CloseSocket;
         Exit;
       end;
     end;
   finally
     FSocketLock.Release;
-    Logger.Info('TBadger.Start: Releasing socket lock');
+//    Logger.Info('TBadger.Start: Releasing socket lock');
   end;
 
   FShutdownEvent.ResetEvent;
@@ -440,11 +475,16 @@ end;
 procedure TBadger.Stop;
 var
   TimeoutCounter: Integer;
+  {$IFDEF MSWINDOWS}
   WaitResult: DWORD;
+  {$ENDIF}
+  {$IFDEF UNIX}
+  ThreadTerminated: Boolean;
+  {$ENDIF}
 const
   MaxWaitTime = 15000;
 begin
-  Logger.Info('TBadger.Stop: Starting shutdown sequence');
+//  Logger.Info('TBadger.Stop: Starting shutdown sequence');
 
   FIsShuttingDown := True;
 
@@ -457,7 +497,7 @@ begin
        CleanupClientSockets;
        Free;
     end;
-    Logger.Info('Server already stopped or suspended');
+//    Logger.Info('Server already stopped or suspended');
     Exit;
   end;
 
@@ -468,7 +508,7 @@ begin
 
   if FParallelProcessing then
   begin
-    Logger.Info(Format('Waiting for active connections to close. Current count: %d', [FActiveConnections]));
+ //   Logger.Info(Format('Waiting for active connections to close. Current count: %d', [FActiveConnections]));
     TimeoutCounter := 0;
     while (FActiveConnections > 0) and (TimeoutCounter < MaxWaitTime) do
     begin
@@ -476,14 +516,15 @@ begin
       Inc(TimeoutCounter, 100);
     end;
     if FActiveConnections > 0 then
-      Logger.Info(Format('Warning: Timeout waiting for %d active connections to close', [FActiveConnections]));
+ //     Logger.Info(Format('Warning: Timeout waiting for %d active connections to close', [FActiveConnections]));
   end;
 
-  Logger.Info('TBadger.Stop: Terminating thread');
+ // Logger.Info('TBadger.Stop: Terminating thread');
   Terminate;
 
   try
-
+    {$IFDEF MSWINDOWS}
+    // Windows: usa WaitForSingleObject
     TimeoutCounter := 0;
     WaitResult := WaitForSingleObject(Handle, 100);
     while (WaitResult = WAIT_TIMEOUT) and (TimeoutCounter < MaxWaitTime) do
@@ -495,8 +536,18 @@ begin
 
     if WaitResult <> WAIT_OBJECT_0 then
     begin
+  //    Logger.Warning('Thread termination timeout');
+    end;
+    {$ENDIF}
+
+    {$IFDEF UNIX}
+    // Linux/Unix: usa implementação personalizada
+    ThreadTerminated := WaitForThreadTermination(MaxWaitTime);
+    if not ThreadTerminated then
+    begin
       Logger.Warning('Thread termination timeout');
     end;
+    {$ENDIF}
   except
     on E: Exception do
       Logger.Error(Format('Error waiting for thread: %s', [E.Message]));
@@ -504,7 +555,7 @@ begin
 
   CleanupClientSockets;
 
-  Logger.Info('TBadger.Stop: Server stopped successfully');
+ // Logger.Info('TBadger.Stop: Server stopped successfully');
   Free;
 end;
 
@@ -513,7 +564,7 @@ var
   ClientSocket: TTCPBlockSocket;
   ResponseInfo: TResponseInfo;
 begin
-  Logger.Info('TBadger.Execute: Server thread started');
+ // Logger.Info('TBadger.Execute: Server thread started');
 
   while not Terminated and not FIsShuttingDown do
   begin
@@ -529,19 +580,19 @@ begin
         begin
           if FParallelProcessing and not CanAcceptNewConnection then
           begin
-            Logger.Info(Format('TBadger.Execute: Max concurrent connections reached: %d', [FActiveConnections]));
+ //           Logger.Info(Format('TBadger.Execute: Max concurrent connections reached: %d', [FActiveConnections]));
             Sleep(10);
             Continue;
           end;
 
-          Logger.Info('TBadger.Execute: Creating client socket');
+  //        Logger.Info('TBadger.Execute: Creating client socket');
           ClientSocket := TTCPBlockSocket.Create;
           try
-            Logger.Info('TBadger.Execute: Accepting connection');
+  //          Logger.Info('TBadger.Execute: Accepting connection');
             ClientSocket.Socket := FServerSocket.Accept;
             if ClientSocket.LastError = 0 then
             begin
-              Logger.Info(Format('TBadger.Execute: New connection accepted. Active connections: %d', [FActiveConnections + 1]));
+   //           Logger.Info(Format('TBadger.Execute: New connection accepted. Active connections: %d', [FActiveConnections + 1]));
               AddClientSocket(ClientSocket);
 
               if FParallelProcessing then
@@ -561,7 +612,7 @@ begin
             end
             else
             begin
-              Logger.Info(Format('TBadger.Execute: Error accepting connection: %s', [ClientSocket.LastErrorDesc]));
+   //           Logger.Info(Format('TBadger.Execute: Error accepting connection: %s', [ClientSocket.LastErrorDesc]));
               if Assigned(FOnResponse) then
               begin
                 ResponseInfo.StatusCode := 500;
@@ -577,7 +628,7 @@ begin
               try
                 ClientSocket.CloseSocket;
                 FreeAndNil(ClientSocket);
-                Logger.Info('TBadger.Execute: ClientSocket freed due to error');
+   //             Logger.Info('TBadger.Execute: ClientSocket freed due to error');
               except
                 on E: Exception do
                   Logger.Error(Format('TBadger.Execute: Error freeing ClientSocket: %s', [E.Message]));
@@ -600,7 +651,7 @@ begin
     end;
   end;
 
-  Logger.Info('TBadger.Execute: Server thread terminated');
+ // Logger.Info('TBadger.Execute: Server thread terminated');
   SafeCloseSocket;
 end;
 
