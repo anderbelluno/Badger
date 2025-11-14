@@ -3,8 +3,8 @@ unit BadgerMethods;
 interface
 
 uses
-  blcksock, SysUtils, Classes, DB, BadgerMultipartDataReader, Contnrs, BadgerUtils,
-  BadgerTypes, BadgerHttpStatus;
+  SysUtils, Classes, DB, BadgerMultipartDataReader, Contnrs, BadgerUtils,
+  BadgerTypes, BadgerHttpStatus, blcksock;
 
 type
   TBadgerMethods = class(TObject)
@@ -119,9 +119,9 @@ end;
 function TBadgerMethods.fParserJsonStream( Request: THTTPRequest; Response : THTTPResponse ): string;
 begin
   if UpperCase(Request.Method) = 'POST' then
-    Result := '{"status":true, "message":"Recebimento concluÌdo com sucesso", "Vc me mandou":"' + Request.Body + '"}'
+    Result := '{"status":true, "message":"Recebimento conclu√≠do com sucesso", "Vc me mandou":"' + Request.Body + '"}'
   else
-    Result := '{"status":false, "message":"MÈtodo n„o aceito, usar POST"}';
+    Result := '{"status":false, "message":"M√©todo n√£o aceito, usar POST"}';
 end;
 
 function TBadgerMethods.fDownloadStream(const FilePath: string; out MimeType: string): TStream;

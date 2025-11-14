@@ -28,6 +28,7 @@ type
     class procedure AtuImage(Request: THTTPRequest; out Response: THTTPResponse);
     class procedure Login(Request: THTTPRequest; out Response: THTTPResponse);
     class procedure RefreshToken(Request: THTTPRequest; out Response: THTTPResponse);
+    class procedure produtos(Request: THTTPRequest; out Response: THTTPResponse);
   end;
 
 var
@@ -117,6 +118,19 @@ class procedure TSampleRouteManager.ping(Request: THTTPRequest;
 begin
   Response.StatusCode := HTTP_OK;
   Response.Body := UTF8Encode('Pong');
+  Response.ContentType := TEXT_PLAIN;
+end;
+
+class procedure TSampleRouteManager.produtos(Request: THTTPRequest;
+  out Response: THTTPResponse);
+begin
+  Response.StatusCode := HTTP_OK;
+  Response.ContentType := TEXT_PLAIN;
+
+  if Request.RouteParams.Count > 0 then
+    Response.Body := Format('id: %s' + sLineBreak +  'código: %s', [Request.RouteParams.Values['id'], Request.RouteParams.Values['codigo'] ])
+  else
+    Response.Body := Format('id: %s' + sLineBreak +  'código: %s', [Request.QueryParams.Values['id'], Request.QueryParams.Values['codigo'] ]);
 end;
 
 class procedure TSampleRouteManager.RefreshToken(Request: THTTPRequest;

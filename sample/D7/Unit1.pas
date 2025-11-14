@@ -72,7 +72,9 @@ begin
       .AddGet('/ping', TSampleRouteManager.ping)
       .AddPost('/AtuImage', TSampleRouteManager.AtuImage)
       .AddPost('/Login',TSampleRouteManager.Login)
-      .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken);
+      .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken)
+      .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
+      .AddGet('/produtos', TSampleRouteManager.produtos);
 
      // ServerThread.ParallelProcessing := True;
 

@@ -74,7 +74,7 @@ procedure TBadgerLogger.WriteToFile(const Msg: string);
 begin
   if not FLogToFile then Exit;
   
-  FCS.Acquire;
+ // FCS.Acquire;
   try
     if not FileExists(FLogFileName) then
     begin
@@ -90,7 +90,7 @@ begin
     WriteLn(FLogFile, Msg);
     CloseFile(FLogFile);
   finally
-    FCS.Release;
+  //  FCS.Release;
   end;
 end;
 
@@ -98,11 +98,11 @@ procedure TBadgerLogger.WriteToConsole(const Msg: string);
 begin
   if not FLogToConsole then Exit;
   
-  FCS.Acquire;
+ // FCS.Acquire;
   try
     WriteLn(Msg);
   finally
-    FCS.Release;
+  //  FCS.Release;
   end;
 end;
 
@@ -115,9 +115,7 @@ end;
 
 procedure TBadgerLogger.Log(Level: TLogLevel; const Msg: string);
 const
-  LevelNames: array[TLogLevel] of string = (
-    'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
-  );
+  LevelNames: array[TLogLevel] of string = ( 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL' );
 var
   LogMsg: string;
 begin
@@ -126,11 +124,7 @@ begin
    
   if Level < FLogLevel then Exit; // Filtro por nível
   
-  LogMsg := Format('[%s] %s: %s', [
-    FormatDateTime('yyyy-mm-dd hh:nn:ss.zzz', Now),
-    LevelNames[Level],
-    Msg
-  ]);
+  LogMsg := Format('[%s] %s: %s', [ FormatDateTime('yyyy-mm-dd hh:nn:ss.zzz', Now), LevelNames[Level], Msg ]);
 
   // Escrita thread-safe
   FCS.Acquire;

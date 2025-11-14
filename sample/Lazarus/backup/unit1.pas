@@ -5,7 +5,7 @@ unit Unit1;
 interface
 
 uses
-    Windows, Messages, Classes, SysUtils, Forms, Controls, Graphics, Dialogs, ExtCtrls, StdCtrls,
+    {$IFDEF MSWINDOWS}Windows, {$ENDIF} Messages, Classes, SysUtils, Forms, Controls, Graphics, Dialogs, ExtCtrls, StdCtrls,
     Badger, BadgerBasicAuth, BadgerAuthJWT, BadgerTypes, BadgerLogger, SampleRouteManager;
 
 type
@@ -95,7 +95,6 @@ begin
     btnSyna.Caption := 'Iniciar Servidor';
     edtPorta.Enabled := True;
     rdLog.Enabled := True;
-    CBxNonBlockMode.Enabled := True;
     RadioGroup1.Enabled := True;
     edtTimeOut.Enabled:= True;
   end;
@@ -127,7 +126,7 @@ begin
     begin
        Memo1.Lines.Add('Client Request: ' + #13#10 + RequestInfo.RequestLine + #13#10);
           Memo1.Lines.Add('Remote Request IP: ' + #13#10 + RequestInfo.RemoteIP + #13#10);
-          memo1.Perform(WM_VSCROLL, SB_LINEDOWN, 0);
+          memo1.SelStart := Length(Memo1.Text);
     end;
 end;
 
@@ -137,7 +136,7 @@ begin
     begin
       Memo1.Lines.Add('Server Response: ' + #13#10 + IntToStr(ResponseInfo.StatusCode) + ' ' + ResponseInfo.Body + #13#10
        + DateTimeToStr(ResponseInfo.Timestamp) + #13#10);
-       memo1.Perform(WM_VSCROLL, SB_LINEDOWN, 0);
+       memo1.SelStart := Length(Memo1.Text);
     end;
 end;
 
