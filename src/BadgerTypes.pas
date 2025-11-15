@@ -3,7 +3,7 @@ unit BadgerTypes;
 interface
 
 uses
-  blcksock, Classes, SysUtils, Contnrs;
+  Classes, SysUtils, Contnrs, blcksock;
 
 type
   THTTPRequest = record
@@ -16,6 +16,7 @@ type
     FRemoteIP: String;
     UserID   : String;
     UserRole : String;
+    RouteParams: TStringList;
   end;
 
   THTTPResponse = record
@@ -26,29 +27,26 @@ type
     HeadersCustom: TStringList;
   end;
 
-  // Record para armazenar detalhes da última requisição
   TRequestInfo = record
-    RemoteIP : string;        //Ex.: Client Request IP : 192.168.0.1
-    Method: string;           // Ex.: GET, POST
-    URI: string;              // Ex.: /path
-    RequestLine: string;      // Ex.: GET /path HTTP/1.1
-    Headers: TStringList;     // Cabeçalhos da requisição
-    Body: string;             // Corpo da requisição (se texto/JSON)
-    QueryParams: TStringList; // Parâmetros da query string
-    Timestamp: TDateTime;     // Hora da requisição
+    RemoteIP : string;
+    Method: string;
+    URI: string;
+    RequestLine: string;
+    Headers: TStringList;
+    Body: string;
+    QueryParams: TStringList;
+    Timestamp: TDateTime;
   end;
 
-  // Record para armazenar detalhes da última resposta
   TResponseInfo = record
-    StatusCode: Integer;      // Ex.: 200, 404
-    StatusText: string;       // Ex.: OK, Not Found
-    Body: string;             // Corpo da resposta
-    ContentType: string;      // Ex.: text/plain, application/json
-    Headers: TStringList;     // Cabeçalhos da resposta
-    Timestamp: TDateTime;     // Hora da resposta
+    StatusCode: Integer;
+    StatusText: string;
+    Body: string;
+    ContentType: string;
+    Headers: TStringList;
+    Timestamp: TDateTime;
   end;
 
-  // Eventos para requisição e resposta
   TOnRequest = procedure(const RequestInfo: TRequestInfo) of object;
   TOnResponse = procedure(const ResponseInfo: TResponseInfo) of object;
 

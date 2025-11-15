@@ -8,7 +8,8 @@ interface
 
 uses
   SysUtils, Classes
-  {$IFDEF WINDOWS}, Registry {$ENDIF};
+  {$IFDEF MSWINDOWS}, Registry {$ENDIF}  ;
+
 
 type
   TBytes = array of Byte;
@@ -682,20 +683,23 @@ end;
 
 function BytesToRawString(const ABytes: TBytes): string;
 var
-  i: Integer;
+  Len: Integer;
 begin
-  SetLength(Result, Length(ABytes));
-  for i := 0 to Length(ABytes) - 1 do
-    Result[i + 1] := Chr(ABytes[i]);
+  Len := Length(aBytes) div SizeOf(Char);
+  SetLength(Result, Len);
+  if Len > 0 then
+    Move(aBytes[0], Result[1], Len * SizeOf(Char));
 end;
 
 function RawStringToBytes(const S: string): TBytes;
 var
-  i: Integer;
+  Len: Integer;
 begin
-  SetLength(Result, Length(S));
-  for i := 1 to Length(S) do
-    Result[i - 1] := Byte(AnsiChar(S[i]));
+  Len := Length(S);
+  SetLength(Result, Len * 2); // Para Unicode, ajustar conforme necessidade
+  if Len > 0 then
+    Move(S[1], Result[0], Len * SizeOf(Char));
 end;
+
 
 end.

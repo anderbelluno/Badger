@@ -5,8 +5,8 @@ unit Unit1;
 interface
 
 uses
-    Windows, Messages, Classes, SysUtils, Forms, Controls, Graphics, Dialogs, ExtCtrls, StdCtrls,
-    Badger, BadgerBasicAuth, BadgerAuthJWT, BadgerTypes, SampleRouteManager;
+    {$IFDEF MSWINDOWS}Windows, {$ENDIF} Messages, Classes, SysUtils, Forms, Controls, Graphics, Dialogs, ExtCtrls, StdCtrls,
+    Badger, BadgerBasicAuth, BadgerAuthJWT, BadgerTypes, BadgerLogger, SampleRouteManager;
 
 type
 
@@ -15,7 +15,6 @@ type
     TForm1 = class(TForm)
         btnClearLog: TButton;
         btnSyna: TButton;
-        CBxNonBlockMode: TCheckBox;
         edtPorta: TEdit;
         edtTimeOut: TEdit;
         Label1: TLabel;
@@ -49,12 +48,14 @@ implementation
 
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
+  Logger.isActive := True;
+  Logger.LogToConsole := False;
+
     if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
-    ServerThread.NonBlockMode := CBxNonBlockMode.Checked;
 
     ServerThread.OnRequest  := HandleRequest;
     ServerThread.OnResponse := HandleResponse;
@@ -68,20 +69,19 @@ begin
     end;
 
     ServerThread.RouteManager
-      .Add('/upload',       TSampleRouteManager.upLoad)
-      .Add('/download',     TSampleRouteManager.downLoad)
-      .Add('/rota1',        TSampleRouteManager.rota1)
-      .Add('/ping',         TSampleRouteManager.ping)
-      .Add('/AtuImage',     TSampleRouteManager.AtuImage)
-      .Add('/Login',        TSampleRouteManager.Login)
-      .Add('/RefreshToken', TSampleRouteManager.RefreshToken);
+      .AddPost('/upload', TSampleRouteManager.upLoad)
+      .AddGet('/download', TSampleRouteManager.downLoad)
+      .AddGet('/rota1', TSampleRouteManager.rota1)
+      .AddGet('/ping', TSampleRouteManager.ping)
+      .AddPost('/AtuImage', TSampleRouteManager.AtuImage)
+      .AddPost('/Login',TSampleRouteManager.Login)
+      .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken);
 
-    ServerThread.ParallelProcessing:= True;
+    //ServerThread.ParallelProcessing:= True;
 
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
-    CBxNonBlockMode.Enabled := False;
     btnSyna.Tag := 1;
     btnSyna.Caption := 'Parar Servidor';
     RadioGroup1.Enabled := False;
@@ -95,7 +95,6 @@ begin
     btnSyna.Caption := 'Iniciar Servidor';
     edtPorta.Enabled := True;
     rdLog.Enabled := True;
-    CBxNonBlockMode.Enabled := True;
     RadioGroup1.Enabled := True;
     edtTimeOut.Enabled:= True;
   end;
@@ -127,7 +126,7 @@ begin
     begin
        Memo1.Lines.Add('Client Request: ' + #13#10 + RequestInfo.RequestLine + #13#10);
           Memo1.Lines.Add('Remote Request IP: ' + #13#10 + RequestInfo.RemoteIP + #13#10);
-          memo1.Perform(WM_VSCROLL, SB_LINEDOWN, 0);
+          memo1.SelStart := Length(Memo1.Text);
     end;
 end;
 
@@ -137,7 +136,7 @@ begin
     begin
       Memo1.Lines.Add('Server Response: ' + #13#10 + IntToStr(ResponseInfo.StatusCode) + ' ' + ResponseInfo.Body + #13#10
        + DateTimeToStr(ResponseInfo.Timestamp) + #13#10);
-       memo1.Perform(WM_VSCROLL, SB_LINEDOWN, 0);
+       memo1.SelStart := Length(Memo1.Text);
     end;
 end;
 

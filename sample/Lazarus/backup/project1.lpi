@@ -56,9 +56,14 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="..\..\..\TTCPBlockSocket\src;..\..\..\TTCPBlockSocket\src\Auth\Basic;..\..\..\TTCPBlockSocket\src\Auth\JWT;..\..\..\TTCPBlockSocket\sample;..\..\..\TTCPBlockSocket\ThirdParty\Synapse;..\..\ThirdParty\SuperObject\D7_Laz"/>
+      <OtherUnitFiles Value="..\..\src;..\..\src\Auth\Basic;..\..\src\Auth\JWT;..\..\sample;..\..\ThirdParty\Synapse;..\..\ThirdParty\SuperObject\D_Plus_Laz_Linux"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
+    <Parsing>
+      <SyntaxOptions>
+        <SyntaxMode Value="Delphi"/>
+      </SyntaxOptions>
+    </Parsing>
     <Linking>
       <Debugging>
         <DebugInfoType Value="dsDwarf3"/>

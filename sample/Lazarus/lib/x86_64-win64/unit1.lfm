@@ -6,7 +6,7 @@ object Form1: TForm1
   Caption = 'Form1'
   ClientHeight = 574
   ClientWidth = 626
-  LCLVersion = '4.0.0.4'
+  LCLVersion = '4.1.0.0'
   OnCreate = FormCreate
   OnDestroy = FormDestroy
   object Panel2: TPanel
@@ -67,14 +67,6 @@ object Form1: TForm1
     ClientHeight = 501
     ClientWidth = 185
     TabOrder = 1
-    object CBxNonBlockMode: TCheckBox
-      Left = 16
-      Height = 19
-      Top = 48
-      Width = 101
-      Caption = 'NonBlockMode'
-      TabOrder = 0
-    end
     object RadioGroup1: TRadioGroup
       Left = 8
       Height = 137
@@ -89,7 +81,7 @@ object Form1: TForm1
       ChildSizing.ShrinkVertical = crsScaleChilds
       ChildSizing.Layout = cclLeftToRightThenTopToBottom
       ChildSizing.ControlsPerLine = 1
-      ClientHeight = 117
+      ClientHeight = 116
       ClientWidth = 165
       ItemIndex = 0
       Items.Strings = (
@@ -98,7 +90,7 @@ object Form1: TForm1
         'Token'
         'JWT'
       )
-      TabOrder = 1
+      TabOrder = 0
     end
     object rdLog: TCheckBox
       Left = 16
@@ -108,7 +100,7 @@ object Form1: TForm1
       Caption = 'Request Log'
       Checked = True
       State = cbChecked
-      TabOrder = 2
+      TabOrder = 1
     end
     object btnClearLog: TButton
       Left = 24
@@ -116,7 +108,7 @@ object Form1: TForm1
       Top = 248
       Width = 75
       Caption = 'Clear Log'
-      TabOrder = 3
+      TabOrder = 2
       OnClick = btnClearLogClick
     end
   end

@@ -6,10 +6,10 @@
         <Base>True</Base>
         <Config Condition="'$(Config)'==''">Debug</Config>
         <Platform Condition="'$(Platform)'==''">Win32</Platform>
-        <ProjectName Condition="'$(ProjectName)'==''">FMXWindows</ProjectName>
-        <TargetedPlatforms>558099</TargetedPlatforms>
+        <TargetedPlatforms>558227</TargetedPlatforms>
         <AppType>Application</AppType>
         <MainSource>FMXWindows.dpr</MainSource>
+        <ProjectName Condition="'$(ProjectName)'==''">FMXWindows</ProjectName>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
         <Base>true</Base>
@@ -98,7 +98,7 @@
         <Icon_MainIcon>$(BDS)\bin\delphi_PROJECTICON.ico</Icon_MainIcon>
         <Icns_MainIcns>$(BDS)\bin\delphi_PROJECTICNS.icns</Icns_MainIcns>
         <SanitizedProjectName>FMXWindows</SanitizedProjectName>
-        <DCC_UnitSearchPath>..\..\..\src;..\..\..\src\Auth\Basic;..\..\..\src\Auth\JWT;..\..\..\ThirdParty\Synapse;..\..\..\ThirdParty\SuperObject\D_plus;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>..\..\..\src;..\..\..\src\Auth\Basic;..\..\..\src\Auth\JWT;..\..\..\ThirdParty\Synapse;..\..\..\ThirdParty\SuperObject\D_Plus_Laz_Linux;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <DCC_MapFile>3</DCC_MapFile>
         <DCC_GenerateStackFrames>true</DCC_GenerateStackFrames>
     </PropertyGroup>
@@ -259,7 +259,8 @@
     <PropertyGroup Condition="'$(Cfg_1_Win32)'!=''">
         <DCC_RemoteDebug>false</DCC_RemoteDebug>
         <AppDPIAwarenessMode>PerMonitorV2</AppDPIAwarenessMode>
-        <DCC_MapFile>3</DCC_MapFile>
+        <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
+        <VerInfo_Locale>1033</VerInfo_Locale>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
         <AppDPIAwarenessMode>PerMonitorV2</AppDPIAwarenessMode>
@@ -394,11 +395,20 @@
                         <Overwrite>true</Overwrite>
                     </Platform>
                 </DeployFile>
+                <DeployFile LocalName="Linux64\Debug\FMXWindows" Configuration="Debug" Class="ProjectOutput">
+                    <Platform Name="Linux64">
+                        <RemoteName>FMXWindows</RemoteName>
+                        <Overwrite>true</Overwrite>
+                    </Platform>
+                </DeployFile>
                 <DeployFile LocalName="Win32\Debug\Project1.exe" Configuration="Debug" Class="ProjectOutput"/>
-                <DeployFile LocalName="Win64\Debug\FMXWindows.exe" Configuration="Debug" Class="ProjectOutput"/>
-                <DeployFile LocalName="Win64\Debug\FMXWindows.rsm" Configuration="Debug" Class="DebugSymbols"/>
+                <DeployFile LocalName="Win64\Debug\FMXWindows.exe" Configuration="Debug" Class="ProjectOutput">
+                    <Platform Name="Win64">
+                        <RemoteName>FMXWindows.exe</RemoteName>
+                        <Overwrite>true</Overwrite>
+                    </Platform>
+                </DeployFile>
                 <DeployFile LocalName="Win64\Debug\Project1.exe" Configuration="Debug" Class="ProjectOutput"/>
-                <DeployFile LocalName="Win64\Debug\Project1.rsm" Configuration="Debug" Class="DebugSymbols"/>
                 <DeployClass Name="AdditionalDebugSymbols">
                     <Platform Name="iOSSimulator">
                         <Operation>1</Operation>
@@ -1345,6 +1355,9 @@
                 <Platform value="Android64">True</Platform>
                 <Platform value="iOSDevice64">True</Platform>
                 <Platform value="iOSSimARM64">True</Platform>
+                <Platform value="Linux64">True</Platform>
+                <Platform value="OSX64">False</Platform>
+                <Platform value="OSXARM64">False</Platform>
                 <Platform value="Win32">True</Platform>
                 <Platform value="Win64">True</Platform>
             </Platforms>

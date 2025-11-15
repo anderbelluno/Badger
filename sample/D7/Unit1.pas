@@ -4,14 +4,14 @@ interface
 
 uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs,  Badger, BadgerBasicAuth, BadgerAuthJWT, BadgerTypes, SampleRouteManager, ExtCtrls,
+  Dialogs,  Badger, BadgerBasicAuth, BadgerAuthJWT, BadgerTypes, SampleRouteManager,
+  BadgerLogger, ExtCtrls,
   StdCtrls;
 
 type
   TForm1 = class(TForm)
     btnSyna: TButton;
     rdLog: TCheckBox;
-    CBxNonBlockMode: TCheckBox;
     Memo1: TMemo;
     Label1: TLabel;
     edtPorta: TEdit;
@@ -46,12 +46,14 @@ implementation
 
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
+  Logger.isActive := True;
+  Logger.LogToConsole := False;
+  
   if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
-    ServerThread.NonBlockMode := CBxNonBlockMode.Checked;
     ServerThread.OnRequest := HandleRequest;
     ServerThread.OnResponse := HandleResponse;
 
@@ -74,14 +76,13 @@ begin
       .AddGet('/ping', TSampleRouteManager.ping)
       .AddPost('/AtuImage', TSampleRouteManager.AtuImage)
       .AddPost('/Login',TSampleRouteManager.Login)
-      .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken);
-
-      ServerThread.ParallelProcessing := False;
+      .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken)
+      .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
+      .AddGet('/produtos', TSampleRouteManager.produtos);
 
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
-    CBxNonBlockMode.Enabled := False;
     btnSyna.Tag := 1;
     btnSyna.Caption := 'Parar Servidor';
     RadioGroup1.Enabled := False;
@@ -95,7 +96,6 @@ begin
     btnSyna.Caption := 'Iniciar Servidor';
     edtPorta.Enabled := True;
     rdLog.Enabled := True;
-    CBxNonBlockMode.Enabled := True;
     RadioGroup1.Enabled := True;
     edtTimeOut.Enabled:= True;
   end;

@@ -13,6 +13,7 @@ uses
   BadgerBasicAuth,
   BadgerAuthJWT,
   BadgerTypes,
+  BadgerLogger,
 
   System.SysUtils, System.Types, System.UITypes, System.Classes, System.Variants,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
@@ -24,7 +25,6 @@ type
     Layout1: TLayout;
     btnSyna: TButton;
     rdLog: TCheckBox;
-    CBxNonBlockMode: TCheckBox;
     Memo1: TMemo;
     Label1: TLabel;
     edtPorta: TEdit;
@@ -69,12 +69,14 @@ end;
 
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
+  Logger.isActive := True;
+  Logger.LogToConsole := False;
+
   if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
-    ServerThread.NonBlockMode := CBxNonBlockMode.IsChecked;
     ServerThread.OnRequest := HandleRequest;
     ServerThread.OnResponse := HandleResponse;
 
@@ -93,15 +95,15 @@ begin
       .AddGet('/ping', TSampleRouteManager.ping)
       .AddPost('/AtuImage', TSampleRouteManager.AtuImage)
       .AddPost('/Login',TSampleRouteManager.Login)
-      .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken);
-
-    ServerThread.ParallelProcessing := True;
-    ServerThread.MaxConcurrentConnections := 500;
+      .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken)
+      .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
+      .AddGet('/produtos', TSampleRouteManager.produtos);
+   // ServerThread.ParallelProcessing := True;
+   // ServerThread.MaxConcurrentConnections := 500;
 
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
-    CBxNonBlockMode.Enabled := False;
     btnSyna.Tag := 1;
     btnSyna.Text := 'Parar Servidor';
     ComboAuth.Enabled := False;
@@ -115,7 +117,6 @@ begin
     btnSyna.Text := 'Iniciar Servidor';
     edtPorta.Enabled := True;
     rdLog.Enabled := True;
-    CBxNonBlockMode.Enabled := True;
     ComboAuth.Enabled := True;
     edtTimeOut.Enabled := True;
   end;
