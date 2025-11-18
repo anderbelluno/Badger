@@ -48,12 +48,13 @@ implementation
 
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
-  Logger.isActive := True;
+  Logger.isActive := False;
   Logger.LogToConsole := False;
 
     if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
+    ServerThread.EnableEventInfo := rdLog.Checked;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
 
@@ -72,12 +73,15 @@ begin
       .AddPost('/upload', TSampleRouteManager.upLoad)
       .AddGet('/download', TSampleRouteManager.downLoad)
       .AddGet('/rota1', TSampleRouteManager.rota1)
-      .AddGet('/ping', TSampleRouteManager.ping)
+      .AddGet('/teste/ping', TSampleRouteManager.ping)
       .AddPost('/AtuImage', TSampleRouteManager.AtuImage)
       .AddPost('/Login',TSampleRouteManager.Login)
-      .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken);
+      .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken)
+      .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
+      .AddGet('/produtos', TSampleRouteManager.produtos);
 
-    //ServerThread.ParallelProcessing:= True;
+    ServerThread.ParallelProcessing:= True;
+    ServerThread.MaxConcurrentConnections:= 30000;
 
     ServerThread.Start;
     edtPorta.Enabled := False;

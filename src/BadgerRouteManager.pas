@@ -25,6 +25,7 @@ type
   TRouteManager = class(TObject)
   private
     FRoutes: TObjectList;
+    FContextIndex: TStringList;
     function SplitString(const S, Delim: string): TStringList;
 
   public
@@ -78,6 +79,10 @@ var
   I: Integer;
   Entry: TRouteEntry;
   FullRoute: string;
+  Parts: TStringList;
+  ContextKey: string;
+  CtxIdx: Integer;
+  Bucket: TObjectList;
 begin
   Result := Self;
   for I := FRoutes.Count - 1 downto 0 do
@@ -87,6 +92,21 @@ begin
     if SameText(FullRoute, Route) then
     begin
       FRoutes.Delete(I);
+      Parts := SplitString(Entry.Pattern, '/');
+      try
+        if (Parts.Count > 1) and (Copy(Parts[1], 1, 1) <> ':') then
+          ContextKey := Parts[1]
+        else
+          ContextKey := '';
+        CtxIdx := FContextIndex.IndexOf(ContextKey);
+        if CtxIdx >= 0 then
+        begin
+          Bucket := TObjectList(FContextIndex.Objects[CtxIdx]);
+          Bucket.Remove(Entry);
+        end;
+      finally
+        Parts.Free;
+      end;
       Break;
     end;
   end;
@@ -108,6 +128,10 @@ function TRouteManager.AddMethod(const AVerb, ARoute: string; ACallback: TRoutin
 var
   Entry: TRouteEntry;
   CleanRoute: string;
+  Parts: TStringList;
+  ContextKey: string;
+  CtxIdx: Integer;
+  Bucket: TObjectList;
 begin
   Result := Self;
   CleanRoute := StringReplace(ARoute, '//', '/', [rfReplaceAll]);
@@ -121,6 +145,26 @@ begin
   Entry.Pattern := LowerCase(CleanRoute);
   Entry.Callback := ACallback;
   FRoutes.Add(Entry);
+
+  Parts := SplitString(Entry.Pattern, '/');
+  try
+    if (Parts.Count > 1) and (Copy(Parts[1], 1, 1) <> ':') then
+      ContextKey := Parts[1]
+    else
+      ContextKey := '';
+
+    CtxIdx := FContextIndex.IndexOf(ContextKey);
+    if CtxIdx < 0 then
+    begin
+      Bucket := TObjectList.Create(False);
+      CtxIdx := FContextIndex.AddObject(ContextKey, Bucket);
+    end
+    else
+      Bucket := TObjectList(FContextIndex.Objects[CtxIdx]);
+    Bucket.Add(Entry);
+  finally
+    Parts.Free;
+  end;
 end;
 
 function TRouteManager.AddPatch(const ARoute: string;
@@ -145,10 +189,22 @@ constructor TRouteManager.Create;
 begin
   inherited Create;
   FRoutes := TObjectList.Create(True);
+  FContextIndex := TStringList.Create;
+  FContextIndex.CaseSensitive := False;
 end;
 
 destructor TRouteManager.Destroy;
 begin
+  if Assigned(FContextIndex) then
+  begin
+    while FContextIndex.Count > 0 do
+    begin
+      if Assigned(FContextIndex.Objects[0]) then
+        TObject(FContextIndex.Objects[0]).Free;
+      FContextIndex.Delete(0);
+    end;
+    FreeAndNil(FContextIndex);
+  end;
   FreeAndNil(FRoutes);
   inherited;
 end;
@@ -178,21 +234,34 @@ end;
 
 function TRouteManager.MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; out Params: TStringList): Boolean;
 var
-  I, J: Integer;
+  I, J, CtxIdx: Integer;
   PatternParts, PathParts: TStringList;
-  Part, ParamName: string;
+  Part, ParamName, ContextKey: string;
+  Bucket: TObjectList;
 begin
   Result := False;
   Params.Clear;
   Entry := nil;
 
-  for I := 0 to FRoutes.Count - 1 do
+  PathParts := SplitString(APath, '/');
+  try
+    if (PathParts.Count > 1) then
+      ContextKey := PathParts[1]
+    else
+      ContextKey := '';
+
+    CtxIdx := FContextIndex.IndexOf(ContextKey);
+    if CtxIdx >= 0 then
+      Bucket := TObjectList(FContextIndex.Objects[CtxIdx])
+    else
+      Bucket := FRoutes;
+
+    for I := 0 to Bucket.Count - 1 do
   begin
-    Entry := TRouteEntry(FRoutes[I]);
+    Entry := TRouteEntry(Bucket[I]);
     if Entry.Verb <> AVerb then Continue;
 
     PatternParts := SplitString(Entry.Pattern, '/');
-    PathParts := SplitString(APath, '/');
     try
       if PatternParts.Count <> PathParts.Count then
         Continue;
@@ -221,8 +290,10 @@ begin
         Exit;
     finally
       PatternParts.Free;
-      PathParts.Free;
     end;
+  end;
+  finally
+    PathParts.Free;
   end;
 end;
 

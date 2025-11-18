@@ -23,16 +23,17 @@ type
     FTimeout: Integer;
     FParentServer: TBadger;
     FIsParallel: Boolean;
+    FEnableEventInfo: Boolean;
   protected
     procedure ParseRequestHeader(ClientSocket: TTCPBlockSocket; aHeaders: TStringList);
     function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean; HeaderCustom: TStringList): string;
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
                       AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
-                      AOnRequest: TOnRequest; AOnResponse: TOnResponse);
+                      AOnRequest: TOnRequest; AOnResponse: TOnResponse; AEnableEventInfo: Boolean);
     constructor CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
                               AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
-                              AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger);
+                              AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
     destructor Destroy; override;
     procedure Execute; override;
   end;
@@ -43,7 +44,7 @@ implementation
 
 constructor THTTPRequestHandler.Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
   AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
-  AOnRequest: TOnRequest; AOnResponse: TOnResponse);
+  AOnRequest: TOnRequest; AOnResponse: TOnResponse; AEnableEventInfo: Boolean);
 var
   I: Integer;
 begin
@@ -58,6 +59,7 @@ begin
   FTimeout := ATimeout;
   FParentServer := nil;
   FIsParallel := False;
+  FEnableEventInfo := AEnableEventInfo;
 
   for I := 0 to AMiddlewares.Count - 1 do
     FMiddlewares.Add(TMiddlewareWrapper.Create(TMiddlewareWrapper(AMiddlewares[I]).Middleware));
@@ -66,7 +68,7 @@ end;
 
 constructor THTTPRequestHandler.CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
   AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
-  AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger);
+  AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
 var
   I: Integer;
 begin
@@ -81,6 +83,7 @@ begin
   FTimeout := ATimeout;
   FParentServer := AParentServer;
   FIsParallel := True;
+  FEnableEventInfo := AEnableEventInfo;
 
   for I := 0 to AMiddlewares.Count - 1 do
     FMiddlewares.Add(TMiddlewareWrapper.Create(TMiddlewareWrapper(AMiddlewares[I]).Middleware));
@@ -341,7 +344,17 @@ begin
             end;
           end;
 
-          CloseConnection := (Headers.Values['Connection'] = 'close') or (Pos('HTTP/1.0', FRequestLine) > 0);
+          if Pos('HTTP/1.0', FRequestLine) > 0 then
+          begin
+            // HTTP/1.0 s� aceita Keep-Alive se o cliente pedir explicitamente
+            CloseConnection := (Headers.Values['Connection'].ToLower <> 'keep-alive');
+          end
+          else
+          begin
+            // HTTP/1.1 mant�m aberta a menos que pe�a para fechar
+            CloseConnection := (Headers.Values['Connection'].ToLower = 'close');
+          end;
+
 
           // --- MIDDLEWARES ---
           Handled := False;
@@ -408,7 +421,7 @@ begin
           end;
 
           // --- LOGS ---
-          if Assigned(FOnRequest) then
+          if FEnableEventInfo and Assigned(FOnRequest) then
           begin
             RequestInfo.Headers := TStringList.Create;
             RequestInfo.QueryParams := TStringList.Create;
@@ -428,7 +441,7 @@ begin
             end;
           end;
 
-          if Assigned(FOnResponse) then
+          if FEnableEventInfo and Assigned(FOnResponse) then
           begin
             ResponseInfo.Headers := TStringList.Create;
             try

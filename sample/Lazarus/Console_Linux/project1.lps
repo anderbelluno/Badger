@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <ProjectSession>
+    <Version Value="12"/>
+    <BuildModes Active="Debug"/>
+    <Units>
+      <Unit>
+        <Filename Value="project1.lpr"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="Project1"/>
+        <IsVisibleTab Value="True"/>
+        <CursorPos X="34" Y="9"/>
+        <UsageCount Value="22"/>
+        <Loaded Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="../../SampleRouteManager.pas"/>
+        <IsPartOfProject Value="True"/>
+        <EditorIndex Value="3"/>
+        <TopLine Value="88"/>
+        <CursorPos X="27" Y="104"/>
+        <UsageCount Value="22"/>
+        <Loaded Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="../../../src/Badger.pas"/>
+        <EditorIndex Value="1"/>
+        <TopLine Value="627"/>
+        <CursorPos X="5" Y="662"/>
+        <UsageCount Value="11"/>
+        <Loaded Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="../../../ThirdParty/Synapse/blcksock.pas"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="584"/>
+        <CursorPos X="34" Y="597"/>
+        <UsageCount Value="11"/>
+      </Unit>
+      <Unit>
+        <Filename Value="../../../src/BadgerRequestHandler.pas"/>
+        <EditorIndex Value="2"/>
+        <TopLine Value="478"/>
+        <CursorPos X="5" Y="513"/>
+        <UsageCount Value="11"/>
+        <Loaded Value="True"/>
+      </Unit>
+    </Units>
+    <JumpHistory HistoryIndex="17">
+      <Position>
+        <Filename Value="../../SampleRouteManager.pas"/>
+        <Caret Line="27" Column="23"/>
+      </Position>
+      <Position>
+        <Filename Value="project1.lpr"/>
+        <Caret Line="18" Column="18" TopLine="13"/>
+      </Position>
+      <Position>
+        <Filename Value="project1.lpr"/>
+        <Caret Line="42" Column="34" TopLine="28"/>
+      </Position>
+      <Position>
+        <Filename Value="../../SampleRouteManager.pas"/>
+        <Caret Line="27" Column="21" TopLine="10"/>
+      </Position>
+      <Position>
+        <Filename Value="project1.lpr"/>
+        <Caret Line="42" Column="34" TopLine="28"/>
+      </Position>
+      <Position>
+        <Filename Value="project1.lpr"/>
+        <Caret Line="47" Column="49"/>
+      </Position>
+      <Position>
+        <Filename Value="project1.lpr"/>
+        <Caret Line="43" Column="27" TopLine="26"/>
+      </Position>
+      <Position>
+        <Filename Value="../../../src/Badger.pas"/>
+        <Caret Line="443" Column="38" TopLine="422"/>
+      </Position>
+      <Position>
+        <Filename Value="../../../src/Badger.pas"/>
+        <Caret Line="449" Column="125" TopLine="394"/>
+      </Position>
+      <Position>
+        <Filename Value="../../../src/Badger.pas"/>
+        <Caret Line="510" Column="25" TopLine="492"/>
+      </Position>
+      <Position>
+        <Filename Value="../../../src/Badger.pas"/>
+        <Caret Line="440" Column="50" TopLine="395"/>
+      </Position>
+      <Position>
+        <Filename Value="../../../src/Badger.pas"/>
+        <Caret Line="510" Column="25" TopLine="483"/>
+      </Position>
+      <Position>
+        <Filename Value="../../../src/Badger.pas"/>
+        <Caret Line="460" Column="88" TopLine="46"/>
+      </Position>
+      <Position>
+        <Filename Value="../../../src/BadgerRequestHandler.pas"/>
+        <Caret Line="28" Column="26"/>
+      </Position>
+      <Position>
+        <Filename Value="../../../src/Badger.pas"/>
+        <Caret Line="55" Column="18" TopLine="49"/>
+      </Position>
+      <Position>
+        <Filename Value="../../../src/Badger.pas"/>
+        <Caret Line="428" Column="15" TopLine="425"/>
+      </Position>
+      <Position>
+        <Filename Value="../../../src/BadgerRequestHandler.pas"/>
+        <Caret Line="327" Column="25" TopLine="324"/>
+      </Position>
+      <Position>
+        <Filename Value="project1.lpr"/>
+        <Caret Line="38" Column="26"/>
+      </Position>
+    </JumpHistory>
+    <RunParams>
+      <FormatVersion Value="2"/>
+      <Modes ActiveMode=""/>
+    </RunParams>
+  </ProjectSession>
+</CONFIG>

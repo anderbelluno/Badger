@@ -2,10 +2,6 @@
 
 {$I BadgerDefines.inc}
 
-{$IFDEF FPC}
-  {$mode delphi}{$H+}
-{$ENDIF}
-
 interface
 
 uses
@@ -40,6 +36,7 @@ type
     FIsShuttingDown: Boolean;
     FClientSockets: TList;
     FIsRunning: Boolean;
+    FEnableEventInfo: Boolean;
   protected
     procedure Execute; override;
     function CanAcceptNewConnection: Boolean;
@@ -68,6 +65,7 @@ type
     property OnRequest: TOnRequest read FOnRequest write FOnRequest;
     property OnResponse: TOnResponse read FOnResponse write FOnResponse;
     property IsRunning: Boolean read FIsRunning;
+    property EnableEventInfo: Boolean read FEnableEventInfo write FEnableEventInfo;
   end;
 
 implementation
@@ -95,6 +93,7 @@ begin
   FMaxConcurrentConnections := 100;
   FActiveConnections := 0;
   FIsShuttingDown := False;
+  FEnableEventInfo := True;
 
   Logger.Info('TBadger created');
 end;
@@ -602,13 +601,13 @@ begin
                 begin
                   IncActiveConnections;
                   THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares,
-                                                    FTimeout, FOnRequest, FOnResponse, Self);
+                                                    FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
                   ClientSocket := nil;
                 end
                 else
                 begin
                   THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares,
-                                             FTimeout, FOnRequest, FOnResponse);
+                                             FTimeout, FOnRequest, FOnResponse, FEnableEventInfo);
                   RemoveClientSocket(ClientSocket);
                   ClientSocket := nil;
                 end;
@@ -643,7 +642,7 @@ begin
           FSocketLock.Release;
         end;
         if Terminated or FIsShuttingDown then Break;
-        Sleep(10);
+        //Sleep(10);
       except
         on E: Exception do
         begin

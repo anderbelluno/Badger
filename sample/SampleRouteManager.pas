@@ -118,7 +118,6 @@ class procedure TSampleRouteManager.ping(Request: THTTPRequest;
 begin
   Response.StatusCode := HTTP_OK;
   Response.Body := UTF8Encode('Pong');
-  Response.HeadersCustom.Add('Access-Control-Allow-Origin: *');
   Response.ContentType := TEXT_PLAIN;
 end;
 
