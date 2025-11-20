@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Compiler Value="C:\Laz_fix\fpc\bin\i386-win32\fpc.exe" Date="1533963989"/>
+  <Params Value="-MObjFPC -Scaghi -CirotR -O1 -gw3 -gl -gh -gt -l -vewnhibq -FiD:\files\Badger\sample\Lazarus\Console\lib\i386-win32 -FuD:\files\Badger\sample\Lazarus\Console\ -FuD:\files\Badger\sample\Lazarus\Console\home\usuario\Badger\Badger\ThirdParty\Synapse -FuD:\files\Badger\sample\Lazarus\Console\home\usuario\Badger\Badger\ThirdParty\SuperObject\D_Plus_Laz_Linux -FuD:\files\Badger\sample\Lazarus\Console\home\usuario\Badger\Badger\src\Auth\Basic -FuD:\files\Badger\sample\Lazarus\Console\home\usuario\Badger\Badger\src -FuD:\files\Badger\sample\Lazarus\Console\home\usuario\Badger\Badger\src\Auth\JWT -FuD:\files\Badger\sample\Lazarus\Console\home\usuario\Badger\Badger\sample -FUD:\files\Badger\sample\Lazarus\Console\lib\i386-win32\ -FED:\files\Badger\sample\Lazarus\Console\ -oD:\files\Badger\sample\Lazarus\Console\project1.exe project1.lpr"/>
+  <Complete Value="False"/>
+</CONFIG>

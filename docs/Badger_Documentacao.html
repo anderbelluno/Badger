@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>Badger – Documentação Técnica</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; line-height: 1.6; margin: 40px; color: #222; }
+    h1, h2, h3 { line-height: 1.25; }
+    code, pre { background: #f6f8fa; padding: 2px 4px; border-radius: 4px; }
+    pre { padding: 12px; overflow-x: auto; }
+    ul { margin: 0 0 1em 1.2em; }
+  </style>
+  </head>
+<body>
+  <h1>Badger – Documentação Técnica Completa</h1>
+  <h2>Visão Geral</h2>
+  <p>Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, com suporte a rotas estáticas e dinâmicas, middlewares, eventos de aplicação (OnRequest/OnResponse) e autenticação via exemplos.</p>
+
+  <h2>Arquitetura</h2>
+  <ul>
+    <li><strong>TBadger</strong>: accept loop, concorrência e criação de handlers. Referências: <code>src/Badger.pas:24–71</code>, <code>src/Badger.pas:80–100</code>, <code>src/Badger.pas:564–647</code>.</li>
+    <li><strong>THTTPRequestHandler</strong>: parsing, roteamento, execução e resposta. Referências: <code>src/BadgerRequestHandler.pas:12–38</code>, <code>src/BadgerRequestHandler.pas:45–89</code>, <code>src/BadgerRequestHandler.pas:117–143</code>, <code>src/BadgerRequestHandler.pas:145–176</code>, <code>src/BadgerRequestHandler.pas:380–445</code>.</li>
+    <li><strong>TRouteManager</strong>: cadastro e matching com buckets por contexto. Referências: <code>src/BadgerRouteManager.pas:25–49</code>, <code>src/BadgerRouteManager.pas:107–124</code>, <code>src/BadgerRouteManager.pas:179–227</code>.</li>
+  </ul>
+
+  <h2>Fluxo da Requisição</h2>
+  <ol>
+    <li>Accept e criação de handler: <code>src/Badger.pas:591–612</code>.</li>
+    <li>Parsing de headers (linha a linha): <code>src/BadgerRequestHandler.pas:117–143</code>.</li>
+    <li>Roteamento: <code>src/BadgerRouteManager.pas:179–227</code>.</li>
+    <li>Callback de rota e <code>THTTPResponse</code>: <code>src/BadgerRequestHandler.pas:145–176</code>.</li>
+    <li>Envio de corpo/stream: <code>src/BadgerRequestHandler.pas:380–408</code>.</li>
+    <li>Eventos (condicionais por <code>EnableEventInfo</code>): <code>src/BadgerRequestHandler.pas:410–445</code>.</li>
+  </ol>
+
+  <h2>Roteamento por Contexto</h2>
+  <p>O primeiro segmento do path é usado para escolher um bucket de rotas. Rotas com primeiro segmento dinâmico entram no bucket vazio.</p>
+
+  <h2>Middlewares</h2>
+  <p>Wrappers clonados por handler; liberação no destrutor.</p>
+
+  <h2>Eventos e Logging</h2>
+  <ul>
+    <li>Eventos controlados por <code>EnableEventInfo</code> (checkbox do sample).</li>
+    <li>Logger (<code>Logger.isActive</code>) independente dos eventos.</li>
+  </ul>
+
+  <h2>Concorrência e Desempenho</h2>
+  <ul>
+    <li>Processamento sequencial/paralelo com limites configuráveis.</li>
+    <li><code>Sleep(10)</code> no loop para estabilidade.</li>
+    <li>Sugestões: cache de <code>PatternParts</code> e buckets por <code>Verb</code>.</li>
+  </ul>
+
+  <h2>Boas Práticas</h2>
+  <ul>
+    <li>Desativar eventos/logging em teste de throughput.</li>
+    <li>Ajustar <code>MaxConcurrentConnections</code> gradualmente.</li>
+    <li>Preferir contextos estáveis (evitar primeiro segmento dinâmico).</li>
+  </ul>
+
+  <h2>Troubleshooting</h2>
+  <ul>
+    <li>Checar antivírus/firewall (ESET), desativar ou criar exceções.</li>
+    <li>Usar parser por linha e <code>Sleep(10)</code>.</li>
+  </ul>
+
+  <h2>Referências</h2>
+  <ul>
+    <li><code>src/Badger.pas:564–647</code></li>
+    <li><code>src/BadgerRequestHandler.pas:117–176</code>, <code>src/BadgerRequestHandler.pas:380–445</code></li>
+    <li><code>src/BadgerRouteManager.pas:107–124</code>, <code>src/BadgerRouteManager.pas:179–227</code></li>
+  </ul>
+
+</body>
+</html>

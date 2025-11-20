@@ -24,6 +24,7 @@ type
     Body: string;
     Stream: TStream;
     ContentType: string;
+    HeadersCustom: TStringList;
   end;
 
   TRequestInfo = record

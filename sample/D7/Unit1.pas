@@ -52,10 +52,13 @@ begin
   if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
+    ServerThread.EnableEventInfo := rdLog.Checked;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
     ServerThread.OnRequest := HandleRequest;
     ServerThread.OnResponse := HandleResponse;
+
+
 
    case RadioGroup1.ItemIndex of
      1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping', '/download']);
@@ -65,18 +68,18 @@ begin
         end;
     end;
 
+    ServerThread.UseCORS := True;
+
     ServerThread.RouteManager
       .AddPost('/upload', TSampleRouteManager.upLoad)
       .AddGet('/download', TSampleRouteManager.downLoad)
       .AddGet('/rota1', TSampleRouteManager.rota1)
-      .AddGet('/ping', TSampleRouteManager.ping)
+      .AddGet('/teste/ping', TSampleRouteManager.ping)
       .AddPost('/AtuImage', TSampleRouteManager.AtuImage)
       .AddPost('/Login',TSampleRouteManager.Login)
       .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken)
       .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
       .AddGet('/produtos', TSampleRouteManager.produtos);
-
-     // ServerThread.ParallelProcessing := True;
 
     ServerThread.Start;
     edtPorta.Enabled := False;
