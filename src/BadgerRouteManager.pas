@@ -29,13 +29,6 @@ type
     function SplitString(const S, Delim: string): TStringList;
 
   public
-    const
-    CDEL = 'DELETE';
-    CGET = 'GET';
-    CPATCH = 'PATCH';
-    CPOST = 'POST';
-    CPUT = 'PUT';
-    
     constructor Create;
     destructor Destroy; override;
     function AddMethod(const AVerb, ARoute: string; ACallback: TRoutingCallback): TRouteManager;
