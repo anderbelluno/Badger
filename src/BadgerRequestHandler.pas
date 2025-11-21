@@ -30,7 +30,7 @@ type
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
                       AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
-                      AOnRequest: TOnRequest; AOnResponse: TOnResponse; AEnableEventInfo: Boolean);
+                      AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
     constructor CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
                               AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
                               AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
@@ -44,7 +44,7 @@ implementation
 
 constructor THTTPRequestHandler.Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
   AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
-  AOnRequest: TOnRequest; AOnResponse: TOnResponse; AEnableEventInfo: Boolean);
+  AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
 var
   I: Integer;
 begin
@@ -57,7 +57,7 @@ begin
   FMethods := AMethods;
   FMiddlewares := TList.Create;
   FTimeout := ATimeout;
-  FParentServer := nil;
+  FParentServer := AParentServer;
   FIsParallel := False;
   FEnableEventInfo := AEnableEventInfo;
 
@@ -260,6 +260,7 @@ var
   RequestInfo: TRequestInfo;
   ResponseInfo: TResponseInfo;
   Handled: Boolean;
+  Origin, ACRM, ACRH, AllowOrigin, MethodsStr, HeadersStr, ExposeStr: string;
 begin
   // Logger.Info(Format('Starting THTTPRequestHandler.Execute for thread %d', [ThreadID]));
 
@@ -355,6 +356,55 @@ begin
             CloseConnection := (Headers.Values['Connection'].ToLower = 'close');
           end;
 
+          Origin := Headers.Values['Origin'];
+          ACRM := Headers.Values['Access-Control-Request-Method'];
+          ACRH := Headers.Values['Access-Control-Request-Headers'];
+
+          if SameText(FMethod, 'OPTIONS') and (Origin <> '') and (ACRM <> '') and Assigned(FParentServer) and FParentServer.CorsEnabled then
+          begin
+            if (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) or (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0) then
+            begin
+              if FParentServer.CorsAllowCredentials and (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) then
+                AllowOrigin := Origin
+              else if (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) then
+                AllowOrigin := '*'
+              else
+                AllowOrigin := Origin;
+
+              MethodsStr := FParentServer.CorsAllowedMethods.CommaText;
+              if ACRH <> '' then
+                HeadersStr := ACRH
+              else
+                HeadersStr := FParentServer.CorsAllowedHeaders.CommaText;
+
+              Resp.StatusCode := HTTP_NO_CONTENT;
+              Resp.Body := '';
+              Resp.ContentType := '';
+              Resp.HeadersCustom.Values['Access-Control-Allow-Origin'] := AllowOrigin;
+              Resp.HeadersCustom.Values['Access-Control-Allow-Methods'] := MethodsStr;
+              Resp.HeadersCustom.Values['Access-Control-Allow-Headers'] := HeadersStr;
+              if FParentServer.CorsAllowCredentials then
+                Resp.HeadersCustom.Values['Access-Control-Allow-Credentials'] := 'true';
+              if FParentServer.CorsMaxAge > 0 then
+                Resp.HeadersCustom.Values['Access-Control-Max-Age'] := IntToStr(FParentServer.CorsMaxAge);
+              if AllowOrigin <> '*' then
+                Resp.HeadersCustom.Values['Vary'] := 'Origin';
+
+              ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection, Resp.HeadersCustom);
+              FClientSocket.SendString(ResponseHeader);
+              Break;
+            end
+            else
+            begin
+              Resp.StatusCode := HTTP_FORBIDDEN;
+              Resp.Body := 'CORS origin not allowed';
+              Resp.ContentType := TEXT_PLAIN;
+              ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, True, Resp.HeadersCustom);
+              FClientSocket.SendString(ResponseHeader);
+              Break;
+            end;
+          end;
+
 
           // --- MIDDLEWARES ---
           Handled := False;
@@ -385,6 +435,26 @@ begin
           end;
 
           // --- RESPOSTA ---
+          if Assigned(FParentServer) and FParentServer.CorsEnabled and (Origin <> '') then
+          begin
+            if (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) or (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0) then
+            begin
+              if FParentServer.CorsAllowCredentials and (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) then
+                AllowOrigin := Origin
+              else if (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) then
+                AllowOrigin := '*'
+              else
+                AllowOrigin := Origin;
+              Resp.HeadersCustom.Values['Access-Control-Allow-Origin'] := AllowOrigin;
+              if FParentServer.CorsAllowCredentials then
+                Resp.HeadersCustom.Values['Access-Control-Allow-Credentials'] := 'true';
+              ExposeStr := FParentServer.CorsExposeHeaders.CommaText;
+              if ExposeStr <> '' then
+                Resp.HeadersCustom.Values['Access-Control-Expose-Headers'] := ExposeStr;
+              if AllowOrigin <> '*' then
+                Resp.HeadersCustom.Values['Vary'] := 'Origin';
+            end;
+          end;
           ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection, Resp.HeadersCustom);
           FClientSocket.SendString(ResponseHeader);
 

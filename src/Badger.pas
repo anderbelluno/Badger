@@ -37,6 +37,13 @@ type
     FClientSockets: TList;
     FIsRunning: Boolean;
     FEnableEventInfo: Boolean;
+    FCorsEnabled: Boolean;
+    FCorsAllowedOrigins: TStringList;
+    FCorsAllowedMethods: TStringList;
+    FCorsAllowedHeaders: TStringList;
+    FCorsExposeHeaders: TStringList;
+    FCorsAllowCredentials: Boolean;
+    FCorsMaxAge: Integer;
   protected
     procedure Execute; override;
     function CanAcceptNewConnection: Boolean;
@@ -66,6 +73,13 @@ type
     property OnResponse: TOnResponse read FOnResponse write FOnResponse;
     property IsRunning: Boolean read FIsRunning;
     property EnableEventInfo: Boolean read FEnableEventInfo write FEnableEventInfo;
+    property CorsEnabled: Boolean read FCorsEnabled write FCorsEnabled;
+    property CorsAllowedOrigins: TStringList read FCorsAllowedOrigins;
+    property CorsAllowedMethods: TStringList read FCorsAllowedMethods;
+    property CorsAllowedHeaders: TStringList read FCorsAllowedHeaders;
+    property CorsExposeHeaders: TStringList read FCorsExposeHeaders;
+    property CorsAllowCredentials: Boolean read FCorsAllowCredentials write FCorsAllowCredentials;
+    property CorsMaxAge: Integer read FCorsMaxAge write FCorsMaxAge;
   end;
 
 implementation
@@ -94,6 +108,28 @@ begin
   FActiveConnections := 0;
   FIsShuttingDown := False;
   FEnableEventInfo := True;
+  FCorsEnabled := False;
+  FCorsAllowedOrigins := TStringList.Create;
+  FCorsAllowedMethods := TStringList.Create;
+  FCorsAllowedHeaders := TStringList.Create;
+  FCorsExposeHeaders := TStringList.Create;
+  FCorsAllowedOrigins.CaseSensitive := False;
+  FCorsAllowedMethods.CaseSensitive := False;
+  FCorsAllowedHeaders.CaseSensitive := False;
+  FCorsExposeHeaders.CaseSensitive := False;
+  FCorsAllowedOrigins.Add('*');
+  FCorsAllowedMethods.Add('GET');
+  FCorsAllowedMethods.Add('POST');
+  FCorsAllowedMethods.Add('PUT');
+  FCorsAllowedMethods.Add('DELETE');
+  FCorsAllowedMethods.Add('PATCH');
+  FCorsAllowedMethods.Add('OPTIONS');
+  FCorsAllowedHeaders.Add('Content-Type');
+  FCorsAllowedHeaders.Add('Authorization');
+  FCorsAllowedHeaders.Add('X-Requested-With');
+  FCorsExposeHeaders.Clear;
+  FCorsAllowCredentials := False;
+  FCorsMaxAge := 600;
 
   Logger.Info('TBadger created');
 end;
@@ -233,6 +269,16 @@ begin
   except
     on E: Exception do
       Logger.Error(Format('Error freeing FSocketLock: %s', [E.Message]));
+  end;
+
+  try
+    if Assigned(FCorsAllowedOrigins) then FreeAndNil(FCorsAllowedOrigins);
+    if Assigned(FCorsAllowedMethods) then FreeAndNil(FCorsAllowedMethods);
+    if Assigned(FCorsAllowedHeaders) then FreeAndNil(FCorsAllowedHeaders);
+    if Assigned(FCorsExposeHeaders) then FreeAndNil(FCorsExposeHeaders);
+  except
+    on E: Exception do
+      Logger.Error(Format('Error freeing CORS lists: %s', [E.Message]));
   end;
 
   Logger.Info('TBadger destroyed');
@@ -607,7 +653,7 @@ begin
                 else
                 begin
                   THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares,
-                                             FTimeout, FOnRequest, FOnResponse, FEnableEventInfo);
+                                             FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
                   RemoveClientSocket(ClientSocket);
                   ClientSocket := nil;
                 end;
