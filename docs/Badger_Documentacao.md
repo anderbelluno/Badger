@@ -22,6 +22,7 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
   - Parser de cabeçalho HTTP (linha a linha): `src/BadgerRequestHandler.pas:117–143`
   - Montagem de resposta HTTP: `src/BadgerRequestHandler.pas:145–176` e envio de corpo/stream: `src/BadgerRequestHandler.pas:380–408`
   - Eventos de aplicação (`OnRequest`/`OnResponse`) condicionados por `EnableEventInfo`: `src/BadgerRequestHandler.pas:410–445`
+  - Suporte a CORS (preflight + cabeçalhos): `src/BadgerRequestHandler.pas:361–451`
 
 - Gerenciador de rotas (`TRouteManager`): registra, desregistra e resolve rotas.
   - Declaração: `src/BadgerRouteManager.pas:25–49`
@@ -69,6 +70,25 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
 
 - `Logger.isActive` e `Logger.LogToConsole` controlam log interno do Badger (independente dos eventos): `src/Badger.pas:99`, samples definem no início.
 - Recomendado desabilitar durante testes de throughput para reduzir overhead.
+
+## CORS
+
+- Configuração em `TBadger`:
+  - `CorsEnabled`, `CorsAllowedOrigins`, `CorsAllowedMethods`, `CorsAllowedHeaders`, `CorsExposeHeaders`, `CorsAllowCredentials`, `CorsMaxAge`.
+- Preflight (OPTIONS): `src/BadgerRequestHandler.pas:365–451`
+  - Valida método solicitado e cabeçalhos; responde `204` com `Access-Control-Allow-*` e `Max-Age`.
+  - Quando refletindo origem, inclui `Vary: Origin, Access-Control-Request-Method, Access-Control-Request-Headers`.
+- Respostas normais: injeta `Access-Control-Allow-Origin` (`*` ou origem), `Access-Control-Allow-Credentials` (se habilitado) e `Access-Control-Expose-Headers`.
+- Amostra FMX: habilitação direta em `sample/D12/FMX Windows/Unit1.pas:77–83`.
+
+### Boas práticas
+- Evitar `*` quando `AllowCredentials=True`; refletir origem whitelisted.
+- Listar `Authorization` explicitamente em `Access-Control-Allow-Headers`.
+- Usar `CorsMaxAge` para reduzir frequência de preflights.
+
+### Testes rápidos
+- Preflight: `curl -i -X OPTIONS http://localhost:8080/teste/ping -H "Origin: http://localhost:3000" -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: Content-Type"`
+- Normal: `curl -i http://localhost:8080/teste/ping -H "Origin: http://localhost:3000"`
 
 ## Concorrência e Desempenho
 

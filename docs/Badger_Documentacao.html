@@ -20,7 +20,7 @@
   <h2>Arquitetura</h2>
   <ul>
     <li><strong>TBadger</strong>: accept loop, concorrência e criação de handlers. Referências: <code>src/Badger.pas:24–71</code>, <code>src/Badger.pas:80–100</code>, <code>src/Badger.pas:564–647</code>.</li>
-    <li><strong>THTTPRequestHandler</strong>: parsing, roteamento, execução e resposta. Referências: <code>src/BadgerRequestHandler.pas:12–38</code>, <code>src/BadgerRequestHandler.pas:45–89</code>, <code>src/BadgerRequestHandler.pas:117–143</code>, <code>src/BadgerRequestHandler.pas:145–176</code>, <code>src/BadgerRequestHandler.pas:380–445</code>.</li>
+    <li><strong>THTTPRequestHandler</strong>: parsing, roteamento, execução e resposta. Referências: <code>src/BadgerRequestHandler.pas:12–38</code>, <code>src/BadgerRequestHandler.pas:45–89</code>, <code>src/BadgerRequestHandler.pas:117–143</code>, <code>src/BadgerRequestHandler.pas:145–176</code>, <code>src/BadgerRequestHandler.pas:361–451</code>, <code>src/BadgerRequestHandler.pas:380–445</code>.</li>
     <li><strong>TRouteManager</strong>: cadastro e matching com buckets por contexto. Referências: <code>src/BadgerRouteManager.pas:25–49</code>, <code>src/BadgerRouteManager.pas:107–124</code>, <code>src/BadgerRouteManager.pas:179–227</code>.</li>
   </ul>
 
@@ -44,6 +44,16 @@
   <ul>
     <li>Eventos controlados por <code>EnableEventInfo</code> (checkbox do sample).</li>
     <li>Logger (<code>Logger.isActive</code>) independente dos eventos.</li>
+  </ul>
+
+  <h2>CORS</h2>
+  <p>Suporte a CORS com preflight (OPTIONS) e injeção de cabeçalhos em respostas.</p>
+  <ul>
+    <li>Configuração: <code>CorsEnabled</code>, <code>CorsAllowedOrigins</code>, <code>CorsAllowedMethods</code>, <code>CorsAllowedHeaders</code>, <code>CorsExposeHeaders</code>, <code>CorsAllowCredentials</code>, <code>CorsMaxAge</code>.</li>
+    <li>Preflight: valida método e cabeçalhos; responde <code>204</code> com <code>Access-Control-Allow-*</code> e <code>Max-Age</code>. Referência: <code>src/BadgerRequestHandler.pas:365–451</code>.</li>
+    <li>Respostas normais: injeta <code>Access-Control-Allow-Origin</code> (<code>*</code> ou origem), <code>Access-Control-Allow-Credentials</code>, <code>Access-Control-Expose-Headers</code>.</li>
+    <li>Boas práticas: evitar <code>*</code> com credenciais, listar <code>Authorization</code> em <code>Allow-Headers</code>, usar <code>MaxAge</code>.</li>
+    <li>Testes: <code>curl -i -X OPTIONS http://localhost:8080/teste/ping -H "Origin: http://localhost:3000" -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: Content-Type"</code>; <code>curl -i http://localhost:8080/teste/ping -H "Origin: http://localhost:3000"</code>.</li>
   </ul>
 
   <h2>Concorrência e Desempenho</h2>
