@@ -6,9 +6,26 @@
 
 # Badger
 
-**Badger** is an open-source library designed for Delphi and Lazarus (Object Pascal) environments to help you quickly build HTTP servers and REST APIs. It includes support for features like authentication, routing, logging and utilities to simplify common web tasks.
+---
+
+**Badger** is an open-source library designed for Delphi and Lazarus (Object Pascal) environments to help you quickly build HTTP servers and REST APIs. It includes support for features like authentication, routing, CORS, logging and more.
 
 ---
+
+🦡⚡ Challenge: this project delivers extremely high throughput for simple HTTP endpoints. Think it's fast? Test it yourself — beat these numbers and open a PR with your results. Let's see who can outperform Badger.
+
+## Performance Benchmark (summary — highlighted)
+- Throughput: **30,483 req/s**
+- Average latency: **4 ms**
+- Median latency: **0 ms**
+- 90th percentile: **16 ms**
+- 95th percentile: **27 ms**
+- 99th percentile: **42 ms**
+- Errors: **0%**
+
+> Important: the tests were performed with **Keep-Alive = true** (persistent connections). This significantly reduces connection setup overhead and is a critical factor contributing to the high throughput observed.
+
+![JMeter Benchmark](https://github.com/anderbelluno/Badger/blob/main/img/JMeter_benchmark.png?raw=true)
 
 ## ✨ Features
 
@@ -24,7 +41,7 @@
 
 ## 🌐 CORS Support
 
-Badger now includes built-in support for Cross-Origin Resource Sharing (CORS). This lets you control which origins, HTTP methods and headers are allowed when clients from other domains access your API. CORS can be configured globally on the server and Badger handles preflight (OPTIONS) requests when enabled.
+Badger now includes built-in support for Cross-Origin Resource Sharing (CORS). This lets you control which origins, HTTP methods and headers are allowed when clients from other domains access your[...]
 
 Usage example (illustrative):
 
@@ -47,13 +64,13 @@ end;
 
 Note: adjust the example to match the exact property/method names used in your Badger fork — the README demonstrates the intended configuration and behavior.
 
-Preflight (OPTIONS): when CORS is enabled Badger will automatically reply to OPTIONS/preflight requests with the appropriate Access-Control-* headers. If your application implements custom logic for OPTIONS you may need to merge behaviors.
+Preflight (OPTIONS): when CORS is enabled Badger will automatically reply to OPTIONS/preflight requests with the appropriate Access-Control-* headers. If your application implements custom logic f[...]
 
 ---
 
 ## 📝 BadgerLogger
 
-`BadgerLogger` is a built-in, thread-safe logging utility for Badger. It supports logging at multiple levels (Debug, Info, Warning, Error, Critical), with output options for console, file, and (on Windows) the debugger.
+`BadgerLogger` is a built-in, thread-safe logging utility for Badger. It supports logging at multiple levels (Debug, Info, Warning, Error, Critical), with output options for console, file, and (on[...]
 
 ### Key Features
 
