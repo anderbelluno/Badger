@@ -76,9 +76,11 @@ begin
   begin
     ServerThread := TBadger.Create;
     ServerThread.EnableEventInfo := rdLog.IsChecked;
-    ServerThread.CorsEnabled := True;
+
+    ServerThread.CorsEnabled := False;
     ServerThread.CorsAllowedOrigins.Clear;
     ServerThread.CorsAllowedOrigins.Add('*');
+
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
     ServerThread.OnRequest := HandleRequest;
