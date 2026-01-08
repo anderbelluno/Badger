@@ -27,6 +27,8 @@
 
 ![JMeter Benchmark](https://github.com/anderbelluno/Badger/blob/main/img/JMeter_benchmark.png?raw=true)
 
+---
+
 ## ✨ Features
 
 - **HTTP Server**: Quickly spin up HTTP servers in Delphi/Lazarus projects.
@@ -41,7 +43,7 @@
 
 ## 🌐 CORS Support
 
-Badger now includes built-in support for Cross-Origin Resource Sharing (CORS). This lets you control which origins, HTTP methods and headers are allowed when clients from other domains access your[...]
+Badger now includes built-in support for Cross-Origin Resource Sharing (CORS). This lets you control which origins, HTTP methods and headers are allowed when clients from other domains access your API. Configure allowed origins, methods and headers to protect and enable cross-domain requests in a safe manner. You can allow specific origins or wildcard (`*`), limit allowed HTTP methods (for example `GET`, `POST`, `PUT`, `DELETE`, `OPTIONS`) and restrict which request headers are accepted. Badger also supports toggling credentials support and will automatically handle OPTIONS preflight requests when configured to do so.
 
 Usage example (illustrative):
 
@@ -59,18 +61,20 @@ begin
   Response.SetHeader('Access-Control-Allow-Origin','*');
   Response.SetHeader('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS');
   Response.SetHeader('Access-Control-Allow-Headers','Content-Type,Authorization');
+  if ServerThread.CORS.AllowCredentials then
+    Response.SetHeader('Access-Control-Allow-Credentials','true')
+  else
+    Response.SetHeader('Access-Control-Allow-Credentials','false');
 end;
 ```
 
-Note: adjust the example to match the exact property/method names used in your Badger fork — the README demonstrates the intended configuration and behavior.
-
-Preflight (OPTIONS): when CORS is enabled Badger will automatically reply to OPTIONS/preflight requests with the appropriate Access-Control-* headers. If your application implements custom logic f[...]
+Preflight (OPTIONS): when CORS is enabled Badger will automatically reply to OPTIONS/preflight requests with the appropriate Access-Control-* headers. If your application implements custom logic for OPTIONS, ensure it returns the correct Access-Control headers for preflight validation.
 
 ---
 
 ## 📝 BadgerLogger
 
-`BadgerLogger` is a built-in, thread-safe logging utility for Badger. It supports logging at multiple levels (Debug, Info, Warning, Error, Critical), with output options for console, file, and (on[...]
+`BadgerLogger` is a built-in, thread-safe logging utility for Badger. It supports logging at multiple levels (Debug, Info, Warning, Error, Critical), with output options for console, file, and optional integration with the Windows debugger via `OutputDebugString`.
 
 ### Key Features
 
@@ -174,7 +178,7 @@ See `sample/Lazarus/unit1.pas` and `sample/D7/Unit1.pas` for complete working ex
 
 ## 💬 Telegram
 
-Join our community on Telegram:** [https://t.me/badgerbrasil](https://t.me/badgerbrasil)
+Join our community on Telegram: [https://t.me/badgerbrasil](https://t.me/badgerbrasil)
 
 ---
 
