@@ -68,7 +68,7 @@ begin
         end;
     end;
 
-    ServerThread.UseCORS := True;
+    ServerThread.CorsEnabled := False;
 
     ServerThread.RouteManager
       .AddPost('/upload', TSampleRouteManager.upLoad)

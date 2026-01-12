@@ -81,7 +81,7 @@ begin
       .AddGet('/produtos', TSampleRouteManager.produtos);
 
     ServerThread.ParallelProcessing:= True;
-    ServerThread.MaxConcurrentConnections:= 2000;
+    ServerThread.MaxConcurrentConnections:= 30000;
 
     ServerThread.Start;
     edtPorta.Enabled := False;

@@ -19,8 +19,9 @@
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
         <UnitName Value="Unit1"/>
-        <TopLine Value="45"/>
-        <CursorPos X="35" Y="85"/>
+        <IsVisibleTab Value="True"/>
+        <TopLine Value="63"/>
+        <CursorPos X="37" Y="86"/>
         <UsageCount Value="362"/>
         <Loaded Value="True"/>
         <LoadedDesigner Value="True"/>
@@ -38,42 +39,41 @@
         <EditorIndex Value="-1"/>
         <TopLine Value="19"/>
         <CursorPos X="23" Y="3"/>
-        <UsageCount Value="175"/>
+        <UsageCount Value="165"/>
       </Unit>
       <Unit>
         <Filename Value="..\..\src\BadgerRequestHandler.pas"/>
         <EditorIndex Value="-1"/>
         <TopLine Value="470"/>
         <CursorPos X="5" Y="503"/>
-        <UsageCount Value="175"/>
+        <UsageCount Value="165"/>
       </Unit>
       <Unit>
         <Filename Value="..\..\src\BadgerLogger.pas"/>
         <EditorIndex Value="-1"/>
         <CursorPos X="30" Y="8"/>
-        <UsageCount Value="166"/>
+        <UsageCount Value="156"/>
       </Unit>
       <Unit>
         <Filename Value="..\..\src\BadgerUtils.pas"/>
         <EditorIndex Value="-1"/>
         <TopLine Value="7"/>
         <CursorPos X="43" Y="11"/>
-        <UsageCount Value="95"/>
+        <UsageCount Value="85"/>
       </Unit>
       <Unit>
         <Filename Value="..\..\src\BadgerRouteManager.pas"/>
         <EditorIndex Value="-1"/>
         <TopLine Value="228"/>
         <CursorPos X="5" Y="300"/>
-        <UsageCount Value="13"/>
+        <UsageCount Value="3"/>
       </Unit>
       <Unit>
         <Filename Value="..\..\SampleRouteManager.pas"/>
-        <IsVisibleTab Value="True"/>
         <EditorIndex Value="1"/>
         <TopLine Value="4"/>
         <CursorPos X="21" Y="24"/>
-        <UsageCount Value="12"/>
+        <UsageCount Value="62"/>
         <Loaded Value="True"/>
       </Unit>
     </Units>

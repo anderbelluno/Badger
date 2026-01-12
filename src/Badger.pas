@@ -1,4 +1,4 @@
-﻿unit Badger;
+unit Badger;
 
 {$I BadgerDefines.inc}
 

@@ -1,4 +1,4 @@
-﻿unit BadgerMethods;
+unit BadgerMethods;
 
 interface
 

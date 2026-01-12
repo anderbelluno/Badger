@@ -1,4 +1,4 @@
-﻿unit BadgerRequestHandler;
+unit BadgerRequestHandler;
 
 {$I BadgerDefines.inc}
 
@@ -383,7 +383,9 @@ begin
                 HdrParts := TStringList.Create;
                 try
                   HdrParts.Delimiter := ',';
-                  HdrParts.StrictDelimiter := True;
+                  {$IFNDEF VER150}
+                    HdrParts.StrictDelimiter := True;
+                  {$ENDIF}
                   HdrParts.DelimitedText := ACRH;
                   for I := 0 to HdrParts.Count - 1 do
                   begin
@@ -512,7 +514,7 @@ begin
           begin
             {$IFDEF VER150}
             UTF8Body := UTF8Encode(Resp.Body);
-            SetLength(ResponseBodyBytes,, Length(UTF8Body));
+            SetLength(ResponseBodyBytes, Length(UTF8Body));
             Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
             {$ELSE}
             ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
