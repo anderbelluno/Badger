@@ -1,4 +1,4 @@
-unit BadgerRequestHandler;
+﻿unit BadgerRequestHandler;
 
 {$I BadgerDefines.inc}
 
@@ -350,12 +350,12 @@ begin
           if Pos('HTTP/1.0', FRequestLine) > 0 then
           begin
             // HTTP/1.0 s� aceita Keep-Alive se o cliente pedir explicitamente
-            CloseConnection := (Headers.Values['Connection'].ToLower <> 'keep-alive');
+            CloseConnection := (LowerCase(Headers.Values['Connection']) <> 'keep-alive');
           end
           else
           begin
             // HTTP/1.1 mant�m aberta a menos que pe�a para fechar
-            CloseConnection := (Headers.Values['Connection'].ToLower = 'close');
+            CloseConnection := (LowerCase(Headers.Values['Connection']) = 'close');
           end;
 
           Origin := Headers.Values['Origin'];

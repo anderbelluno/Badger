@@ -39,7 +39,7 @@ type
     function AddPut(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
 
     function Unregister(const Route: string): TRouteManager;
-    function MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; out Params: TStringList): Boolean;
+    function MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; var Params: TStringList): Boolean;
   end;
 
 const
@@ -225,7 +225,7 @@ begin
   end;
 end;
 
-function TRouteManager.MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; out Params: TStringList): Boolean;
+function TRouteManager.MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; var Params: TStringList): Boolean;
 var
   I, J, CtxIdx: Integer;
   PatternParts, PathParts: TStringList;

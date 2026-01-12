@@ -1,4 +1,4 @@
-unit BadgerMethods;
+﻿unit BadgerMethods;
 
 interface
 
@@ -16,7 +16,7 @@ type
     function fParserJsonStream(Request: THTTPRequest; Response : THTTPResponse): string;
     function fDownloadStream(const FilePath: string; out MimeType: string): TStream;
     procedure AtuImage(Request: THTTPRequest; out Response: THTTPResponse);
-    function ExtractMethodAndURI(const RequestLine: string; out Method, URI: string; out QueryParams: TStringList): Boolean;
+    function ExtractMethodAndURI(const RequestLine: string; out Method, URI: string; var QueryParams: TStringList): Boolean;
     function ExtractBoundary(const ContentType: string): string;
   end;
 
@@ -24,7 +24,7 @@ implementation
 
 uses StrUtils;
 
-function TBadgerMethods.ExtractMethodAndURI(const RequestLine: string; out Method, URI: string; out QueryParams: TStringList): Boolean;
+function TBadgerMethods.ExtractMethodAndURI(const RequestLine: string; out Method, URI: string; var QueryParams: TStringList): Boolean;
 var
   SpacePos, QueryPos: Integer;
   VRequestLine, QueryString, ParamPair, DoubleSlash: string;
