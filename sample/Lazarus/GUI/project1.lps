@@ -19,65 +19,88 @@
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
         <UnitName Value="Unit1"/>
-        <IsVisibleTab Value="True"/>
-        <TopLine Value="63"/>
-        <CursorPos X="37" Y="86"/>
+        <CursorPos X="103" Y="139"/>
         <UsageCount Value="362"/>
         <Loaded Value="True"/>
         <LoadedDesigner Value="True"/>
       </Unit>
       <Unit>
         <Filename Value="..\SampleRouteManager.pas"/>
-        <IsPartOfProject Value="True"/>
         <EditorIndex Value="-1"/>
         <TopLine Value="110"/>
         <CursorPos X="4" Y="121"/>
-        <UsageCount Value="362"/>
+        <UsageCount Value="361"/>
       </Unit>
       <Unit>
         <Filename Value="..\..\src\Badger.pas"/>
         <EditorIndex Value="-1"/>
         <TopLine Value="19"/>
         <CursorPos X="23" Y="3"/>
-        <UsageCount Value="165"/>
+        <UsageCount Value="160"/>
       </Unit>
       <Unit>
         <Filename Value="..\..\src\BadgerRequestHandler.pas"/>
         <EditorIndex Value="-1"/>
         <TopLine Value="470"/>
         <CursorPos X="5" Y="503"/>
-        <UsageCount Value="165"/>
+        <UsageCount Value="160"/>
       </Unit>
       <Unit>
         <Filename Value="..\..\src\BadgerLogger.pas"/>
         <EditorIndex Value="-1"/>
         <CursorPos X="30" Y="8"/>
-        <UsageCount Value="156"/>
+        <UsageCount Value="151"/>
       </Unit>
       <Unit>
         <Filename Value="..\..\src\BadgerUtils.pas"/>
         <EditorIndex Value="-1"/>
         <TopLine Value="7"/>
         <CursorPos X="43" Y="11"/>
-        <UsageCount Value="85"/>
-      </Unit>
-      <Unit>
-        <Filename Value="..\..\src\BadgerRouteManager.pas"/>
-        <EditorIndex Value="-1"/>
-        <TopLine Value="228"/>
-        <CursorPos X="5" Y="300"/>
-        <UsageCount Value="3"/>
+        <UsageCount Value="80"/>
       </Unit>
       <Unit>
         <Filename Value="..\..\SampleRouteManager.pas"/>
+        <IsPartOfProject Value="True"/>
+        <EditorIndex Value="2"/>
+        <CursorPos X="22" Y="27"/>
+        <UsageCount Value="90"/>
+        <Loaded Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\SampleSmartService.pas"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="11"/>
+        <CursorPos X="5" Y="15"/>
+        <UsageCount Value="14"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\BadgerAttributes.pas"/>
+        <EditorIndex Value="-1"/>
+        <CursorPos X="22"/>
+        <UsageCount Value="10"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\BadgerDefines.inc"/>
+        <EditorIndex Value="-1"/>
+        <UsageCount Value="10"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\BadgerSmart.pas"/>
+        <EditorIndex Value="-1"/>
+        <CursorPos X="4" Y="10"/>
+        <UsageCount Value="9"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\Badger.pas"/>
+        <IsVisibleTab Value="True"/>
         <EditorIndex Value="1"/>
-        <TopLine Value="4"/>
-        <CursorPos X="21" Y="24"/>
-        <UsageCount Value="62"/>
+        <TopLine Value="464"/>
+        <CursorPos X="7" Y="489"/>
+        <UsageCount Value="13"/>
         <Loaded Value="True"/>
       </Unit>
     </Units>
-    <JumpHistory HistoryIndex="9">
+    <JumpHistory HistoryIndex="14">
       <Position>
         <Filename Value="unit1.pas"/>
         <Caret Line="70" Column="4" TopLine="56"/>
@@ -117,6 +140,26 @@
       <Position>
         <Filename Value="unit1.pas"/>
         <Caret Line="85" Column="35" TopLine="45"/>
+      </Position>
+      <Position>
+        <Filename Value="unit1.pas"/>
+        <Caret Line="134" Column="28" TopLine="109"/>
+      </Position>
+      <Position>
+        <Filename Value="unit1.pas"/>
+        <Caret Line="15" Column="67" TopLine="70"/>
+      </Position>
+      <Position>
+        <Filename Value="unit1.pas"/>
+        <Caret Line="76" Column="53" TopLine="56"/>
+      </Position>
+      <Position>
+        <Filename Value="unit1.pas"/>
+        <Caret Line="85" Column="39" TopLine="67"/>
+      </Position>
+      <Position>
+        <Filename Value="unit1.pas"/>
+        <Caret Line="139" Column="103"/>
       </Position>
     </JumpHistory>
     <RunParams>

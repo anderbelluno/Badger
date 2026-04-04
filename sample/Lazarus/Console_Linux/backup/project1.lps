@@ -9,8 +9,8 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="Project1"/>
         <IsVisibleTab Value="True"/>
-        <TopLine Value="12"/>
-        <CursorPos X="3" Y="14"/>
+        <TopLine Value="35"/>
+        <CursorPos X="13" Y="53"/>
         <UsageCount Value="22"/>
         <Loaded Value="True"/>
       </Unit>
@@ -47,7 +47,7 @@
         <Loaded Value="True"/>
       </Unit>
     </Units>
-    <JumpHistory HistoryIndex="16">
+    <JumpHistory HistoryIndex="17">
       <Position>
         <Filename Value="../../SampleRouteManager.pas"/>
         <Caret Line="27" Column="23"/>
@@ -115,6 +115,10 @@
       <Position>
         <Filename Value="../../../src/BadgerRequestHandler.pas"/>
         <Caret Line="327" Column="25" TopLine="324"/>
+      </Position>
+      <Position>
+        <Filename Value="project1.lpr"/>
+        <Caret Line="38" Column="26"/>
       </Position>
     </JumpHistory>
     <RunParams>

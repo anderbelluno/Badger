@@ -1,4 +1,4 @@
-unit BadgerRequestHandler;
+﻿unit BadgerRequestHandler;
 
 {$I BadgerDefines.inc}
 
@@ -185,7 +185,8 @@ begin
               'Content-Length: ' + IntToStr(Length(UTF8Body)) + CRLF;
 {$ENDIF}
   end
-  else if Assigned(Stream) and (Stream.Size > 0) then
+  else
+  if Assigned(Stream) and (Stream.Size > 0) then
   begin
     Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
               'Content-Type: ' + EffectiveContentType  + CRLF +
@@ -458,10 +459,21 @@ begin
           for I := 0 to FMiddlewares.Count - 1 do
           begin
             MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
-            if MiddlewareWrapper.Middleware(Req, Resp) then
-            begin
-              Handled := True;
-              Break;
+            try
+              if MiddlewareWrapper.Middleware(Req, Resp) then
+              begin
+                Handled := True;
+                Break;
+              end;
+            except
+              on E: Exception do
+              begin
+                Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
+                Resp.Body := '{"error":"Middleware exception: ' + E.Message + '"}';
+                Resp.ContentType := APPLICATION_JSON;
+                Handled := True;
+                Break;
+              end;
             end;
           end;
 
@@ -470,8 +482,17 @@ begin
             // --- MATCH ROTA COM :param ---
             if FRouteManager.MatchRoute(UpperCase(FMethod), LowerCase(FURI), RouteEntry, RouteParams) then
             begin
-              Req.RouteParams.Assign(RouteParams);
-              RouteEntry.Callback(Req, Resp);
+              if Assigned(RouteEntry) and Assigned(TMethod(RouteEntry.Callback).Code) then
+              begin
+                Req.RouteParams.Assign(RouteParams);
+                RouteEntry.Callback(Req, Resp);
+              end
+              else
+              begin
+                Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
+                Resp.Body := '{"error":"Route handler not assigned"}';
+                Resp.ContentType := APPLICATION_JSON;
+              end;
             end
             else
             begin

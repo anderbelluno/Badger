@@ -65,7 +65,7 @@
           </Target>
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir)"/>
-            <OtherUnitFiles Value="..\..\src;..\..\src\Auth\Basic;..\..\src\Auth\JWT;..\..\sample;..\..\ThirdParty\Synapse;..\..\ThirdParty\SuperObject\D_Plus_Laz_Linux"/>
+            <OtherUnitFiles Value="..\..\..\src;..\..\..\src\Auth\Basic;..\..\..\src\Auth\JWT;..\..\..\sample;..\..\..\ThirdParty\Synapse;..\..\..\ThirdParty\SuperObject\D_Plus_Laz_Linux"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <CodeGeneration>
@@ -116,7 +116,7 @@
         <UnitName Value="Unit1"/>
       </Unit>
       <Unit>
-        <Filename Value="..\SampleRouteManager.pas"/>
+        <Filename Value="..\..\SampleRouteManager.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
     </Units>

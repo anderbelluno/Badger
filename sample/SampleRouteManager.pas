@@ -21,14 +21,14 @@ type
   private
 
   public
-    class procedure upLoad(Request: THTTPRequest; out Response: THTTPResponse);
-    class procedure downLoad(Request: THTTPRequest; out Response: THTTPResponse);
-    class procedure rota1(Request: THTTPRequest; out Response: THTTPResponse);
-    class procedure ping(Request: THTTPRequest; out Response: THTTPResponse);
-    class procedure AtuImage(Request: THTTPRequest; out Response: THTTPResponse);
-    class procedure Login(Request: THTTPRequest; out Response: THTTPResponse);
-    class procedure RefreshToken(Request: THTTPRequest; out Response: THTTPResponse);
-    class procedure produtos(Request: THTTPRequest; out Response: THTTPResponse);
+    class procedure upLoad(Request: THTTPRequest; var Response: THTTPResponse);
+    class procedure downLoad(Request: THTTPRequest; var Response: THTTPResponse);
+    class procedure rota1(Request: THTTPRequest; var Response: THTTPResponse);
+    class procedure ping(Request: THTTPRequest; var Response: THTTPResponse);
+    class procedure AtuImage(Request: THTTPRequest; var Response: THTTPResponse);
+    class procedure Login(Request: THTTPRequest; var Response: THTTPResponse);
+    class procedure RefreshToken(Request: THTTPRequest; var Response: THTTPResponse);
+    class procedure produtos(Request: THTTPRequest; var Response: THTTPResponse);
   end;
 
 var
@@ -38,7 +38,7 @@ implementation
 
 { TSampleRouteManager }
 
-class procedure TSampleRouteManager.downLoad(Request: THTTPRequest; out Response: THTTPResponse);
+class procedure TSampleRouteManager.downLoad(Request: THTTPRequest; var Response: THTTPResponse);
 var
   SynClasses: TBadgerMethods;
   FileName: string;
@@ -64,7 +64,7 @@ begin
 end;
 
 class procedure TSampleRouteManager.Login(Request: THTTPRequest;
-  out Response: THTTPResponse);
+  var Response: THTTPResponse);
 var
   LJSON, LResponseJSON: ISuperObject;
   LUser, LPass: string;
@@ -86,12 +86,12 @@ begin
   begin
     Response.StatusCode := 401;
     Response.ContentType := APPLICATION_JSON;
-    Response.Body := '{"error":"Credenciais inválidas"}';
+    Response.Body := '{"error":"Credenciais invï¿½lidas"}';
   end;
 end;
 
 class procedure TSampleRouteManager.rota1(Request: THTTPRequest;
-  out Response: THTTPResponse);
+  var Response: THTTPResponse);
 begin
   Sleep(10000) ;
   Response.StatusCode := HTTP_OK;
@@ -99,7 +99,7 @@ begin
 end;
 
 class procedure TSampleRouteManager.upLoad(Request: THTTPRequest;
-  out Response: THTTPResponse);
+  var Response: THTTPResponse);
 var
   SynClasses: TBadgerMethods;
 begin
@@ -114,7 +114,7 @@ begin
 end;
 
 class procedure TSampleRouteManager.ping(Request: THTTPRequest;
-  out Response: THTTPResponse);
+  var Response: THTTPResponse);
 begin
   Response.StatusCode := HTTP_OK;
   Response.Body := UTF8Encode('Pong');
@@ -122,19 +122,19 @@ begin
 end;
 
 class procedure TSampleRouteManager.produtos(Request: THTTPRequest;
-  out Response: THTTPResponse);
+  var Response: THTTPResponse);
 begin
   Response.StatusCode := HTTP_OK;
   Response.ContentType := TEXT_PLAIN;
 
   if Request.RouteParams.Count > 0 then
-    Response.Body := Format('id: %s' + sLineBreak +  'código: %s', [Request.RouteParams.Values['id'], Request.RouteParams.Values['codigo'] ])
+    Response.Body := Format('id: %s' + sLineBreak +  'cï¿½digo: %s', [Request.RouteParams.Values['id'], Request.RouteParams.Values['codigo'] ])
   else
-    Response.Body := Format('id: %s' + sLineBreak +  'código: %s', [Request.QueryParams.Values['id'], Request.QueryParams.Values['codigo'] ]);
+    Response.Body := Format('id: %s' + sLineBreak +  'cï¿½digo: %s', [Request.QueryParams.Values['id'], Request.QueryParams.Values['codigo'] ]);
 end;
 
 class procedure TSampleRouteManager.RefreshToken(Request: THTTPRequest;
-  out Response: THTTPResponse);
+  var Response: THTTPResponse);
 var
   LRefreshToken: string;
   I: Integer;
@@ -152,7 +152,7 @@ begin
   if LRefreshToken = '' then
   begin
     Response.StatusCode := HTTP_UNAUTHORIZED;
-    Response.Body := '{"error":"Refresh token não fornecido"}';
+    Response.Body := '{"error":"Refresh token nï¿½o fornecido"}';
     Response.ContentType := APPLICATION_JSON;
     Exit;
   end;
@@ -172,7 +172,7 @@ begin
 end;
 
 class procedure TSampleRouteManager.AtuImage(Request: THTTPRequest;
-  out Response: THTTPResponse);
+  var Response: THTTPResponse);
 var
   SynClasses: TBadgerMethods;
 begin

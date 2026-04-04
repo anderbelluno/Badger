@@ -36,7 +36,7 @@ begin
 
   ServerThread := TBadger.Create;
   ServerThread.EnableEventInfo := False;
-  ServerThread.Port := 8080;
+  ServerThread.Port := 8082;
   ServerThread.Timeout := 3000;
 
   ServerThread.RouteManager

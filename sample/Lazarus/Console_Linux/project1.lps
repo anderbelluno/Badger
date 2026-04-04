@@ -2,14 +2,15 @@
 <CONFIG>
   <ProjectSession>
     <Version Value="12"/>
-    <BuildModes Active="Debug"/>
+    <BuildModes Active="Release"/>
     <Units>
       <Unit>
         <Filename Value="project1.lpr"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="Project1"/>
         <IsVisibleTab Value="True"/>
-        <CursorPos X="34" Y="9"/>
+        <TopLine Value="36"/>
+        <CursorPos X="13" Y="53"/>
         <UsageCount Value="22"/>
         <Loaded Value="True"/>
       </Unit>

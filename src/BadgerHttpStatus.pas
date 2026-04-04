@@ -75,6 +75,7 @@ const
   APPLICATION_OCTET_STREAM = 'application/octet-stream';
   APPLICATION_JSON = 'application/json';
   TEXT_PLAIN = 'text/plain';
+  TEXT_HTML = 'text/html';
 
   type
   THTTPStatus = class

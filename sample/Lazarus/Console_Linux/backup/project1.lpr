@@ -36,21 +36,21 @@ begin
 
   ServerThread := TBadger.Create;
   ServerThread.EnableEventInfo := False;
-  ServerThread.Port := 8080;
+  ServerThread.Port := 8082;
   ServerThread.Timeout := 3000;
 
   ServerThread.RouteManager
   .AddGet('/teste/ping', TSampleRouteManager.ping) ;
 
 
-     ServerThread.ParallelProcessing:= True;
-      ServerThread.MaxConcurrentConnections:= 30000;
+    { ServerThread.ParallelProcessing:= True;
+      ServerThread.MaxConcurrentConnections:= 30000;}
 
   ServerThread.Start;
 
   WriteLn('Badger start on port ' + IntToStr(ServerThread.Port));
   WriteLn('Precione Ctrl + c para terminar');
-  ReadLn;
+//  ReadLn;
 
 end;
 
