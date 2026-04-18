@@ -1,4 +1,4 @@
-﻿unit BadgerAuthJWT;
+unit BadgerAuthJWT;
 {$IFDEF FPC}
   {$mode delphi}{$H+}
 {$ENDIF}
@@ -15,7 +15,7 @@ type
     FSecret: string;
     FStoragePath: string;
     FProtectedRoutes: TStringList;
-    function MiddlewareProc(Request: THTTPRequest; out Response: THTTPResponse): Boolean;
+    function MiddlewareProc(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 
   public
     constructor Create(const ASecret: string; const AStoragePath: string = '');
@@ -221,7 +221,7 @@ begin
 end;
 
 
-function TBadgerJWTAuth.MiddlewareProc(Request: THTTPRequest; out Response: THTTPResponse): Boolean;
+function TBadgerJWTAuth.MiddlewareProc(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 var
   I: Integer;
   LToken: string;

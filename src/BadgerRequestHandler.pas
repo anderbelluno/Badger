@@ -212,7 +212,7 @@ begin
 end;
 
 procedure THTTPRequestHandler.Execute;
-  procedure Exec(ARoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF}; const ARequest: THTTPRequest; out Response: THTTPResponse);
+  procedure Exec(ARoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF}; const ARequest: THTTPRequest; var Response: THTTPResponse);
   {$IFDEF Delphi2009Plus}
   begin
     ARoute(ARequest, Response);

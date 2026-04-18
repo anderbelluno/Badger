@@ -15,7 +15,7 @@ type
     FUsername: string;
     FPassword: string;
     FProtectedRoutes: TStringList;
-    function Check(Request: THTTPRequest; out Response: THTTPResponse): Boolean;
+    function Check(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
   public
     constructor Create(const AUsername, APassword: string);
     destructor Destroy; override;
@@ -45,7 +45,7 @@ begin
   inherited;
 end;
 
-function TBasicAuth.Check(Request: THTTPRequest; out Response: THTTPResponse): Boolean;
+function TBasicAuth.Check(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 var
   AuthHeader, DecodedAuth, vUsername, vPassword: string;
   I, ColonPos: Integer;
