@@ -15,7 +15,7 @@ type
     FUsername: string;
     FPassword: string;
     FProtectedRoutes: TStringList;
-    function Check(Request: THTTPRequest; out Response: THTTPResponse): Boolean;
+    function Check(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
   public
     constructor Create(const AUsername, APassword: string);
     destructor Destroy; override;
@@ -45,7 +45,7 @@ begin
   inherited;
 end;
 
-function TBasicAuth.Check(Request: THTTPRequest; out Response: THTTPResponse): Boolean;
+function TBasicAuth.Check(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 var
   AuthHeader, DecodedAuth, vUsername, vPassword: string;
   I, ColonPos: Integer;
@@ -61,7 +61,7 @@ begin
 
   if not LRouteMatch then
   begin
-    Result := True;
+    Result := False;
     Exit;
   end;
 
@@ -89,14 +89,14 @@ begin
         if (vUsername = FUsername) and (vPassword = FPassword) then
         begin
           Request.UserID := vUsername;
-          Result := True;
+          Result := False;
         end
         else
         begin
           Response.StatusCode := HTTP_UNAUTHORIZED;
           Response.Body := '{"error":"Invalid username or password"}';
           Response.ContentType := APPLICATION_JSON;
-          Result := False;
+          Result := True;
         end;
       end
       else
@@ -104,7 +104,7 @@ begin
         Response.StatusCode := HTTP_UNAUTHORIZED;
         Response.Body := '{"error":"Invalid Basic Auth format"}';
         Response.ContentType := APPLICATION_JSON;
-        Result := False;
+        Result := True;
       end;
     except
       on E: Exception do
@@ -112,7 +112,7 @@ begin
         Response.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
         Response.Body := '{"error":"Error decoding Basic Auth: ' + E.Message + '"}';
         Response.ContentType := APPLICATION_JSON;
-        Result := False;
+        Result := True;
       end;
     end;
   end
@@ -121,7 +121,7 @@ begin
     Response.StatusCode := HTTP_UNAUTHORIZED;
     Response.Body := '{"error":"Basic Authorization header missing or invalid"}';
     Response.ContentType := APPLICATION_JSON;
-    Result := False;
+    Result := True;
   end;
 end;
 

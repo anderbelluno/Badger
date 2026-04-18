@@ -1,4 +1,4 @@
-﻿unit Badger;
+unit Badger;
 
 {$I BadgerDefines.inc}
 
@@ -516,7 +516,12 @@ begin
   end;
 
   FShutdownEvent.ResetEvent;
-  Resume;
+
+  {$IFDEF FPC}
+    inherited Start;
+  {$ELSE}
+    Resume;
+  {$ENDIF}
 end;
 
 procedure TBadger.Stop;

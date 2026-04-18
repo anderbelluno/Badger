@@ -1,4 +1,4 @@
-unit BadgerRequestHandler;
+﻿unit BadgerRequestHandler;
 
 {$I BadgerDefines.inc}
 
@@ -185,7 +185,8 @@ begin
               'Content-Length: ' + IntToStr(Length(UTF8Body)) + CRLF;
 {$ENDIF}
   end
-  else if Assigned(Stream) and (Stream.Size > 0) then
+  else
+  if Assigned(Stream) and (Stream.Size > 0) then
   begin
     Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
               'Content-Type: ' + EffectiveContentType  + CRLF +
@@ -211,7 +212,7 @@ begin
 end;
 
 procedure THTTPRequestHandler.Execute;
-  procedure Exec(ARoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF}; const ARequest: THTTPRequest; out Response: THTTPResponse);
+  procedure Exec(ARoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF}; const ARequest: THTTPRequest; var Response: THTTPResponse);
   {$IFDEF Delphi2009Plus}
   begin
     ARoute(ARequest, Response);
@@ -350,12 +351,12 @@ begin
           if Pos('HTTP/1.0', FRequestLine) > 0 then
           begin
             // HTTP/1.0 s� aceita Keep-Alive se o cliente pedir explicitamente
-            CloseConnection := (Headers.Values['Connection'].ToLower <> 'keep-alive');
+            CloseConnection := (LowerCase(Headers.Values['Connection']) <> 'keep-alive');
           end
           else
           begin
             // HTTP/1.1 mant�m aberta a menos que pe�a para fechar
-            CloseConnection := (Headers.Values['Connection'].ToLower = 'close');
+            CloseConnection := (LowerCase(Headers.Values['Connection']) = 'close');
           end;
 
           Origin := Headers.Values['Origin'];
@@ -383,7 +384,9 @@ begin
                 HdrParts := TStringList.Create;
                 try
                   HdrParts.Delimiter := ',';
-                  HdrParts.StrictDelimiter := True;
+                  {$IFNDEF VER150}
+                    HdrParts.StrictDelimiter := True;
+                  {$ENDIF}
                   HdrParts.DelimitedText := ACRH;
                   for I := 0 to HdrParts.Count - 1 do
                   begin
@@ -456,10 +459,21 @@ begin
           for I := 0 to FMiddlewares.Count - 1 do
           begin
             MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
-            if MiddlewareWrapper.Middleware(Req, Resp) then
-            begin
-              Handled := True;
-              Break;
+            try
+              if MiddlewareWrapper.Middleware(Req, Resp) then
+              begin
+                Handled := True;
+                Break;
+              end;
+            except
+              on E: Exception do
+              begin
+                Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
+                Resp.Body := '{"error":"Middleware exception: ' + E.Message + '"}';
+                Resp.ContentType := APPLICATION_JSON;
+                Handled := True;
+                Break;
+              end;
             end;
           end;
 
@@ -468,8 +482,17 @@ begin
             // --- MATCH ROTA COM :param ---
             if FRouteManager.MatchRoute(UpperCase(FMethod), LowerCase(FURI), RouteEntry, RouteParams) then
             begin
-              Req.RouteParams.Assign(RouteParams);
-              RouteEntry.Callback(Req, Resp);
+              if Assigned(RouteEntry) and Assigned(TMethod(RouteEntry.Callback).Code) then
+              begin
+                Req.RouteParams.Assign(RouteParams);
+                RouteEntry.Callback(Req, Resp);
+              end
+              else
+              begin
+                Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
+                Resp.Body := '{"error":"Route handler not assigned"}';
+                Resp.ContentType := APPLICATION_JSON;
+              end;
             end
             else
             begin
@@ -512,7 +535,7 @@ begin
           begin
             {$IFDEF VER150}
             UTF8Body := UTF8Encode(Resp.Body);
-            SetLength(ResponseBodyBytes,, Length(UTF8Body));
+            SetLength(ResponseBodyBytes, Length(UTF8Body));
             Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
             {$ELSE}
             ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);

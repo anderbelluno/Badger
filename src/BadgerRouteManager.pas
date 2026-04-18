@@ -39,7 +39,7 @@ type
     function AddPut(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
 
     function Unregister(const Route: string): TRouteManager;
-    function MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; out Params: TStringList): Boolean;
+    function MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; var Params: TStringList): Boolean;
   end;
 
 const
@@ -225,7 +225,7 @@ begin
   end;
 end;
 
-function TRouteManager.MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; out Params: TStringList): Boolean;
+function TRouteManager.MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; var Params: TStringList): Boolean;
 var
   I, J, CtxIdx: Integer;
   PatternParts, PathParts: TStringList;
@@ -250,41 +250,44 @@ begin
       Bucket := FRoutes;
 
     for I := 0 to Bucket.Count - 1 do
-  begin
-    Entry := TRouteEntry(Bucket[I]);
-    if Entry.Verb <> AVerb then Continue;
+    begin
+      Entry := TRouteEntry(Bucket[I]);
+      if not Assigned(Entry) then Continue;
+      if Entry.Verb <> AVerb then Continue;
 
-    PatternParts := SplitString(Entry.Pattern, '/');
-    try
-      if PatternParts.Count <> PathParts.Count then
-        Continue;
-
-      Params.Clear;
-      Result := True;
-      for J := 0 to PatternParts.Count - 1 do
-      begin
-        Part := PatternParts[J];
-        if (Part = '') and (J = 0) then
+      PatternParts := SplitString(Entry.Pattern, '/');
+      try
+        if PatternParts.Count <> PathParts.Count then
           Continue;
 
-        if Copy(Part, 1, 1) = ':' then
+        Params.Clear;
+        Result := True;
+        for J := 0 to PatternParts.Count - 1 do
         begin
-          ParamName := Copy(Part, 2, MaxInt);
-          Params.Add(ParamName + '=' + PathParts[J]);
-        end
-        else if Part <> PathParts[J] then
-        begin
-          Result := False;
-          Break;
-        end;
-      end;
+          Part := PatternParts[J];
+          if (Part = '') and (J = 0) then
+            Continue;
 
-      if Result then
-        Exit;
-    finally
-      PatternParts.Free;
+          if Copy(Part, 1, 1) = ':' then
+          begin
+            ParamName := Copy(Part, 2, MaxInt);
+            Params.Add(ParamName + '=' + PathParts[J]);
+          end
+          else if Part <> PathParts[J] then
+          begin
+            Result := False;
+            Break;
+          end;
+        end;
+
+        if Result then
+          Exit;
+
+        Entry := nil;
+      finally
+        PatternParts.Free;
+      end;
     end;
-  end;
   finally
     PathParts.Free;
   end;

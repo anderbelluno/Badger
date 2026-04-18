@@ -80,8 +80,10 @@ begin
       .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
       .AddGet('/produtos', TSampleRouteManager.produtos);
 
-    ServerThread.ParallelProcessing:= True;
-    ServerThread.MaxConcurrentConnections:= 30000;
+    {ServerThread.ParallelProcessing:= True;
+    ServerThread.MaxConcurrentConnections:= 30000; }
+
+    ServerThread.CorsEnabled:= False;
 
     ServerThread.Start;
     edtPorta.Enabled := False;

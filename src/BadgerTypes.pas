@@ -50,8 +50,8 @@ type
   TOnRequest = procedure(const RequestInfo: TRequestInfo) of object;
   TOnResponse = procedure(const ResponseInfo: TResponseInfo) of object;
 
-  TMiddlewareProc = function(Request: THTTPRequest; out Response: THTTPResponse): Boolean of object;
-  TRoutingCallback = procedure(Request: THTTPRequest; out Response: THTTPResponse) of object;
+  TMiddlewareProc = function(Request: THTTPRequest; var Response: THTTPResponse): Boolean of object;
+  TRoutingCallback = procedure(Request: THTTPRequest; var Response: THTTPResponse) of object;
 
   TMiddlewareWrapper = class
   public

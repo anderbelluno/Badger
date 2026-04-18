@@ -78,10 +78,18 @@ begin
       .AddPost('/Login',TSampleRouteManager.Login)
       .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken)
       .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
-      .AddGet('/produtos', TSampleRouteManager.produtos);
+      .AddGet('/produtos', TSampleRouteManager.produtos)
+      .AddGet('/porra',
 
-    ServerThread.ParallelProcessing:= True;
-    ServerThread.MaxConcurrentConnections:= 2000;
+        begin
+          THTTPResponse.Body:= 'caraio';
+        end;
+        );
+
+    {ServerThread.ParallelProcessing:= True;
+    ServerThread.MaxConcurrentConnections:= 30000; }
+
+    ServerThread.CorsEnabled:= False;
 
     ServerThread.Start;
     edtPorta.Enabled := False;

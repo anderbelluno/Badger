@@ -15,7 +15,7 @@ type
     FSecret: string;
     FStoragePath: string;
     FProtectedRoutes: TStringList;
-    function MiddlewareProc(Request: THTTPRequest; out Response: THTTPResponse): Boolean;
+    function MiddlewareProc(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 
   public
     constructor Create(const ASecret: string; const AStoragePath: string = '');
@@ -75,7 +75,7 @@ begin
 
     LRefreshToken := GenerateRefreshToken(AUserID);
       {$IFNDEF FPC}
-        {$IF CompilerVersion >= 20}  //Necessário pois foi usado versão diferente do SuperObject
+        {$IF CompilerVersion >= 20}  //Necessï¿½rio pois foi usado versï¿½o diferente do SuperObject
             LJSONArray := SA();
         {$ELSE}
             LJSONArray := SA([]);
@@ -221,7 +221,7 @@ begin
 end;
 
 
-function TBadgerJWTAuth.MiddlewareProc(Request: THTTPRequest; out Response: THTTPResponse): Boolean;
+function TBadgerJWTAuth.MiddlewareProc(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 var
   I: Integer;
   LToken: string;
@@ -238,7 +238,7 @@ begin
 
   if not LRouteMatch then
   begin
-    Result := True;
+    Result := False;
     Exit;
   end;
 
@@ -257,7 +257,7 @@ begin
     Response.StatusCode := HTTP_UNAUTHORIZED;
     Response.Body := '{"error":"Token not provided"}';
     Response.ContentType := APPLICATION_JSON;
-    Result := False;
+    Result := True;
     Exit;
   end;
 
@@ -266,7 +266,7 @@ begin
     try
       Request.UserID := LClaims.UserID;
       Request.UserRole := LClaims.Role;
-      Result := True;
+      Result := False;
     finally
       LClaims.Free;
     end;
@@ -276,7 +276,7 @@ begin
       Response.StatusCode := HTTP_UNAUTHORIZED;
       Response.Body := '{"error":"' + E.Message + '"}';
       Response.ContentType := APPLICATION_JSON;
-      Result := False;
+      Result := True;
     end;
   end;
 end;

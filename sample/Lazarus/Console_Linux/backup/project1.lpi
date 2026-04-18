@@ -23,7 +23,7 @@
           </Target>
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir)"/>
-            <OtherUnitFiles Value="/home/usuario/Badger/Badger/ThirdParty/Synapse/;/home/usuario/Badger/Badger/ThirdParty/SuperObject/D_Plus_Laz_Linux/;/home/usuario/Badger/Badger/src/Auth/Basic/;/home/usuario/Badger/Badger/src/;/home/usuario/Badger/Badger/src/Auth/JWT/;/home/usuario/Badger/Badger/sample/"/>
+            <OtherUnitFiles Value="/home/usuario/Badger/Badger/ThirdParty/Synapse;/home/usuario/Badger/Badger/ThirdParty/SuperObject/D_Plus_Laz_Linux;/home/usuario/Badger/Badger/src/Auth/Basic;/home/usuario/Badger/Badger/src;/home/usuario/Badger/Badger/src/Auth/JWT;/home/usuario/Badger/Badger/sample"/>
             <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <Parsing>
@@ -103,7 +103,7 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="/home/usuario/Badger/Badger/ThirdParty/Synapse/;/home/usuario/Badger/Badger/ThirdParty/SuperObject/D_Plus_Laz_Linux/;/home/usuario/Badger/Badger/src/Auth/Basic/;/home/usuario/Badger/Badger/src/;/home/usuario/Badger/Badger/src/Auth/JWT/;/home/usuario/Badger/Badger/sample/"/>
+      <OtherUnitFiles Value="/home/usuario/Badger/Badger/ThirdParty/Synapse;/home/usuario/Badger/Badger/ThirdParty/SuperObject/D_Plus_Laz_Linux;/home/usuario/Badger/Badger/src/Auth/Basic;/home/usuario/Badger/Badger/src;/home/usuario/Badger/Badger/src/Auth/JWT;/home/usuario/Badger/Badger/sample"/>
       <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Linking>
