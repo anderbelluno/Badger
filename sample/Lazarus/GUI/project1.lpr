@@ -4,6 +4,7 @@ program project1;
 
 uses
     {$IFDEF UNIX}
+    cmem,
     cthreads,
     {$ENDIF}
     {$IFDEF HASAMIGA}
