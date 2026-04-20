@@ -203,19 +203,23 @@ begin
 end;
 
 function TBadgerMethods.ExtractBoundary(const ContentType: string): string;
+const
+  BoundaryPrefix = 'boundary=';
 var
   BoundaryStart, BoundaryEnd: Integer;
 begin
   Result := '';
-  BoundaryStart := Pos('boundary=', ContentType);
-  if BoundaryStart > 0 then
-  begin
-    BoundaryStart := BoundaryStart + Length('boundary=');
-    BoundaryEnd := PosEx(' ', ContentType, BoundaryStart);
-    if BoundaryEnd = 0 then
-      BoundaryEnd := Length(ContentType) + 1;
-    Result := Copy(ContentType, BoundaryStart, BoundaryEnd - BoundaryStart);
-  end;
+  BoundaryStart := Pos(BoundaryPrefix, ContentType);
+  if BoundaryStart = 0 then Exit;
+
+  BoundaryStart := BoundaryStart + Length(BoundaryPrefix);
+  BoundaryEnd := PosEx(';', ContentType, BoundaryStart);
+  if BoundaryEnd = 0 then
+    BoundaryEnd := Length(ContentType) + 1;
+  Result := Trim(Copy(ContentType, BoundaryStart, BoundaryEnd - BoundaryStart));
+
+  if (Length(Result) >= 2) and (Result[1] = '"') and (Result[Length(Result)] = '"') then
+    Result := Copy(Result, 2, Length(Result) - 2);
 end;
 
 end.

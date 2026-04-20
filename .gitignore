@@ -92,3 +92,7 @@ modules/
 *.mes
 *.dof
 /sample/backup
+*.compiled
+*.lps
+*.compiled
+*.or

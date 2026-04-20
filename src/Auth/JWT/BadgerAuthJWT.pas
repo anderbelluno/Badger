@@ -7,7 +7,7 @@ interface
 
 uses
   SysUtils, Classes, Badger, BadgerTypes, BadgerHttpStatus, BadgerJWTClaims,
-  BadgerJWTUtils, superobject;
+  BadgerJWTUtils, BadgerUtils, superobject;
 
 type
   TBadgerJWTAuth = class
@@ -248,7 +248,7 @@ begin
     begin
       LToken := Trim(Copy(Request.Headers[I], Pos('=', Request.Headers[I]) + 1, Length(Request.Headers[I])));
       if Pos('Bearer ', LToken) = 1 then
-        LToken := Copy(LToken, 8, MaxInt);
+        LToken := Copy(LToken, 8, Length(LToken));
       Break;
     end;
 

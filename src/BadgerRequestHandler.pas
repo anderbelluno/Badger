@@ -160,12 +160,13 @@ function THTTPRequestHandler.BuildHTTPResponse(StatusCode: Integer;
 var
   EffectiveContentType: string;
   i: Integer;
-{$IFDEF VER150}
-  UTF8Body: string;
-{$ELSE}
+{$IFDEF Delphi2009Plus}
   UTF8Body: RawByteString;
+{$ELSE}
+  UTF8Body: string;
 {$ENDIF}
 begin
+  Result := '';
   if ContentType = '' then
     EffectiveContentType := TEXT_PLAIN
   else
@@ -173,17 +174,10 @@ begin
 
   if (AnsiContainsText(LowerCase(EffectiveContentType), TEXT_PLAIN)) or (AnsiContainsText(LowerCase(EffectiveContentType), APPLICATION_JSON)) then
   begin
-{$IFDEF VER150}
     UTF8Body := UTF8Encode(Body);
     Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
               'Content-Type: ' + EffectiveContentType + '; charset=utf-8' + CRLF +
               'Content-Length: ' + IntToStr(Length(UTF8Body)) + CRLF;
-{$ELSE}
-    UTF8Body := UTF8Encode(Body);
-    Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
-              'Content-Type: ' + EffectiveContentType + '; charset=utf-8' + CRLF +
-              'Content-Length: ' + IntToStr(Length(UTF8Body)) + CRLF;
-{$ENDIF}
   end
   else
   if Assigned(Stream) and (Stream.Size > 0) then
@@ -230,7 +224,8 @@ procedure THTTPRequestHandler.Execute;
   {$ENDIF}
 
 const
-  MaxBufferSize = 1048576; // 1MB
+  MaxBufferSize = 1048576;       // 1MB buffer de leitura
+  MaxRequestBodySize = 52428800; // 50MB limite de request body
 var
   I, ContentLength, TotalBytes: Integer;
   Req: THTTPRequest;
@@ -244,14 +239,14 @@ var
   LRouteStr: string;
   LRoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF};
   Index: Integer;
-{$IFDEF VER150}
-  TempBytes: array of Byte;
-  ResponseBodyBytes: array of Byte;
-  UTF8Body: string;
-{$ELSE}
+{$IFDEF Delphi2009Plus}
   TempBytes: TBytes;
   ResponseBodyBytes: TBytes;
   UTF8Body: RawByteString;
+{$ELSE}
+  TempBytes: array of Byte;
+  ResponseBodyBytes: array of Byte;
+  UTF8Body: string;
 {$ENDIF}
   BufferSize: Integer;
   BytesRead: Integer;
@@ -265,8 +260,6 @@ var
   HdrParts: TStringList;
   HdrPart: string;
 begin
-  // Logger.Info(Format('Starting THTTPRequestHandler.Execute for thread %d', [ThreadID]));
-
   QueryParams := TStringList.Create;
   Req.QueryParams := TStringList.Create;
   Req.Headers := TStringList.Create;
@@ -310,6 +303,14 @@ begin
           ContentLength := StrToIntDef(Headers.Values['Content-Length'], 0);
           ContentType := Headers.Values['Content-Type'];
 
+          if ContentLength > MaxRequestBodySize then
+          begin
+            Resp.StatusCode := HTTP_PAYLOAD_TOO_LARGE;
+            Resp.Body := '{"error":"Request body too large"}';
+            Resp.ContentType := APPLICATION_JSON;
+            Break;
+          end;
+
           if ContentLength > 0 then
           begin
             BodyStream := TMemoryStream.Create;
@@ -330,10 +331,10 @@ begin
                 SetLength(TempBytes, TotalBytes);
                 BodyStream.ReadBuffer(TempBytes[0], TotalBytes);
                 SetString(Req.Body, PChar(@TempBytes[0]), TotalBytes);
-                {$IFDEF VER150}
-                Req.Body := CharsetConversion(Req.Body, UTF_8, GetCurCP);
-                {$ELSE}
+                {$IFDEF Delphi2009Plus}
                 Req.Body := TEncoding.UTF8.GetString(TempBytes);
+                {$ELSE}
+                Req.Body := CharsetConversion(Req.Body, UTF_8, GetCurCP);
                 {$ENDIF}
                 FreeAndNil(BodyStream);
               end
@@ -533,12 +534,12 @@ begin
              (Pos('application/json', Resp.ContentType) = 1)
           ) then
           begin
-            {$IFDEF VER150}
+            {$IFDEF Delphi2009Plus}
+            ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
+            {$ELSE}
             UTF8Body := UTF8Encode(Resp.Body);
             SetLength(ResponseBodyBytes, Length(UTF8Body));
             Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
-            {$ELSE}
-            ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
             {$ENDIF}
             if Length(ResponseBodyBytes) > 0 then
               FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
@@ -607,18 +608,19 @@ begin
       on E: Exception do
       begin
         Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-        Resp.Body := 'Internal Server Error: ' + E.Message;
+        Logger.Error(Format('Unhandled exception in request handler: %s', [E.Message]));
+        Resp.Body := 'Internal Server Error';
         Resp.ContentType := TEXT_PLAIN;
         ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, nil, Resp.ContentType, True, Resp.HeadersCustom);
         if Assigned(FClientSocket) and (FClientSocket.LastError = 0) then
         begin
           FClientSocket.SendString(ResponseHeader);
-          {$IFDEF VER150}
+          {$IFDEF Delphi2009Plus}
+          ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
+          {$ELSE}
           UTF8Body := UTF8Encode(Resp.Body);
           SetLength(ResponseBodyBytes, Length(UTF8Body));
           Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
-          {$ELSE}
-          ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
           {$ENDIF}
           if Length(ResponseBodyBytes) > 0 then
             FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
@@ -643,8 +645,6 @@ begin
       FClientSocket.CloseSocket;
       FreeAndNil(FClientSocket);
     end;
-
-    // Logger.Info(Format('Finished THTTPRequestHandler.Execute for thread %d', [ThreadID]));
   end;
 end;
 
