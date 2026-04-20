@@ -23,6 +23,8 @@ type
     constructor Create(TheOwner: TComponent); override;
     destructor Destroy; override;
     procedure WriteHelp; virtual;
+    procedure HandleRequest(const RequestInfo: TRequestInfo);
+    procedure HandleResponse(const ResponseInfo: TResponseInfo);
   end;
 
 { TMyApplication }
@@ -35,9 +37,12 @@ begin
   Logger.LogToConsole := False;
 
   ServerThread := TBadger.Create;
-  ServerThread.EnableEventInfo := False;
-  ServerThread.Port := 8082;
+  ServerThread.EnableEventInfo := True;
+  ServerThread.Port := 8080;
   ServerThread.Timeout := 3000;
+
+  ServerThread.OnRequest  := HandleRequest;
+  ServerThread.OnResponse := HandleResponse;
 
   ServerThread.RouteManager
   .AddGet('/teste/ping', TSampleRouteManager.ping) ;
@@ -73,6 +78,19 @@ procedure TMyApplication.WriteHelp;
 begin
   { add your help code here }
   writeln('Usage: ', ExeName, ' -h');
+end;
+
+procedure TMyApplication.HandleRequest(const RequestInfo: TRequestInfo);
+begin
+   WriteLn('>> ' + RequestInfo.Method + ' ' + RequestInfo.URI
+                + ' | IP: ' + RequestInfo.RemoteIP);
+end;
+
+procedure TMyApplication.HandleResponse(const ResponseInfo: TResponseInfo);
+begin
+    WriteLn('<< ' + IntToStr(ResponseInfo.StatusCode)
+                + ' ' + ResponseInfo.StatusText
+                + ' | ' + DateTimeToStr(ResponseInfo.Timestamp));
 end;
 
 var

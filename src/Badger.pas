@@ -141,13 +141,11 @@ var
 const
   MaxWaitTime = 15000;
 begin
- // Logger.Info('TBadger.Destroy started');
 
   if not FIsShuttingDown then
   begin
     try
       Stop;
-     // Logger.Info('Stop called in Destroy');
     except
       on E: Exception do
         Logger.Error(Format('Error in Stop during Destroy: %s', [E.Message]));
@@ -169,7 +167,6 @@ begin
 
   try
     CleanupClientSockets;
-   // Logger.Info('CleanupClientSockets completed');
   except
     on E: Exception do
       Logger.Error(Format('Error in CleanupClientSockets: %s', [E.Message]));
@@ -179,12 +176,8 @@ begin
     if Assigned(FServerSocket) then
     begin
       if FServerSocket.Socket <> INVALID_SOCKET then
-      begin
         FServerSocket.CloseSocket;
-      //  Logger.info('Server socket closed in Destroy');
-      end;
       FreeAndNil(FServerSocket);
-     // Logger.info('FServerSocket freed in Destroy');
     end;
   except
     on E: Exception do
@@ -192,22 +185,14 @@ begin
   end;
 
   try
-    if Assigned(FRouteManager) then
-    begin
-      FreeAndNil(FRouteManager);
-     // Logger.info('FRouteManager freed');
-    end;
+    if Assigned(FRouteManager) then FreeAndNil(FRouteManager);
   except
     on E: Exception do
       Logger.Error(Format('Error freeing FRouteManager: %s', [E.Message]));
   end;
 
   try
-    if Assigned(FMethods) then
-    begin
-      FreeAndNil(FMethods);
-     // Logger.info('FMethods freed');
-    end;
+    if Assigned(FMethods) then FreeAndNil(FMethods);
   except
     on E: Exception do
       Logger.Error(Format('Error freeing FMethods: %s', [E.Message]));
@@ -216,22 +201,10 @@ begin
   try
     if Assigned(FMiddlewares) then
     begin
-     // Logger.info(Format('Freeing %d middlewares', [FMiddlewares.Count]));
       for I := 0 to FMiddlewares.Count - 1 do
-      begin
         if Assigned(FMiddlewares[I]) then
-        begin
-          try
-            TObject(FMiddlewares[I]).Free;
-     //       Logger.info(Format('Freed middleware %d', [I]));
-          except
-            on E: Exception do
-              Logger.Error(Format('Error freeing middleware %d: %s', [I, E.Message]));
-          end;
-        end;
-      end;
+          TObject(FMiddlewares[I]).Free;
       FreeAndNil(FMiddlewares);
-    //  Logger.info('FMiddlewares freed');
     end;
   except
     on E: Exception do
@@ -239,33 +212,21 @@ begin
   end;
 
   try
-    if Assigned(FClientSockets) then
-    begin
-      FreeAndNil(FClientSockets);
-  //    Logger.info('FClientSockets freed');
-    end;
+    if Assigned(FClientSockets) then FreeAndNil(FClientSockets);
   except
     on E: Exception do
       Logger.Error(Format('Error freeing FClientSockets: %s', [E.Message]));
   end;
 
   try
-    if Assigned(FShutdownEvent) then
-    begin
-      FreeAndNil(FShutdownEvent);
-    //  Logger.info('FShutdownEvent freed');
-    end;
+    if Assigned(FShutdownEvent) then FreeAndNil(FShutdownEvent);
   except
     on E: Exception do
-      Logger.info(Format('Error freeing FShutdownEvent: %s', [E.Message]));
+      Logger.Error(Format('Error freeing FShutdownEvent: %s', [E.Message]));
   end;
 
   try
-    if Assigned(FSocketLock) then
-    begin
-      FreeAndNil(FSocketLock);
-   //   Logger.info('FSocketLock freed');
-    end;
+    if Assigned(FSocketLock) then FreeAndNil(FSocketLock);
   except
     on E: Exception do
       Logger.Error(Format('Error freeing FSocketLock: %s', [E.Message]));
@@ -281,7 +242,6 @@ begin
       Logger.Error(Format('Error freeing CORS lists: %s', [E.Message]));
   end;
 
-  Logger.Info('TBadger destroyed');
   inherited;
 end;
 
@@ -392,19 +352,8 @@ end;
 
 {$IFDEF UNIX}
 function TBadger.WaitForThreadTermination(TimeoutMs: Integer): Boolean;
-var
-  StartTime: TDateTime;
-  ElapsedMs: Integer;
 begin
-  Result := False;
-  StartTime := Now;
-
-  while not Finished and (ElapsedMs < TimeoutMs) do
-  begin
-    Sleep(10);
-    ElapsedMs := Trunc((Now - StartTime) * 24 * 60 * 60 * 1000);
-  end;
-
+  WaitFor;
   Result := Finished;
 end;
 {$ENDIF}
@@ -485,6 +434,7 @@ begin
 
  //  Logger.Info('TBadger.Start: Configuring socket');
     try
+      FServerSocket.EnableReuse(True);
       FServerSocket.CreateSocket;
       FServerSocket.setLinger(True, 10000);
       FServerSocket.NonBlockMode := FNonBlockMode;
@@ -530,14 +480,13 @@ var
   {$IFDEF MSWINDOWS}
   WaitResult: DWORD;
   {$ENDIF}
-  {$IFDEF UNIX}
-  ThreadTerminated: Boolean;
-  {$ENDIF}
 const
   MaxWaitTime = 15000;
 begin
 //  Logger.Info('TBadger.Stop: Starting shutdown sequence');
 
+  Logger.Debug('DBG: Stop called. Terminated= ' + BoolToStr(Terminated, True) + ' Suspended= ' + BoolToStr(Suspended, True));
+  
   FIsShuttingDown := True;
 
   if Terminated or Suspended then
@@ -547,9 +496,7 @@ begin
        SafeCloseSocket;
        Terminate;
        CleanupClientSockets;
-       Free;
     end;
-//    Logger.Info('Server already stopped or suspended');
     Exit;
   end;
 
@@ -571,7 +518,6 @@ begin
  //     Logger.Info(Format('Warning: Timeout waiting for %d active connections to close', [FActiveConnections]));
   end;
 
- // Logger.Info('TBadger.Stop: Terminating thread');
   Terminate;
 
   try
@@ -593,22 +539,16 @@ begin
     {$ENDIF}
 
     {$IFDEF UNIX}
-    // Linux/Unix: usa implementação personalizada
-    ThreadTerminated := WaitForThreadTermination(MaxWaitTime);
-    if not ThreadTerminated then
-    begin
-      Logger.Warning('Thread termination timeout');
-    end;
+    WaitFor;
     {$ENDIF}
   except
     on E: Exception do
+    begin
       Logger.Error(Format('Error waiting for thread: %s', [E.Message]));
+    end;
   end;
 
   CleanupClientSockets;
-
- // Logger.Info('TBadger.Stop: Server stopped successfully');
-  Free;
 end;
 
 procedure TBadger.Execute;

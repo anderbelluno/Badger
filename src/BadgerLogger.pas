@@ -10,12 +10,11 @@ uses
 
 type
   TLogLevel = (llDebug, llInfo, llWarning, llError, llCritical);
-  
+
   TBadgerLogger = class
   private
     FCS: TCriticalSection;
     FisActive : Boolean;
-    FLogFile: TextFile;
     FLogFileName: string;
     FLogToFile: Boolean;
     FLogToConsole: Boolean;
@@ -34,7 +33,7 @@ type
     procedure Warning(const Msg: string);
     procedure Error(const Msg: string);
     procedure Critical(const Msg: string);
-    
+
     property isActive : Boolean read FisActive write FisActive;
     property LogToFile: Boolean read FLogToFile write FLogToFile;
     property LogToConsole: Boolean read FLogToConsole write FLogToConsole;
@@ -58,52 +57,40 @@ begin
   FLogFileName := 'badger_server.log';
   FisActive := False;
   {$IFDEF DEBUG}
-  FLogLevel := llDebug; // Log mais verboso em debug
+  FLogLevel := llDebug;
   {$ENDIF}
 end;
 
 destructor TBadgerLogger.Destroy;
 begin
-  if FLogToFile then
-    CloseFile(FLogFile);
   FCS.Free;
   inherited;
 end;
 
 procedure TBadgerLogger.WriteToFile(const Msg: string);
+var
+  LFile: TextFile;
 begin
   if not FLogToFile then Exit;
-  
- // FCS.Acquire;
+  AssignFile(LFile, FLogFileName);
   try
-    if not FileExists(FLogFileName) then
-    begin
-      AssignFile(FLogFile, FLogFileName);
-      Rewrite(FLogFile);
-    end
+    if FileExists(FLogFileName) then
+      Append(LFile)
     else
-    begin
-      AssignFile(FLogFile, FLogFileName);
-      Append(FLogFile);
+      Rewrite(LFile);
+    try
+      WriteLn(LFile, Msg);
+    finally
+      CloseFile(LFile);
     end;
-    
-    WriteLn(FLogFile, Msg);
-    CloseFile(FLogFile);
-  finally
-  //  FCS.Release;
+  except
   end;
 end;
 
 procedure TBadgerLogger.WriteToConsole(const Msg: string);
 begin
-  if not FLogToConsole then Exit;
-  
- // FCS.Acquire;
-  try
+  if FLogToConsole then
     WriteLn(Msg);
-  finally
-  //  FCS.Release;
-  end;
 end;
 
 {$IFDEF MSWINDOWS}
@@ -119,26 +106,18 @@ const
 var
   LogMsg: string;
 begin
- if not FisActive then
-   Exit;
-   
-  if Level < FLogLevel then Exit; // Filtro por nível
-  
+  if not FisActive then Exit;
+  if Level < FLogLevel then Exit;
+
   LogMsg := Format('[%s] %s: %s', [ FormatDateTime('yyyy-mm-dd hh:nn:ss.zzz', Now), LevelNames[Level], Msg ]);
 
-  // Escrita thread-safe
   FCS.Acquire;
   try
-    // Console (sempre disponível)
     WriteToConsole(LogMsg);
-    
-    // Arquivo (se habilitado)
     if FLogToFile then
       WriteToFile(LogMsg);
-      
-    // Debug do Windows (apenas Windows)
     {$IFDEF MSWINDOWS}
-    if Level <= llWarning then // Só debug/warning no OutputDebugString
+    if Level <= llWarning then
       WriteToDebugger(LogMsg);
     {$ENDIF}
   finally
@@ -177,4 +156,4 @@ initialization
 finalization
   Logger.Free;
 
-end. 
+end.
