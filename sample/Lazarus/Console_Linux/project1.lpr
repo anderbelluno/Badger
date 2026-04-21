@@ -4,6 +4,7 @@ program Project1;
 
 uses
   {$IFDEF UNIX}
+  cmem,
   cthreads,
   {$ENDIF}
   Classes, SysUtils, CustApp, Badger, BadgerTypes, BadgerLogger, SampleRouteManager
@@ -37,7 +38,7 @@ begin
   Logger.LogToConsole := False;
 
   ServerThread := TBadger.Create;
-  ServerThread.EnableEventInfo := True;
+  ServerThread.EnableEventInfo := false;
   ServerThread.Port := 8080;
   ServerThread.Timeout := 3000;
 
@@ -48,8 +49,8 @@ begin
   .AddGet('/teste/ping', TSampleRouteManager.ping) ;
 
 
-    { ServerThread.ParallelProcessing:= True;
-      ServerThread.MaxConcurrentConnections:= 30000;}
+  ServerThread.ParallelProcessing := True;
+  {ServerThread.MaxConcurrentConnections := 30000;}
 
   ServerThread.Start;
 
