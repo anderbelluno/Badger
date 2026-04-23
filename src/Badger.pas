@@ -5,7 +5,7 @@ unit Badger;
 interface
 
 uses
-  {$IFDEF MSWINDOWS}Windows, {$ENDIF}
+  {$IFDEF BADGER_WINDOWS}Windows, {$ENDIF}
   {$IFDEF FPC}
     {$IFDEF UNIX}BaseUnix, Unix, {$ENDIF}
   {$ENDIF}
@@ -118,7 +118,6 @@ begin
   FCorsAllowedMethods.CaseSensitive := False;
   FCorsAllowedHeaders.CaseSensitive := False;
   FCorsExposeHeaders.CaseSensitive := False;
-  FCorsAllowedOrigins.Add('*');
   FCorsAllowedMethods.Add('GET');
   FCorsAllowedMethods.Add('POST');
   FCorsAllowedMethods.Add('PUT');
@@ -431,8 +430,16 @@ end;
 
 procedure TBadger.AddMiddleware(Middleware: TMiddlewareProc);
 begin
-  if not FIsShuttingDown and Assigned(FMiddlewares) then
-    FMiddlewares.Add(TMiddlewareWrapper.Create(Middleware));
+  if not Assigned(FSocketLock) then
+    Exit;
+
+  FSocketLock.Acquire;
+  try
+    if not FIsShuttingDown and Assigned(FMiddlewares) then
+      FMiddlewares.Add(TMiddlewareWrapper.Create(Middleware));
+  finally
+    FSocketLock.Release;
+  end;
 end;
 
 procedure TBadger.Start;
@@ -510,7 +517,7 @@ end;
 procedure TBadger.Stop;
 var
   TimeoutCounter: Integer;
-  {$IFDEF MSWINDOWS}
+  {$IFDEF BADGER_WINDOWS}
   WaitResult: DWORD;
   {$ENDIF}
 const
@@ -555,7 +562,7 @@ begin
   Terminate;
 
   try
-    {$IFDEF MSWINDOWS}
+    {$IFDEF BADGER_WINDOWS}
     // Windows: usa WaitForSingleObject
     TimeoutCounter := 0;
     WaitResult := WaitForSingleObject(Handle, 100);
@@ -636,13 +643,13 @@ begin
             if FParallelProcessing then
             begin
               IncActiveConnections;
-              THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares,
+              THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares, FSocketLock,
                                                 FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
               ClientSocket := nil;
             end
             else
             begin
-              THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares,
+              THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares, FSocketLock,
                                          FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
               RemoveClientSocket(ClientSocket);
               ClientSocket := nil;
@@ -652,10 +659,16 @@ begin
           begin
             if Assigned(FOnResponse) then
             begin
-              ResponseInfo.StatusCode := 500;
-              ResponseInfo.StatusText := 'Internal Server Error';
-              ResponseInfo.Body := 'Error accepting connection: ' + ClientSocket.LastErrorDesc;
-              FOnResponse(ResponseInfo);
+              FillChar(ResponseInfo, SizeOf(ResponseInfo), 0);
+              ResponseInfo.Headers := TStringList.Create;
+              try
+                ResponseInfo.StatusCode := 500;
+                ResponseInfo.StatusText := 'Internal Server Error';
+                ResponseInfo.Body := 'Error accepting connection: ' + ClientSocket.LastErrorDesc;
+                FOnResponse(ResponseInfo);
+              finally
+                ResponseInfo.Headers.Free;
+              end;
             end;
           end;
         finally

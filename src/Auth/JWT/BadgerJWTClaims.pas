@@ -40,12 +40,32 @@ begin
 end;
 
 class function TBadgerJWTClaims.FromJSON(const AJSON: ISuperObject): TBadgerJWTClaims;
+  procedure RequireType(const AName: string; const AValue: ISuperObject; AType: TSuperType);
+  begin
+    if (AValue = nil) or (not ObjectIsType(AValue, AType)) then
+      raise Exception.CreateFmt('Invalid claim type for "%s"', [AName]);
+  end;
+var
+  VUserID, VRole, VIss, VExp: ISuperObject;
 begin
+  if (AJSON = nil) or (not ObjectIsType(AJSON, stObject)) then
+    raise Exception.Create('Invalid claims payload');
+
+  VUserID := AJSON.O['user_id'];
+  VRole := AJSON.O['role'];
+  VIss := AJSON.O['iss'];
+  VExp := AJSON.O['exp'];
+
+  RequireType('user_id', VUserID, stString);
+  RequireType('role', VRole, stString);
+  RequireType('iss', VIss, stInt);
+  RequireType('exp', VExp, stInt);
+
   Result := TBadgerJWTClaims.Create;
-  Result.UserID := AJSON.S['user_id'];
-  Result.Role := AJSON.S['role'];
-  Result.Iss := AJSON.I['iss'];
-  Result.Exp := AJSON.I['exp'];
+  Result.UserID := VUserID.AsString;
+  Result.Role := VRole.AsString;
+  Result.Iss := VIss.AsInteger;
+  Result.Exp := VExp.AsInteger;
 end;
 
 end.

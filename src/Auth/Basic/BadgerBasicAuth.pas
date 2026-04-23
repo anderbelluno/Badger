@@ -7,21 +7,27 @@ unit BadgerBasicAuth;
 interface
 
 uses
-  SysUtils, Classes, Badger, BadgerTypes, BadgerHttpStatus, BadgerUtils;
+  SysUtils, Classes, Badger, BadgerTypes, BadgerHttpStatus, BadgerUtils, BadgerJWTUtils;
 
 type
   TBasicAuth = class
   private
     FUsername: string;
-    FPassword: string;
+    FPasswordHash: string;
+    FPasswordSalt: string;
     FProtectedRoutes: TStringList;
+    function ConstantTimeEquals(const A, B: string): Boolean;
+    function HashPassword(const APassword: string): string;
+    function BuildPasswordSalt: string;
+    function GetPassword: string;
+    procedure SetPassword(const AValue: string);
     function Check(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
   public
     constructor Create(const AUsername, APassword: string);
     destructor Destroy; override;
     procedure RegisterProtectedRoutes(Badger: TBadger; const ProtectedRoutes: array of string);
     property Username: string read FUsername write FUsername;
-    property Password: string read FPassword write FPassword;
+    property Password: string read GetPassword write SetPassword;
   end;
 
 implementation
@@ -72,8 +78,10 @@ end;
 constructor TBasicAuth.Create(const AUsername, APassword: string);
 begin
   inherited Create;
+  Randomize;
   FUsername := AUsername;
-  FPassword := APassword;
+  FPasswordSalt := BuildPasswordSalt;
+  SetPassword(APassword);
   FProtectedRoutes := TStringList.Create;
 end;
 
@@ -81,6 +89,58 @@ destructor TBasicAuth.Destroy;
 begin
   FProtectedRoutes.Free;
   inherited;
+end;
+
+function TBasicAuth.BuildPasswordSalt: string;
+begin
+  Result := IntToHex(DateTimeToUnix(Now), 8) + IntToHex(Random(MaxInt), 8);
+end;
+
+function TBasicAuth.HashPassword(const APassword: string): string;
+begin
+  Result := CreateSignature('BASIC_AUTH', CustomEncodeBase64(APassword, True), FPasswordSalt);
+end;
+
+function TBasicAuth.ConstantTimeEquals(const A, B: string): Boolean;
+var
+  I, ALen, BLen, MaxLen: Integer;
+  Diff: Cardinal;
+  CA, CB: Cardinal;
+begin
+  ALen := Length(A);
+  BLen := Length(B);
+  if ALen > BLen then
+    MaxLen := ALen
+  else
+    MaxLen := BLen;
+
+  Diff := Cardinal(ALen xor BLen);
+  for I := 1 to MaxLen do
+  begin
+    if I <= ALen then
+      CA := Ord(A[I])
+    else
+      CA := 0;
+
+    if I <= BLen then
+      CB := Ord(B[I])
+    else
+      CB := 0;
+
+    Diff := Diff or (CA xor CB);
+  end;
+  Result := Diff = 0;
+end;
+
+function TBasicAuth.GetPassword: string;
+begin
+  // Intencionalmente não expõe a senha em claro após inicialização.
+  Result := '';
+end;
+
+procedure TBasicAuth.SetPassword(const AValue: string);
+begin
+  FPasswordHash := HashPassword(AValue);
 end;
 
 function TBasicAuth.Check(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
@@ -116,7 +176,8 @@ begin
         vUsername := Copy(DecodedAuth, 1, ColonPos - 1);
         vPassword := Copy(DecodedAuth, ColonPos + 1, Length(DecodedAuth));
 
-        if (vUsername = FUsername) and (vPassword = FPassword) then
+        if ConstantTimeEquals(vUsername, FUsername) and
+           ConstantTimeEquals(HashPassword(vPassword), FPasswordHash) then
         begin
           Request.UserID := vUsername;
           Result := False;

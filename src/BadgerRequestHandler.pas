@@ -20,6 +20,8 @@ type
     FRequestLine: string;
     FMethods: TBadgerMethods;
     FMiddlewares: TList;
+    FOwnMiddlewareObjects: Boolean;
+    FMiddlewareLock: TCriticalSection;
     FTimeout: Integer;
     FParentServer: TBadger;
     FIsParallel: Boolean;
@@ -29,10 +31,10 @@ type
     function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean; HeaderCustom: TStringList): string;
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-                      AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
+                      AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
                       AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
     constructor CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-                              AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
+                              AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
                               AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
     destructor Destroy; override;
     procedure Execute; override;
@@ -40,10 +42,13 @@ type
 
 implementation
 
+type
+  EHeaderTooLarge = class(Exception);
+
 { THTTPRequestHandler }
 
 constructor THTTPRequestHandler.Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-  AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
+  AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
   AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
 var
   I: Integer;
@@ -55,19 +60,28 @@ begin
   FOnResponse := AOnResponse;
   FRouteManager := ARouteManager;
   FMethods := AMethods;
+  FMiddlewareLock := AMiddlewareLock;
   FMiddlewares := TList.Create;
+  FOwnMiddlewareObjects := False;
   FTimeout := ATimeout;
   FParentServer := AParentServer;
   FIsParallel := False;
   FEnableEventInfo := AEnableEventInfo;
 
-  for I := 0 to AMiddlewares.Count - 1 do
-    FMiddlewares.Add(TMiddlewareWrapper.Create(TMiddlewareWrapper(AMiddlewares[I]).Middleware));
+  if Assigned(FMiddlewareLock) then
+    FMiddlewareLock.Acquire;
+  try
+    for I := 0 to AMiddlewares.Count - 1 do
+      FMiddlewares.Add(AMiddlewares[I]);
+  finally
+    if Assigned(FMiddlewareLock) then
+      FMiddlewareLock.Release;
+  end;
   Resume;
 end;
 
 constructor THTTPRequestHandler.CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-  AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
+  AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
   AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
 var
   I: Integer;
@@ -79,14 +93,23 @@ begin
   FOnResponse := AOnResponse;
   FRouteManager := ARouteManager;
   FMethods := AMethods;
+  FMiddlewareLock := AMiddlewareLock;
   FMiddlewares := TList.Create;
+  FOwnMiddlewareObjects := False;
   FTimeout := ATimeout;
   FParentServer := AParentServer;
   FIsParallel := True;
   FEnableEventInfo := AEnableEventInfo;
 
-  for I := 0 to AMiddlewares.Count - 1 do
-    FMiddlewares.Add(TMiddlewareWrapper.Create(TMiddlewareWrapper(AMiddlewares[I]).Middleware));
+  if Assigned(FMiddlewareLock) then
+    FMiddlewareLock.Acquire;
+  try
+    for I := 0 to AMiddlewares.Count - 1 do
+      FMiddlewares.Add(AMiddlewares[I]);
+  finally
+    if Assigned(FMiddlewareLock) then
+      FMiddlewareLock.Release;
+  end;
   Resume;
 end;
 
@@ -124,37 +147,64 @@ begin
     end;
   end;
 
-  for I := 0 to FMiddlewares.Count - 1 do
-    TObject(FMiddlewares[I]).Free;
+  if FOwnMiddlewareObjects then
+    for I := 0 to FMiddlewares.Count - 1 do
+      TObject(FMiddlewares[I]).Free;
   FMiddlewares.Free;
   inherited;
 end;
 
 procedure THTTPRequestHandler.ParseRequestHeader(ClientSocket: TTCPBlockSocket; aHeaders: TStringList);
+const
+  MaxHeaderLineSize = 16384; // 16KB por linha
+  MaxHeaderTotalSize = 65536; // 64KB acumulado
 var
   HeaderLine: string;
   SeparatorPos: Integer;
   Key, Value: string;
+  TotalHeaderSize: Integer;
+  ReadCount: Integer;
+  B: Byte;
+  Ch: Char;
 begin
-  try
-    repeat
-      HeaderLine := ClientSocket.RecvString(FTimeout);
-      if HeaderLine <> '' then
+  TotalHeaderSize := 0;
+  repeat
+    HeaderLine := '';
+    while True do
+    begin
+      ReadCount := ClientSocket.RecvBufferEx(@B, 1, FTimeout);
+      if ReadCount <= 0 then
+        raise Exception.Create('Failed to read header line');
+
+      if B = 10 then
+        Break;
+
+      if B <> 13 then
       begin
-        SeparatorPos := Pos(':', HeaderLine);
-        if SeparatorPos > 0 then
-        begin
-          Key := Trim(Copy(HeaderLine, 1, SeparatorPos - 1));
-          Value := Trim(Copy(HeaderLine, SeparatorPos + 1, Length(HeaderLine)));
-          aHeaders.Add(Key + '=' + Value);
-        end
-        else
-          aHeaders.Add(HeaderLine + '=');
+        if Length(HeaderLine) >= MaxHeaderLineSize then
+          raise EHeaderTooLarge.Create('Header line too large');
+        Ch := Chr(B);
+        HeaderLine := HeaderLine + Ch;
       end;
-    until HeaderLine = '';
-  except
-    raise;
-  end;
+    end;
+
+    Inc(TotalHeaderSize, Length(HeaderLine));
+    if TotalHeaderSize > MaxHeaderTotalSize then
+      raise EHeaderTooLarge.Create('Request headers too large');
+
+    if HeaderLine <> '' then
+    begin
+      SeparatorPos := Pos(':', HeaderLine);
+      if SeparatorPos > 0 then
+      begin
+        Key := Trim(Copy(HeaderLine, 1, SeparatorPos - 1));
+        Value := Trim(Copy(HeaderLine, SeparatorPos + 1, Length(HeaderLine)));
+        aHeaders.Add(Key + '=' + Value);
+      end
+      else
+        aHeaders.Add(HeaderLine + '=');
+    end;
+  until HeaderLine = '';
 end;
 
 function THTTPRequestHandler.BuildHTTPResponse(StatusCode: Integer;
@@ -326,6 +376,31 @@ procedure THTTPRequestHandler.Execute;
     end;
   end;
 
+  procedure SplitCommaTokens(const AValue: string; ADest: TStringList);
+  var
+    I: Integer;
+    Token: string;
+  begin
+    ADest.Clear;
+    Token := '';
+    for I := 1 to Length(AValue) do
+    begin
+      if AValue[I] = ',' then
+      begin
+        Token := Trim(Token);
+        if Token <> '' then
+          ADest.Add(Token);
+        Token := '';
+      end
+      else
+        Token := Token + AValue[I];
+    end;
+
+    Token := Trim(Token);
+    if Token <> '' then
+      ADest.Add(Token);
+  end;
+
 const
   MaxBufferSize = 1048576;       // 1MB buffer de leitura
   MaxRequestBodySize = 52428800; // 50MB limite de request body
@@ -368,19 +443,28 @@ var
   AllowWildcardOrigin: Boolean;
   SkipRequestProcessing: Boolean;
 begin
-  QueryParams := TStringList.Create;
-  Req.QueryParams := TStringList.Create;
-  Req.Headers := TStringList.Create;
+  FillChar(Req, SizeOf(Req), 0);
+  FillChar(Resp, SizeOf(Resp), 0);
+  QueryParams := nil;
+  Req.QueryParams := nil;
+  Req.Headers := nil;
   Req.Body := '';
   Req.BodyStream := nil;
-  Req.RouteParams := TStringList.Create;
+  Req.RouteParams := nil;
   Resp.Stream := nil;
-  Resp.HeadersCustom := TStringList.Create; // da branch1
-  RouteParams := TStringList.Create;
+  Resp.HeadersCustom := nil; // da branch1
+  RouteParams := nil;
   Headers := nil;
   BodyStream := nil;
   Handled := False;
   try
+    QueryParams := TStringList.Create;
+    Req.QueryParams := TStringList.Create;
+    Req.Headers := TStringList.Create;
+    Req.RouteParams := TStringList.Create;
+    Resp.HeadersCustom := TStringList.Create;
+    RouteParams := TStringList.Create;
+
     try
       repeat
         // Reset per-request state to avoid keep-alive cross-request leakage
@@ -436,8 +520,29 @@ begin
 
         Headers := TStringList.Create();
         try
-          ParseRequestHeader(FClientSocket, Headers);
-          Req.Headers.Assign(Headers);
+          try
+            ParseRequestHeader(FClientSocket, Headers);
+            Req.Headers.Assign(Headers);
+          except
+            on E: EHeaderTooLarge do
+            begin
+              Resp.StatusCode := HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE;
+              Resp.Body := '{"error":"Request headers too large"}';
+              Resp.ContentType := APPLICATION_JSON;
+              Handled := True;
+              CloseConnection := True;
+              SkipRequestProcessing := True;
+            end;
+            on E: Exception do
+            begin
+              Resp.StatusCode := HTTP_BAD_REQUEST;
+              Resp.Body := '{"error":"Invalid request headers"}';
+              Resp.ContentType := APPLICATION_JSON;
+              Handled := True;
+              CloseConnection := True;
+              SkipRequestProcessing := True;
+            end;
+          end;
 
           ContentLength := StrToIntDef(Headers.Values['Content-Length'], 0);
           ContentType := Headers.Values['Content-Type'];
@@ -564,11 +669,7 @@ begin
                 HeadersStr := '';
                 HdrParts := TStringList.Create;
                 try
-                  HdrParts.Delimiter := ',';
-                  {$IFNDEF VER150}
-                    HdrParts.StrictDelimiter := True;
-                  {$ENDIF}
-                  HdrParts.DelimitedText := ACRH;
+                  SplitCommaTokens(ACRH, HdrParts);
                   for I := 0 to HdrParts.Count - 1 do
                   begin
                     HdrPart := Trim(HdrParts[I]);

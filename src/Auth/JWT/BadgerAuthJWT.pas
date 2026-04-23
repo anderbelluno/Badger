@@ -41,6 +41,55 @@ begin
     Delete(Result, Length(Result), 1);
 end;
 
+function ConstantTimeEquals(const A, B: string): Boolean;
+var
+  I, ALen, BLen, MaxLen: Integer;
+  Diff: Cardinal;
+  CA, CB: Cardinal;
+begin
+  ALen := Length(A);
+  BLen := Length(B);
+  if ALen > BLen then
+    MaxLen := ALen
+  else
+    MaxLen := BLen;
+
+  Diff := Cardinal(ALen xor BLen);
+  for I := 1 to MaxLen do
+  begin
+    if I <= ALen then
+      CA := Ord(A[I])
+    else
+      CA := 0;
+
+    if I <= BLen then
+      CB := Ord(B[I])
+    else
+      CB := 0;
+
+    Diff := Diff or (CA xor CB);
+  end;
+  Result := Diff = 0;
+end;
+
+procedure EnsureJWTHeader(const EncodedHeader, ExpectedTyp: string);
+var
+  HeaderJSON: ISuperObject;
+  Alg, Typ: string;
+begin
+  HeaderJSON := SO(CustomDecodeBase64(EncodedHeader));
+  if not Assigned(HeaderJSON) then
+    raise Exception.Create('Invalid token header');
+
+  Alg := UpperCase(Trim(HeaderJSON.S['alg']));
+  Typ := Trim(HeaderJSON.S['typ']);
+
+  if Alg <> 'HS256' then
+    raise Exception.Create('Invalid token algorithm');
+  if not SameText(Typ, ExpectedTyp) then
+    raise Exception.Create('Invalid token type');
+end;
+
 function IsProtectedRoute(const ARequestURI, AProtectedRoute: string): Boolean;
 var
   RequestURI, ProtectedRoute: string;
@@ -181,8 +230,9 @@ begin
     LPayload := LParts[1];
     LSignature := LParts[2];
 
+    EnsureJWTHeader(LHeader, 'JWT');
     LExpectedSignature := CreateSignature(LHeader, LPayload, FSecret);
-    if LSignature <> LExpectedSignature then
+    if not ConstantTimeEquals(LSignature, LExpectedSignature) then
       raise Exception.Create('Invalid signature');
 
     LJSON := SO(CustomDecodeBase64(LPayload));
@@ -222,8 +272,9 @@ begin
     LPayload := LParts[1];
     LSignature := LParts[2];
 
+    EnsureJWTHeader(LHeader, 'Refresh');
     LExpectedSignature := CreateSignature(LHeader, LPayload, FSecret);
-    if LSignature <> LExpectedSignature then
+    if not ConstantTimeEquals(LSignature, LExpectedSignature) then
       raise Exception.Create('Invalid signature');
 
     LJSON := SO(CustomDecodeBase64(LPayload));
@@ -287,7 +338,7 @@ begin
   if LToken = '' then
   begin
     Response.StatusCode := HTTP_UNAUTHORIZED;
-    Response.Body := '{"error":"Token not provided"}';
+    Response.Body := '{"error":"Unauthorized"}';
     Response.ContentType := APPLICATION_JSON;
     Result := True;
     Exit;
@@ -306,7 +357,7 @@ begin
     on E: Exception do
     begin
       Response.StatusCode := HTTP_UNAUTHORIZED;
-      Response.Body := '{"error":"' + E.Message + '"}';
+      Response.Body := '{"error":"Unauthorized"}';
       Response.ContentType := APPLICATION_JSON;
       Result := True;
     end;

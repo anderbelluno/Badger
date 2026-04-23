@@ -3,8 +3,8 @@ unit BadgerMethods;
 interface
 
 uses
-  SysUtils, Classes, DB, BadgerMultipartDataReader, Contnrs, BadgerUtils,
-  BadgerTypes, BadgerHttpStatus, blcksock;
+  SysUtils, Classes, BadgerMultipartDataReader, Contnrs, BadgerUtils,
+  BadgerTypes, BadgerHttpStatus, blcksock, BadgerHttpUtils;
 
 type
   TBadgerMethods = class(TObject)
@@ -81,7 +81,7 @@ begin
             ParamPair := QueryString;
             QueryString := '';
           end;
-          QueryParams.Add(ParamPair);
+          QueryParams.Add(URLDecode(ParamPair));
         end;
       end;
       Result := True;
@@ -95,45 +95,21 @@ begin
 end;
 
 function TBadgerMethods.ParseRequestHeaderStr(Headers: TStringList; aRequestHeader: String): String;
-var
-  HeaderLine: string;
-  i, PosColon: Integer;
 begin
-  Result := '';
-  for i := 0 to Headers.Count - 1 do
-  begin
-    HeaderLine := Headers[i];
-    if Pos(aRequestHeader, HeaderLine) > 0 then
-    begin
-      PosColon := Pos(':', HeaderLine);
-      if PosColon > 0 then
-        Result := Trim(Copy(HeaderLine, PosColon + 1, Length(HeaderLine)));
-    end;
-  end;
+  if not TryGetHeaderValue(Headers, aRequestHeader, Result) then
+    Result := '';
 end;
 
 function TBadgerMethods.ParseRequestHeaderInt(Headers: TStringList; aRequestHeader: String): Integer;
-var
-  HeaderLine: string;
-  i, PosColon: Integer;
 begin
-  Result := 0;
-  for i := 0 to Headers.Count - 1 do
-  begin
-    HeaderLine := Headers[i];
-    if Pos(aRequestHeader, HeaderLine) > 0 then
-    begin
-      PosColon := Pos(':', HeaderLine);
-      if PosColon > 0 then
-        Result := StrToIntDef(Trim(Copy(HeaderLine, PosColon + 1, Length(HeaderLine))), 0);
-    end;
-  end;
+  if not TryGetHeaderInt(Headers, aRequestHeader, Result) then
+    Result := 0;
 end;
 
 function TBadgerMethods.fParserJsonStream( Request: THTTPRequest; Response : THTTPResponse ): string;
 begin
   if UpperCase(Request.Method) = 'POST' then
-    Result := '{"status":true, "message":"Recebimento concluído com sucesso", "Vc me mandou":"' + Request.Body + '"}'
+    Result := '{"status":true, "message":"Recebimento concluído com sucesso", "Vc me mandou":"' + JSONEscape(Request.Body) + '"}'
   else
     Result := '{"status":false, "message":"Método não aceito, usar POST"}';
 end;
