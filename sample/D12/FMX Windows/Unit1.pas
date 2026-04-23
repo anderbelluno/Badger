@@ -33,6 +33,7 @@ type
     Label2: TLabel;
     edtTimeOut: TEdit;
     btnClearLog: TButton;
+    rdParallel: TCheckBox;
     procedure btnSynaClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -104,26 +105,30 @@ begin
       .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken)
       .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
       .AddGet('/produtos', TSampleRouteManager.produtos);
-   // ServerThread.ParallelProcessing := True;
+
+
+    ServerThread.ParallelProcessing := rdParallel.IsChecked;
    // ServerThread.MaxConcurrentConnections := 500;
 
     ServerThread.Start;
-    edtPorta.Enabled := False;
-    rdLog.Enabled := False;
-    btnSyna.Tag := 1;
-    btnSyna.Text := 'Parar Servidor';
-    ComboAuth.Enabled := False;
+    edtPorta.Enabled   := False;
+    rdLog.Enabled      := False;
+    rdParallel.Enabled := False;
+    btnSyna.Tag        := 1;
+    btnSyna.Text       := 'Parar Servidor';
+    ComboAuth.Enabled  := False;
     edtTimeOut.Enabled := False;
   end
   else
   begin
     ServerThread.Stop;
-    ServerThread := nil;
-    btnSyna.Tag := 0;
-    btnSyna.Text := 'Iniciar Servidor';
-    edtPorta.Enabled := True;
-    rdLog.Enabled := True;
-    ComboAuth.Enabled := True;
+    ServerThread       := nil;
+    btnSyna.Tag        := 0;
+    btnSyna.Text       := 'Iniciar Servidor';
+    edtPorta.Enabled   := True;
+    rdLog.Enabled      := True;
+    rdParallel.Enabled := True;
+    ComboAuth.Enabled  := True;
     edtTimeOut.Enabled := True;
   end;
 end;

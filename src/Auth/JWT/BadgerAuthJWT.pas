@@ -15,7 +15,7 @@ type
     FSecret: string;
     FStoragePath: string;
     FProtectedRoutes: TStringList;
-    function MiddlewareProc(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
+    function MiddlewareProc(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 
   public
     constructor Create(const ASecret: string; const AStoragePath: string = '');
@@ -33,6 +33,44 @@ type
 implementation
 
   { TBadgerJWTAuth }
+
+function NormalizeRoute(const ARoute: string): string;
+begin
+  Result := Trim(ARoute);
+  while (Length(Result) > 1) and (Result[Length(Result)] = '/') do
+    Delete(Result, Length(Result), 1);
+end;
+
+function IsProtectedRoute(const ARequestURI, AProtectedRoute: string): Boolean;
+var
+  RequestURI, ProtectedRoute: string;
+begin
+  RequestURI := NormalizeRoute(ARequestURI);
+  ProtectedRoute := NormalizeRoute(AProtectedRoute);
+
+  if ProtectedRoute = '' then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  if ProtectedRoute = '/' then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if SameText(RequestURI, ProtectedRoute) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  Result :=
+    (Length(RequestURI) > Length(ProtectedRoute)) and
+    (CompareText(Copy(RequestURI, 1, Length(ProtectedRoute)), ProtectedRoute) = 0) and
+    (RequestURI[Length(ProtectedRoute) + 1] = '/');
+end;
 
 constructor TBadgerJWTAuth.Create(const ASecret: string; const AStoragePath: string);
 begin
@@ -221,7 +259,7 @@ begin
 end;
 
 
-function TBadgerJWTAuth.MiddlewareProc(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
+function TBadgerJWTAuth.MiddlewareProc(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 var
   I: Integer;
   LToken: string;
@@ -230,7 +268,7 @@ var
 begin
   LRouteMatch := False;
   for I := 0 to FProtectedRoutes.Count - 1 do
-    if SameText(Request.URI, FProtectedRoutes[I]) then
+    if IsProtectedRoute(Request.URI, FProtectedRoutes[I]) then
     begin
       LRouteMatch := True;
       Break;
@@ -242,15 +280,9 @@ begin
     Exit;
   end;
 
-  LToken := '';
-  for I := 0 to Request.Headers.Count - 1 do
-    if Pos('Authorization=', Request.Headers[I]) > 0 then
-    begin
-      LToken := Trim(Copy(Request.Headers[I], Pos('=', Request.Headers[I]) + 1, Length(Request.Headers[I])));
-      if Pos('Bearer ', LToken) = 1 then
-        LToken := Copy(LToken, 8, Length(LToken));
-      Break;
-    end;
+  LToken := Trim(Request.Headers.Values['Authorization']);
+  if Pos('Bearer ', LToken) = 1 then
+    LToken := Copy(LToken, 8, Length(LToken));
 
   if LToken = '' then
   begin

@@ -48,6 +48,7 @@ begin
   FMimeList := TStringList.Create;
   FMimeList.Sorted := True;
   FMimeList.Duplicates := dupIgnore;
+  BuildMimelist(FMimeList);
 end;
 
 destructor TBadgerUtils.Destroy;
@@ -545,7 +546,6 @@ var
   Index: Integer;
   LExt: string;
 begin
-  BuildMimelist(FMimeList);
   LExt := LowerCase(ExtractFileExt(AFileName));
   Index := FMimeList.IndexOfName(LExt);
   if (Index = -1) and (FMimeList.Count = 0) then

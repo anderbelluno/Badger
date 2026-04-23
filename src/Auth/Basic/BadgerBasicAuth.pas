@@ -15,7 +15,7 @@ type
     FUsername: string;
     FPassword: string;
     FProtectedRoutes: TStringList;
-    function Check(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
+    function Check(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
   public
     constructor Create(const AUsername, APassword: string);
     destructor Destroy; override;
@@ -31,6 +31,44 @@ const
 
 { TBasicAuth }
 
+function NormalizeRoute(const ARoute: string): string;
+begin
+  Result := Trim(ARoute);
+  while (Length(Result) > 1) and (Result[Length(Result)] = '/') do
+    Delete(Result, Length(Result), 1);
+end;
+
+function IsProtectedRoute(const ARequestURI, AProtectedRoute: string): Boolean;
+var
+  RequestURI, ProtectedRoute: string;
+begin
+  RequestURI := NormalizeRoute(ARequestURI);
+  ProtectedRoute := NormalizeRoute(AProtectedRoute);
+
+  if ProtectedRoute = '' then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  if ProtectedRoute = '/' then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if SameText(RequestURI, ProtectedRoute) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  Result :=
+    (Length(RequestURI) > Length(ProtectedRoute)) and
+    (CompareText(Copy(RequestURI, 1, Length(ProtectedRoute)), ProtectedRoute) = 0) and
+    (RequestURI[Length(ProtectedRoute) + 1] = '/');
+end;
+
 constructor TBasicAuth.Create(const AUsername, APassword: string);
 begin
   inherited Create;
@@ -45,7 +83,7 @@ begin
   inherited;
 end;
 
-function TBasicAuth.Check(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
+function TBasicAuth.Check(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 var
   AuthHeader, DecodedAuth, vUsername, vPassword: string;
   I, ColonPos: Integer;
@@ -53,7 +91,7 @@ var
 begin
   LRouteMatch := False;
   for I := 0 to FProtectedRoutes.Count - 1 do
-    if SameText(Request.URI, FProtectedRoutes[I]) then
+    if IsProtectedRoute(Request.URI, FProtectedRoutes[I]) then
     begin
       LRouteMatch := True;
       Break;
@@ -65,15 +103,7 @@ begin
     Exit;
   end;
 
-  AuthHeader := '';
-  for I := 0 to Request.Headers.Count - 1 do
-  begin
-    if Pos('Authorization=', Request.Headers[I]) > 0 then
-    begin
-      AuthHeader := Trim(Copy(Request.Headers[I], Pos('=', Request.Headers[I]) + 1, Length(Request.Headers[I])));
-      Break;
-    end;
-  end;
+  AuthHeader := Trim(Request.Headers.Values['Authorization']);
 
   if Pos('Basic ', AuthHeader) = 1 then
   begin

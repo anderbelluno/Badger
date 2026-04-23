@@ -16,9 +16,13 @@ type
     FCS: TCriticalSection;
     FisActive : Boolean;
     FLogFileName: string;
+    FActiveLogFileName: string;
     FLogToFile: Boolean;
     FLogToConsole: Boolean;
     FLogLevel: TLogLevel;
+    FLogStream: TFileStream;
+    procedure CloseLogStream;
+    function EnsureLogStream: Boolean;
     procedure WriteToFile(const Msg: string);
     procedure WriteToConsole(const Msg: string);
     {$IFDEF MSWINDOWS}
@@ -55,6 +59,8 @@ begin
   FLogToFile := False;
   FLogLevel := llInfo;
   FLogFileName := 'badger_server.log';
+  FActiveLogFileName := '';
+  FLogStream := nil;
   FisActive := False;
   {$IFDEF DEBUG}
   FLogLevel := llDebug;
@@ -63,27 +69,60 @@ end;
 
 destructor TBadgerLogger.Destroy;
 begin
+  CloseLogStream;
   FCS.Free;
   inherited;
 end;
 
-procedure TBadgerLogger.WriteToFile(const Msg: string);
-var
-  LFile: TextFile;
+procedure TBadgerLogger.CloseLogStream;
 begin
-  if not FLogToFile then Exit;
-  AssignFile(LFile, FLogFileName);
+  if Assigned(FLogStream) then
+    FreeAndNil(FLogStream);
+  FActiveLogFileName := '';
+end;
+
+function TBadgerLogger.EnsureLogStream: Boolean;
+begin
+  Result := False;
+  if not FLogToFile then
+  begin
+    CloseLogStream;
+    Exit;
+  end;
+
+  if Assigned(FLogStream) and (CompareText(FActiveLogFileName, FLogFileName) = 0) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  CloseLogStream;
   try
     if FileExists(FLogFileName) then
-      Append(LFile)
+      FLogStream := TFileStream.Create(FLogFileName, fmOpenReadWrite or fmShareDenyNone)
     else
-      Rewrite(LFile);
-    try
-      WriteLn(LFile, Msg);
-    finally
-      CloseFile(LFile);
-    end;
+      FLogStream := TFileStream.Create(FLogFileName, fmCreate or fmShareDenyNone);
+    FLogStream.Position := FLogStream.Size;
+    FActiveLogFileName := FLogFileName;
+    Result := True;
   except
+    Result := False;
+  end;
+end;
+
+procedure TBadgerLogger.WriteToFile(const Msg: string);
+var
+  LogLine: AnsiString;
+begin
+  if not EnsureLogStream then Exit;
+
+  LogLine := AnsiString(Msg + sLineBreak);
+  try
+    if Length(LogLine) > 0 then
+      FLogStream.WriteBuffer(LogLine[1], Length(LogLine));
+    FLogStream.Position := FLogStream.Size;
+  except
+    CloseLogStream;
   end;
 end;
 

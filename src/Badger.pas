@@ -49,6 +49,7 @@ type
     function CanAcceptNewConnection: Boolean;
     procedure IncActiveConnections;
     procedure SafeCloseSocket;
+    procedure CloseClientSocketsForShutdown;
     procedure AddClientSocket(Socket: TTCPBlockSocket);
     procedure RemoveClientSocket(Socket: TTCPBlockSocket);
     procedure CleanupClientSockets;
@@ -350,6 +351,34 @@ begin
 //  Logger.info('Client sockets cleanup completed');
 end;
 
+procedure TBadger.CloseClientSocketsForShutdown;
+var
+  I: Integer;
+  SocketInfo: TClientSocketInfo;
+begin
+  if not Assigned(FClientSockets) or not Assigned(FSocketLock) then Exit;
+
+  FSocketLock.Acquire;
+  try
+    for I := FClientSockets.Count - 1 downto 0 do
+    begin
+      SocketInfo := TClientSocketInfo(FClientSockets[I]);
+      if Assigned(SocketInfo) and Assigned(SocketInfo.Socket) then
+      begin
+        try
+          if SocketInfo.Socket.Socket <> INVALID_SOCKET then
+            SocketInfo.Socket.CloseSocket;
+        except
+          on E: Exception do
+            Logger.Error(Format('Error closing client socket during shutdown %d: %s', [I, E.Message]));
+        end;
+      end;
+    end;
+  finally
+    FSocketLock.Release;
+  end;
+end;
+
 {$IFDEF UNIX}
 function TBadger.WaitForThreadTermination(TimeoutMs: Integer): Boolean;
 begin
@@ -375,19 +404,23 @@ begin
 end;
 
 procedure TBadger.DecActiveConnections;
+var
+  NewValue: Integer;
 begin
-  if not FIsShuttingDown then
+  {$IFDEF Delphi2009Plus}
+    NewValue := TInterlocked.Decrement(FActiveConnections);
+  {$ELSE}
+    NewValue := InterlockedDecrement(FActiveConnections);
+  {$ENDIF}
+
+  if NewValue < 0 then
   begin
     {$IFDEF Delphi2009Plus}
-      TInterlocked.Decrement(FActiveConnections)
+      TInterlocked.Exchange(FActiveConnections, 0);
     {$ELSE}
-      InterlockedDecrement(FActiveConnections);
+      InterlockedExchange(FActiveConnections, 0);
     {$ENDIF}
-
- //   Logger.info(Format('Decremented active connections: %d', [FActiveConnections]));
-  end
-  else
-    Logger.Warning('Warning: Server is shutting down, skipping DecActiveConnections');
+  end;
 end;
 
 procedure TBadger.NotifyClientSocketClosed(Socket: TTCPBlockSocket);
@@ -504,6 +537,7 @@ begin
     FShutdownEvent.SetEvent;
 
   SafeCloseSocket;
+  CloseClientSocketsForShutdown;
 
   if FParallelProcessing then
   begin
@@ -555,6 +589,7 @@ procedure TBadger.Execute;
 var
   ClientSocket: TTCPBlockSocket;
   ResponseInfo: TResponseInfo;
+  Accepted: Boolean;
 begin
   // OutputDebugString(PChar('TBadger.Execute: Server thread started'));
   FIsRunning := True;
@@ -564,74 +599,79 @@ begin
       try
         if not Assigned(FSocketLock) or not Assigned(FServerSocket) then Break;
 
-        FSocketLock.Acquire;
+        if FParallelProcessing and not CanAcceptNewConnection then
+        begin
+          // n�o segura lock global enquanto aguarda capacidade
+          Sleep(10);
+          Continue;
+        end;
+
+        if not Assigned(FServerSocket) or (FServerSocket.Socket = INVALID_SOCKET) then
+          Continue;
+
+        if not FServerSocket.CanRead(100) then
+          Continue;
+
+        ClientSocket := TTCPBlockSocket.Create;
         try
-          if Terminated or FIsShuttingDown then Break;
-
-          if Assigned(FServerSocket) and (FServerSocket.Socket <> INVALID_SOCKET) and
-             FServerSocket.CanRead(100) then
-          begin
-            if FParallelProcessing and not CanAcceptNewConnection then
-            begin
-              // OutputDebugString(PChar(Format('TBadger.Execute: Max concurrent connections reached: %d', [FActiveConnections])));
-              Sleep(10);
+          Accepted := False;
+          FSocketLock.Acquire;
+          try
+            if Terminated or FIsShuttingDown then
               Continue;
+
+            if not Assigned(FServerSocket) or (FServerSocket.Socket = INVALID_SOCKET) then
+              Continue;
+
+            ClientSocket.Socket := FServerSocket.Accept;
+            Accepted := (ClientSocket.LastError = 0);
+          finally
+            FSocketLock.Release;
+          end;
+
+          if Accepted then
+          begin
+            AddClientSocket(ClientSocket);
+
+            if FParallelProcessing then
+            begin
+              IncActiveConnections;
+              THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares,
+                                                FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
+              ClientSocket := nil;
+            end
+            else
+            begin
+              THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares,
+                                         FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
+              RemoveClientSocket(ClientSocket);
+              ClientSocket := nil;
             end;
-
-            // OutputDebugString(PChar('TBadger.Execute: Creating client socket'));
-            ClientSocket := TTCPBlockSocket.Create;
-            try
-              // OutputDebugString(PChar('TBadger.Execute: Accepting connection'));
-              ClientSocket.Socket := FServerSocket.Accept;
-              if ClientSocket.LastError = 0 then
-              begin
-                // OutputDebugString(PChar(Format('TBadger.Execute: New connection accepted. Active connections: %d', [FActiveConnections + 1])));
-                AddClientSocket(ClientSocket);
-
-                if FParallelProcessing then
-                begin
-                  IncActiveConnections;
-                  THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares,
-                                                    FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
-                  ClientSocket := nil;
-                end
-                else
-                begin
-                  THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares,
-                                             FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
-                  RemoveClientSocket(ClientSocket);
-                  ClientSocket := nil;
-                end;
-              end
-              else
-              begin
-                // OutputDebugString(PChar(Format('TBadger.Execute: Error accepting connection: %s', [ClientSocket.LastErrorDesc])));
-                if Assigned(FOnResponse) then
-                begin
-                  ResponseInfo.StatusCode := 500;
-                  ResponseInfo.StatusText := 'Internal Server Error';
-                  ResponseInfo.Body := 'Error accepting connection: ' + ClientSocket.LastErrorDesc;
-                  FOnResponse(ResponseInfo);
-                end;
-              end;
-            finally
-              if Assigned(ClientSocket) then
-              begin
-                RemoveClientSocket(ClientSocket);
-                try
-                  ClientSocket.CloseSocket;
-                  FreeAndNil(ClientSocket);
-                  // OutputDebugString(PChar('TBadger.Execute: ClientSocket freed due to error'));
-                except
-                  on E: Exception do
-                    // OutputDebugString(PChar(Format('TBadger.Execute: Error freeing ClientSocket: %s', [E.Message])));
-                end;
-              end;
+          end
+          else
+          begin
+            if Assigned(FOnResponse) then
+            begin
+              ResponseInfo.StatusCode := 500;
+              ResponseInfo.StatusText := 'Internal Server Error';
+              ResponseInfo.Body := 'Error accepting connection: ' + ClientSocket.LastErrorDesc;
+              FOnResponse(ResponseInfo);
             end;
           end;
         finally
-          FSocketLock.Release;
+          if Assigned(ClientSocket) then
+          begin
+            RemoveClientSocket(ClientSocket);
+            try
+              ClientSocket.CloseSocket;
+              FreeAndNil(ClientSocket);
+            except
+              on E: Exception do
+                ;
+            end;
+          end;
         end;
+
         if Terminated or FIsShuttingDown then Break;
         //Sleep(10);
       except

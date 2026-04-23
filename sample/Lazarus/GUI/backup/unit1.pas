@@ -25,6 +25,7 @@ type
         Panel2: TPanel;
         RadioGroup1: TRadioGroup;
         rdLog: TCheckBox;
+        rdParallel: TCheckBox;
         procedure btnClearLogClick(Sender: TObject);
         procedure btnSynaClick(Sender: TObject);
         procedure FormCreate(Sender: TObject);
@@ -76,7 +77,7 @@ end;
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
   Logger.isActive := true;
-  Logger.FileName := 'logger.log';
+  Logger.LogFileName := 'logger.log';
   Logger.LogToConsole := False;
 
   if btnSyna.Tag = 0 then
@@ -108,8 +109,8 @@ begin
       .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
       .AddGet('/produtos', TSampleRouteManager.produtos);
 
-    {ServerThread.ParallelProcessing:= True;
-    ServerThread.MaxConcurrentConnections:= 30000; }
+    ServerThread.ParallelProcessing:= rdParallel.Checked;
+   { ServerThread.MaxConcurrentConnections:= 30000; }
 
     ServerThread.CorsEnabled := False;
 

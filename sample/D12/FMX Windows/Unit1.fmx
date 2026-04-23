@@ -93,22 +93,29 @@ object Form1: TForm1
       ItemIndex = 0
       Position.X = 8.000000000000000000
       Position.Y = 72.000000000000000000
-      TabOrder = 8
+      TabOrder = 9
     end
     object rdLog: TCheckBox
       IsChecked = True
       Position.X = 9.000000000000000000
       Position.Y = 8.000000000000000000
-      TabOrder = 5
+      TabOrder = 6
       Text = 'Request Log'
     end
     object btnClearLog: TButton
       Position.X = 8.000000000000000000
       Position.Y = 128.000000000000000000
-      TabOrder = 9
+      TabOrder = 10
       Text = 'Clear Log'
       TextSettings.Trimming = None
       OnClick = btnClearLogClick
+    end
+    object rdParallel: TCheckBox
+      IsChecked = True
+      Position.X = 9.000000000000000000
+      Position.Y = 35.000000000000000000
+      TabOrder = 5
+      Text = 'Parallel Processing'
     end
   end
 end

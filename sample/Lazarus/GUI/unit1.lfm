@@ -6,7 +6,7 @@ object Form1: TForm1
   Caption = 'Form1'
   ClientHeight = 574
   ClientWidth = 626
-  LCLVersion = '4.7.0.0'
+  LCLVersion = '4.5.0.0'
   OnCreate = FormCreate
   OnDestroy = FormDestroy
   object Panel2: TPanel
@@ -81,7 +81,7 @@ object Form1: TForm1
       ChildSizing.ShrinkVertical = crsScaleChilds
       ChildSizing.Layout = cclLeftToRightThenTopToBottom
       ChildSizing.ControlsPerLine = 1
-      ClientHeight = 116
+      ClientHeight = 117
       ClientWidth = 165
       ItemIndex = 0
       Items.Strings = (
@@ -110,6 +110,16 @@ object Form1: TForm1
       Caption = 'Clear Log'
       TabOrder = 2
       OnClick = btnClearLogClick
+    end
+    object rdParallel: TCheckBox
+      Left = 16
+      Height = 19
+      Top = 32
+      Width = 116
+      Caption = 'Parallel Processing'
+      Checked = True
+      State = cbChecked
+      TabOrder = 3
     end
   end
   object Memo1: TMemo

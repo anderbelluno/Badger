@@ -1,4 +1,4 @@
-﻿unit BadgerMethods;
+unit BadgerMethods;
 
 interface
 
@@ -9,8 +9,11 @@ uses
 type
   TBadgerMethods = class(TObject)
   private
+    FUtils: TBadgerUtils;
     function getMime(aFilePath: String): String;
   public
+    constructor Create;
+    destructor Destroy; override;
     function ParseRequestHeaderInt(Headers: TStringList; aRequestHeader: String): Integer;
     function ParseRequestHeaderStr(Headers: TStringList; aRequestHeader: String): String;
     function fParserJsonStream(Request: THTTPRequest; Response : THTTPResponse): string;
@@ -23,6 +26,18 @@ type
 implementation
 
 uses StrUtils;
+
+constructor TBadgerMethods.Create;
+begin
+  inherited Create;
+  FUtils := TBadgerUtils.Create;
+end;
+
+destructor TBadgerMethods.Destroy;
+begin
+  FUtils.Free;
+  inherited;
+end;
 
 function TBadgerMethods.ExtractMethodAndURI(const RequestLine: string; out Method, URI: string; var QueryParams: TStringList): Boolean;
 var
@@ -75,15 +90,8 @@ begin
 end;
 
 function TBadgerMethods.getMime(aFilePath: String): String;
-var
-  sUtils: TBadgerUtils;
 begin
-  sUtils := TBadgerUtils.Create;
-  try
-    Result := sUtils.GetFileMIMEType(aFilePath);
-  finally
-    sUtils.Free;
-  end;
+  Result := FUtils.GetFileMIMEType(aFilePath);
 end;
 
 function TBadgerMethods.ParseRequestHeaderStr(Headers: TStringList; aRequestHeader: String): String;

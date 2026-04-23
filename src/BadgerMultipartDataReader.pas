@@ -59,6 +59,35 @@ end;
 
 { TFormDataReader }
 
+function SanitizeUploadFileName(const AFileName: string): string;
+var
+  I: Integer;
+  Ch: Char;
+  NameOnly: string;
+begin
+  NameOnly := Trim(AFileName);
+  NameOnly := StringReplace(NameOnly, '/', PathDelim, [rfReplaceAll]);
+  NameOnly := StringReplace(NameOnly, '\', PathDelim, [rfReplaceAll]);
+  NameOnly := ExtractFileName(NameOnly);
+
+  Result := '';
+  for I := 1 to Length(NameOnly) do
+  begin
+    Ch := NameOnly[I];
+    if (Ord(Ch) < 32) or (Ch in ['\', '/', ':', '*', '?', '"', '<', '>', '|']) then
+      Result := Result + '_'
+    else
+      Result := Result + Ch;
+  end;
+
+  while Pos('..', Result) > 0 do
+    Result := StringReplace(Result, '..', '_', [rfReplaceAll]);
+
+  Result := Trim(Result);
+  if (Result = '') or (Result = '.') or (Result = '..') then
+    Result := 'unnamed_file_' + IntToStr(Random(10000)) + '.bin';
+end;
+
 {$IFDEF VER150} // Delphi 7
 function TFormDataReader.ReadStreamAsAnsi(Stream: TStream; StartPos, Size: Int64): string;
 begin
@@ -83,7 +112,7 @@ var
   Buffer: PChar;
   BoundaryLen: Integer;
 {$ELSE} // Delphi 2009+ e Lazarus
-  i: Int64;   // Usando Int64 para streams grandes em versões novas
+  i: Int64;   // Usando Int64 para streams grandes em versï¿½es novas
   BoundaryBytes: TBytes;
   Buffer: PByte;
   BoundaryLen: Integer;
@@ -176,19 +205,20 @@ begin
       Result := SubString;
   end;
 
-  if Trim(Result) = '' then
-    Result := 'unnamed_file_' + IntToStr(Random(10000)) + '.bin';
+  Result := SanitizeUploadFileName(Result);
 end;
 
 function TFormDataReader.UniqueFileName(const BaseName: string): string;
 var
   Counter: Integer;
+  SafeBaseName: string;
 begin
-  Result := BaseName;
+  SafeBaseName := SanitizeUploadFileName(BaseName);
+  Result := SafeBaseName;
   Counter := 1;
   while FileExists(Result) do
   begin
-    Result := ChangeFileExt(BaseName, '') + '_' + IntToStr(Counter) + ExtractFileExt(BaseName);
+    Result := ChangeFileExt(SafeBaseName, '') + '_' + IntToStr(Counter) + ExtractFileExt(SafeBaseName);
     Inc(Counter);
   end;
 end;
@@ -208,7 +238,7 @@ begin
   try
    { if (not Assigned(AStream)) or (AStream.Size = 0) then
     begin
-      ShowMessage('Stream de entrada inválido ou vazio.');
+      ShowMessage('Stream de entrada invï¿½lido ou vazio.');
       Exit;
     end;  }
 
