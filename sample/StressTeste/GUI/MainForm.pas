@@ -7,10 +7,12 @@ interface
 uses
   {$IFDEF MSWINDOWS}Windows,{$ENDIF}
   Classes, SysUtils, SyncObjs, StrUtils,
-  Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
+  Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls, Grids,
   blcksock;
 
 type
+  TAuthMode = (amNone, amBasic, amBearer, amJwtLogin);
+
   TStressConfig = record
     Host: string;
     Port: Integer;
@@ -19,6 +21,11 @@ type
     RequestsPerThread: Integer;
     TimeoutMs: Integer;
     KeepAlive: Boolean;
+    AuthMode: TAuthMode;
+    AuthUser: string;
+    AuthPass: string;
+    BearerToken: string;
+    JwtLoginPath: string;
   end;
 
   TStressStats = record
@@ -38,10 +45,19 @@ type
     FWorkerId: Integer;
     FSocket: TTCPBlockSocket;
     FConnected: Boolean;
+    FAuthHeader: string;
     procedure Disconnect;
     function EnsureConnected: Boolean;
+    function EnsureAuthReady: Boolean;
+    function BuildBasicAuthHeader: string;
+    function FetchJwtToken(out AToken: string): Boolean;
+    function ParseJsonStringField(const AJson, AField: string; out AValue: string): Boolean;
+    function EscapeJson(const S: string): string;
+    function Base64Encode(const S: string): string;
     function ParseStatusCode(const StatusLine: string): Integer;
-    function ReadResponse(out AStatusCode: Integer): Boolean;
+    function ReadResponse(out AStatusCode: Integer; out ABody: string; ASocket: TTCPBlockSocket = nil): Boolean;
+    function ReadFixedSize(ASocket: TTCPBlockSocket; ASize: Integer; out AData: string): Boolean;
+    function TrimLineEnd(const S: string): string;
     function SendRequest(out AStatusCode: Integer): Boolean;
   protected
     procedure Execute; override;
@@ -87,14 +103,24 @@ type
     btnClearLog: TButton;
     btnStart: TButton;
     btnStop: TButton;
+    cbAuthMode: TComboBox;
     chkKeepAlive: TCheckBox;
+    edtAuthPass: TEdit;
+    edtAuthUser: TEdit;
+    edtBearerToken: TEdit;
     edtHost: TEdit;
+    edtJwtLoginPath: TEdit;
     edtPath: TEdit;
     edtPort: TEdit;
     edtRequests: TEdit;
     edtThreads: TEdit;
     edtTimeout: TEdit;
+    lblAuthMode: TLabel;
+    lblAuthPass: TLabel;
+    lblAuthUser: TLabel;
+    lblBearerToken: TLabel;
     lblHost: TLabel;
+    lblJwtLoginPath: TLabel;
     lblPath: TLabel;
     lblPort: TLabel;
     lblRequests: TLabel;
@@ -103,11 +129,13 @@ type
     lblThreads: TLabel;
     lblTimeout: TLabel;
     MemoLog: TMemo;
+    grdStats: TStringGrid;
     pnlConfig: TPanel;
     tmrUpdate: TTimer;
     procedure btnClearLogClick(Sender: TObject);
     procedure btnStartClick(Sender: TObject);
     procedure btnStopClick(Sender: TObject);
+    procedure cbAuthModeChange(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure tmrUpdateTimer(Sender: TObject);
@@ -120,8 +148,13 @@ type
     FRpsInstMax: Double;
     FRpsInstSum: Double;
     FRpsInstCount: Int64;
+    FLastMetricsLogTick: QWord;
     procedure Log(const AText: string);
+    procedure InitStatsGrid;
+    procedure SetStatValue(const ARow: Integer; const AValue: string);
     procedure SetUiRunning(const ARunning: Boolean);
+    procedure UpdateAuthControls;
+    function AuthModeToText(const AMode: TAuthMode): string;
     function BuildConfig(out AConfig: TStressConfig): Boolean;
     procedure RunCompleted;
     procedure UpdateSummary;
@@ -145,6 +178,7 @@ begin
   FWorkerId := AWorkerId;
   FSocket := TTCPBlockSocket.Create;
   FConnected := False;
+  FAuthHeader := '';
 end;
 
 destructor TStressWorker.Destroy;
@@ -172,6 +206,206 @@ begin
   Result := FConnected;
 end;
 
+function TStressWorker.Base64Encode(const S: string): string;
+const
+  Base64Table = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+var
+  I: Integer;
+  B0, B1, B2: Integer;
+  Remaining: Integer;
+begin
+  Result := '';
+  I := 1;
+  while I <= Length(S) do
+  begin
+    Remaining := Length(S) - I + 1;
+    B0 := Ord(S[I]);
+    if Remaining > 1 then
+      B1 := Ord(S[I + 1])
+    else
+      B1 := 0;
+    if Remaining > 2 then
+      B2 := Ord(S[I + 2])
+    else
+      B2 := 0;
+
+    Result := Result + Base64Table[(B0 shr 2) + 1];
+    Result := Result + Base64Table[(((B0 and $03) shl 4) or (B1 shr 4)) + 1];
+    if Remaining > 1 then
+      Result := Result + Base64Table[(((B1 and $0F) shl 2) or (B2 shr 6)) + 1]
+    else
+      Result := Result + '=';
+    if Remaining > 2 then
+      Result := Result + Base64Table[(B2 and $3F) + 1]
+    else
+      Result := Result + '=';
+
+    Inc(I, 3);
+  end;
+end;
+
+function TStressWorker.BuildBasicAuthHeader: string;
+begin
+  Result := 'Authorization: Basic ' +
+    Base64Encode(FOwner.Config.AuthUser + ':' + FOwner.Config.AuthPass);
+end;
+
+function TStressWorker.TrimLineEnd(const S: string): string;
+begin
+  Result := S;
+  while (Length(Result) > 0) and
+        ((Result[Length(Result)] = #13) or (Result[Length(Result)] = #10)) do
+    Delete(Result, Length(Result), 1);
+end;
+
+function TStressWorker.ReadFixedSize(ASocket: TTCPBlockSocket; ASize: Integer; out AData: string): Boolean;
+begin
+  AData := '';
+  if ASize <= 0 then
+    Exit(True);
+  AData := ASocket.RecvBufferStr(ASize, FOwner.Config.TimeoutMs);
+  Result := (ASocket.LastError = 0) and (Length(AData) = ASize);
+end;
+
+function TStressWorker.ParseJsonStringField(const AJson, AField: string; out AValue: string): Boolean;
+var
+  KeyPos, ColonPos, I: Integer;
+  KeyToken: string;
+begin
+  Result := False;
+  AValue := '';
+  KeyToken := '"' + AField + '"';
+  KeyPos := Pos(KeyToken, AJson);
+  if KeyPos <= 0 then
+    Exit;
+
+  ColonPos := PosEx(':', AJson, KeyPos + Length(KeyToken));
+  if ColonPos <= 0 then
+    Exit;
+
+  I := ColonPos + 1;
+  while (I <= Length(AJson)) and (AJson[I] <= ' ') do
+    Inc(I);
+  if (I > Length(AJson)) or (AJson[I] <> '"') then
+    Exit;
+  Inc(I);
+
+  while I <= Length(AJson) do
+  begin
+    if (AJson[I] = '"') and ((I = 1) or (AJson[I - 1] <> '\')) then
+    begin
+      Result := True;
+      Exit;
+    end;
+    AValue := AValue + AJson[I];
+    Inc(I);
+  end;
+end;
+
+function TStressWorker.EscapeJson(const S: string): string;
+var
+  I: Integer;
+begin
+  Result := '';
+  for I := 1 to Length(S) do
+  begin
+    case S[I] of
+      '"': Result := Result + '\"';
+      '\': Result := Result + '\\';
+      #13: Result := Result + '\r';
+      #10: Result := Result + '\n';
+    else
+      Result := Result + S[I];
+    end;
+  end;
+end;
+
+function TStressWorker.FetchJwtToken(out AToken: string): Boolean;
+var
+  AuthSock: TTCPBlockSocket;
+  ReqBody: string;
+  ReqText: string;
+  StatusCode: Integer;
+  RespBody: string;
+begin
+  Result := False;
+  AToken := '';
+
+  AuthSock := TTCPBlockSocket.Create;
+  try
+    AuthSock.Connect(FOwner.Config.Host, IntToStr(FOwner.Config.Port));
+    if AuthSock.LastError <> 0 then
+      Exit;
+
+    ReqBody := '{"username":"' + EscapeJson(FOwner.Config.AuthUser) +
+               '","password":"' + EscapeJson(FOwner.Config.AuthPass) + '"}';
+
+    ReqText :=
+      'POST ' + FOwner.Config.JwtLoginPath + ' HTTP/1.1' + #13#10 +
+      'Host: ' + FOwner.Config.Host + ':' + IntToStr(FOwner.Config.Port) + #13#10 +
+      'Connection: close' + #13#10 +
+      'Content-Type: application/json' + #13#10 +
+      'Content-Length: ' + IntToStr(Length(ReqBody)) + #13#10 +
+      'User-Agent: BadgerStressGUI/1.0 (Auth Worker ' + IntToStr(FWorkerId) + ')' + #13#10 +
+      #13#10 +
+      ReqBody;
+
+    AuthSock.SendString(ReqText);
+    if AuthSock.LastError <> 0 then
+      Exit;
+
+    if not ReadResponse(StatusCode, RespBody, AuthSock) then
+      Exit;
+    if StatusCode <> 200 then
+      Exit;
+
+    if not ParseJsonStringField(RespBody, 'token', AToken) then
+      if not ParseJsonStringField(RespBody, 'access_token', AToken) then
+        Exit;
+
+    Result := AToken <> '';
+  finally
+    AuthSock.CloseSocket;
+    AuthSock.Free;
+  end;
+end;
+
+function TStressWorker.EnsureAuthReady: Boolean;
+var
+  JwtToken: string;
+begin
+  case FOwner.Config.AuthMode of
+    amNone:
+      begin
+        FAuthHeader := '';
+        Exit(True);
+      end;
+    amBasic:
+      begin
+        if FAuthHeader = '' then
+          FAuthHeader := BuildBasicAuthHeader;
+        Exit(True);
+      end;
+    amBearer:
+      begin
+        if FAuthHeader = '' then
+          FAuthHeader := 'Authorization: Bearer ' + FOwner.Config.BearerToken;
+        Exit(True);
+      end;
+    amJwtLogin:
+      begin
+        if FAuthHeader = '' then
+        begin
+          if not FetchJwtToken(JwtToken) then
+            Exit(False);
+          FAuthHeader := 'Authorization: Bearer ' + JwtToken;
+        end;
+        Exit(True);
+      end;
+  end;
+  Result := False;
+end;
+
 function TStressWorker.ParseStatusCode(const StatusLine: string): Integer;
 var
   P1, P2: Integer;
@@ -188,8 +422,9 @@ begin
   Result := StrToIntDef(SCode, 0);
 end;
 
-function TStressWorker.ReadResponse(out AStatusCode: Integer): Boolean;
+function TStressWorker.ReadResponse(out AStatusCode: Integer; out ABody: string; ASocket: TTCPBlockSocket): Boolean;
 var
+  TargetSocket: TTCPBlockSocket;
   Line: string;
   HeaderLine: string;
   HeaderName: string;
@@ -199,22 +434,34 @@ var
   IsChunked: Boolean;
   ChunkSize: Integer;
   ChunkLine: string;
+  ChunkData: string;
+  BodyData: string;
+  ContentData: string;
 begin
   Result := False;
   AStatusCode := 0;
+  ABody := '';
   ContentLength := 0;
   IsChunked := False;
+  BodyData := '';
+  ContentData := '';
+  ChunkData := '';
 
-  Line := FSocket.RecvString(FOwner.Config.TimeoutMs);
-  if FSocket.LastError <> 0 then
+  if Assigned(ASocket) then
+    TargetSocket := ASocket
+  else
+    TargetSocket := FSocket;
+
+  Line := TrimLineEnd(TargetSocket.RecvString(FOwner.Config.TimeoutMs));
+  if TargetSocket.LastError <> 0 then
     Exit;
   AStatusCode := ParseStatusCode(Line);
   if AStatusCode = 0 then
     Exit;
 
   repeat
-    HeaderLine := FSocket.RecvString(FOwner.Config.TimeoutMs);
-    if FSocket.LastError <> 0 then
+    HeaderLine := TrimLineEnd(TargetSocket.RecvString(FOwner.Config.TimeoutMs));
+    if TargetSocket.LastError <> 0 then
       Exit;
     if HeaderLine = '' then
       Break;
@@ -235,8 +482,8 @@ begin
   if IsChunked then
   begin
     repeat
-      ChunkLine := FSocket.RecvString(FOwner.Config.TimeoutMs);
-      if FSocket.LastError <> 0 then
+      ChunkLine := TargetSocket.RecvString(FOwner.Config.TimeoutMs);
+      if TargetSocket.LastError <> 0 then
         Exit;
       P := Pos(';', ChunkLine);
       if P > 0 then
@@ -248,35 +495,42 @@ begin
       begin
         // trailer headers (optional)
         repeat
-          Line := FSocket.RecvString(FOwner.Config.TimeoutMs);
-          if FSocket.LastError <> 0 then
+          Line := TrimLineEnd(TargetSocket.RecvString(FOwner.Config.TimeoutMs));
+          if TargetSocket.LastError <> 0 then
             Exit;
         until Line = '';
         Break;
       end;
-      if Length(FSocket.RecvBufferStr(ChunkSize, FOwner.Config.TimeoutMs)) <> ChunkSize then
+      if not ReadFixedSize(TargetSocket, ChunkSize, ChunkData) then
         Exit;
+      BodyData := BodyData + ChunkData;
       // CRLF after chunk data
-      Line := FSocket.RecvString(FOwner.Config.TimeoutMs);
-      if FSocket.LastError <> 0 then
+      Line := TrimLineEnd(TargetSocket.RecvString(FOwner.Config.TimeoutMs));
+      if TargetSocket.LastError <> 0 then
         Exit;
     until False;
   end
   else if ContentLength > 0 then
   begin
-    if Length(FSocket.RecvBufferStr(ContentLength, FOwner.Config.TimeoutMs)) <> ContentLength then
+    if not ReadFixedSize(TargetSocket, ContentLength, ContentData) then
       Exit;
+    BodyData := ContentData;
   end;
 
+  ABody := BodyData;
   Result := True;
 end;
 
 function TStressWorker.SendRequest(out AStatusCode: Integer): Boolean;
 var
   RequestText: string;
+  ResponseBody: string;
 begin
   Result := False;
   AStatusCode := 0;
+
+  if not EnsureAuthReady then
+    Exit;
 
   if not EnsureConnected then
     Exit;
@@ -286,6 +540,7 @@ begin
     'Host: ' + FOwner.Config.Host + ':' + IntToStr(FOwner.Config.Port) + #13#10 +
     'Connection: ' + IfThen(FOwner.Config.KeepAlive, 'keep-alive', 'close') + #13#10 +
     'User-Agent: BadgerStressGUI/1.0 (Worker ' + IntToStr(FWorkerId) + ')' + #13#10 +
+    IfThen(FAuthHeader <> '', FAuthHeader + #13#10, '') +
     #13#10;
 
   FSocket.SendString(RequestText);
@@ -295,7 +550,7 @@ begin
     Exit;
   end;
 
-  Result := ReadResponse(AStatusCode);
+  Result := ReadResponse(AStatusCode, ResponseBody);
   if not Result or (not FOwner.Config.KeepAlive) then
     Disconnect;
 end;
@@ -433,12 +688,26 @@ end;
 
 procedure TfrmStressMain.FormCreate(Sender: TObject);
 begin
+  cbAuthMode.Items.Clear;
+  cbAuthMode.Items.Add('Nenhum');
+  cbAuthMode.Items.Add('Basic');
+  cbAuthMode.Items.Add('Bearer (token manual)');
+  cbAuthMode.Items.Add('JWT (login automático)');
+  cbAuthMode.ItemIndex := 0;
+  edtAuthUser.Text := 'usuario';
+  edtAuthPass.Text := 'senha123';
+  edtJwtLoginPath.Text := '/Login';
+  edtBearerToken.Text := '';
+
   FLastSampleRequests := 0;
   FLastSampleTick := 0;
   FRpsInstMin := 0;
   FRpsInstMax := 0;
   FRpsInstSum := 0;
   FRpsInstCount := 0;
+  FLastMetricsLogTick := 0;
+  InitStatsGrid;
+  UpdateAuthControls;
   SetUiRunning(False);
   lblRunning.Caption := 'Status: aguardando execução';
   lblSummary.Caption := 'Resumo: -';
@@ -478,9 +747,11 @@ begin
   FRpsInstMax := 0;
   FRpsInstSum := 0;
   FRpsInstCount := 0;
+  FLastMetricsLogTick := 0;
   SetUiRunning(True);
-  Log(Format('Iniciando stress: host=%s port=%d path=%s threads=%d requests/thread=%d timeout=%d keepalive=%s',
-    [Cfg.Host, Cfg.Port, Cfg.Path, Cfg.ThreadCount, Cfg.RequestsPerThread, Cfg.TimeoutMs, BoolToStr(Cfg.KeepAlive, True)]));
+  Log(Format('Iniciando stress: host=%s port=%d path=%s threads=%d requests/thread=%d timeout=%d keepalive=%s auth=%s',
+    [Cfg.Host, Cfg.Port, Cfg.Path, Cfg.ThreadCount, Cfg.RequestsPerThread, Cfg.TimeoutMs, BoolToStr(Cfg.KeepAlive, True),
+     AuthModeToText(Cfg.AuthMode)]));
   FRunThread.Start;
   tmrUpdate.Enabled := True;
 end;
@@ -499,6 +770,11 @@ begin
   MemoLog.Clear;
 end;
 
+procedure TfrmStressMain.cbAuthModeChange(Sender: TObject);
+begin
+  UpdateAuthControls;
+end;
+
 procedure TfrmStressMain.tmrUpdateTimer(Sender: TObject);
 begin
   UpdateSummary;
@@ -508,6 +784,35 @@ procedure TfrmStressMain.Log(const AText: string);
 begin
   MemoLog.Lines.Add(FormatDateTime('hh:nn:ss.zzz', Now) + ' - ' + AText);
   MemoLog.SelStart := Length(MemoLog.Text);
+end;
+
+procedure TfrmStressMain.InitStatsGrid;
+begin
+  grdStats.ColCount := 2;
+  grdStats.RowCount := 13;
+  grdStats.FixedCols := 0;
+  grdStats.FixedRows := 1;
+  grdStats.Options := grdStats.Options - [goEditing];
+  grdStats.Cells[0, 0] := 'Métrica';
+  grdStats.Cells[1, 0] := 'Valor';
+  grdStats.Cells[0, 1] := 'Total requests';
+  grdStats.Cells[0, 2] := 'Sucesso';
+  grdStats.Cells[0, 3] := 'Falha';
+  grdStats.Cells[0, 4] := 'Tempo (ms)';
+  grdStats.Cells[0, 5] := 'RPS acumulado';
+  grdStats.Cells[0, 6] := 'RPS instantâneo';
+  grdStats.Cells[0, 7] := 'RPS mínimo';
+  grdStats.Cells[0, 8] := 'RPS máximo';
+  grdStats.Cells[0, 9] := 'RPS médio';
+  grdStats.Cells[0, 10] := 'Lat. média (ms)';
+  grdStats.Cells[0, 11] := 'Lat. min (ms)';
+  grdStats.Cells[0, 12] := 'Lat. max (ms)';
+end;
+
+procedure TfrmStressMain.SetStatValue(const ARow: Integer; const AValue: string);
+begin
+  if (ARow >= 1) and (ARow < grdStats.RowCount) then
+    grdStats.Cells[1, ARow] := AValue;
 end;
 
 procedure TfrmStressMain.SetUiRunning(const ARunning: Boolean);
@@ -521,10 +826,45 @@ begin
   edtRequests.Enabled := not ARunning;
   edtTimeout.Enabled := not ARunning;
   chkKeepAlive.Enabled := not ARunning;
+  cbAuthMode.Enabled := not ARunning;
+  edtAuthUser.Enabled := not ARunning;
+  edtAuthPass.Enabled := not ARunning;
+  edtBearerToken.Enabled := not ARunning;
+  edtJwtLoginPath.Enabled := not ARunning;
   if ARunning then
     lblRunning.Caption := 'Status: executando'
   else
     lblRunning.Caption := 'Status: parado';
+end;
+
+procedure TfrmStressMain.UpdateAuthControls;
+var
+  Mode: TAuthMode;
+begin
+  if cbAuthMode.ItemIndex < 0 then
+    cbAuthMode.ItemIndex := 0;
+  Mode := TAuthMode(cbAuthMode.ItemIndex);
+
+  lblAuthUser.Visible := (Mode = amBasic) or (Mode = amJwtLogin);
+  edtAuthUser.Visible := lblAuthUser.Visible;
+  lblAuthPass.Visible := (Mode = amBasic) or (Mode = amJwtLogin);
+  edtAuthPass.Visible := lblAuthPass.Visible;
+  lblBearerToken.Visible := (Mode = amBearer);
+  edtBearerToken.Visible := lblBearerToken.Visible;
+  lblJwtLoginPath.Visible := (Mode = amJwtLogin);
+  edtJwtLoginPath.Visible := lblJwtLoginPath.Visible;
+end;
+
+function TfrmStressMain.AuthModeToText(const AMode: TAuthMode): string;
+begin
+  case AMode of
+    amNone: Result := 'none';
+    amBasic: Result := 'basic';
+    amBearer: Result := 'bearer';
+    amJwtLogin: Result := 'jwt-login';
+  else
+    Result := 'unknown';
+  end;
 end;
 
 function TfrmStressMain.BuildConfig(out AConfig: TStressConfig): Boolean;
@@ -537,6 +877,13 @@ begin
   AConfig.RequestsPerThread := StrToIntDef(Trim(edtRequests.Text), 0);
   AConfig.TimeoutMs := StrToIntDef(Trim(edtTimeout.Text), 0);
   AConfig.KeepAlive := chkKeepAlive.Checked;
+  if cbAuthMode.ItemIndex < 0 then
+    cbAuthMode.ItemIndex := 0;
+  AConfig.AuthMode := TAuthMode(cbAuthMode.ItemIndex);
+  AConfig.AuthUser := Trim(edtAuthUser.Text);
+  AConfig.AuthPass := Trim(edtAuthPass.Text);
+  AConfig.BearerToken := Trim(edtBearerToken.Text);
+  AConfig.JwtLoginPath := Trim(edtJwtLoginPath.Text);
 
   if AConfig.Host = '' then
   begin
@@ -568,6 +915,38 @@ begin
     Log('Timeout deve ser > 0.');
     Exit;
   end;
+
+  case AConfig.AuthMode of
+    amBasic:
+      begin
+        if (AConfig.AuthUser = '') or (AConfig.AuthPass = '') then
+        begin
+          Log('Basic: informe usuário e senha.');
+          Exit;
+        end;
+      end;
+    amBearer:
+      begin
+        if AConfig.BearerToken = '' then
+        begin
+          Log('Bearer: informe o token.');
+          Exit;
+        end;
+      end;
+    amJwtLogin:
+      begin
+        if (AConfig.AuthUser = '') or (AConfig.AuthPass = '') then
+        begin
+          Log('JWT: informe usuário e senha para login.');
+          Exit;
+        end;
+        if (AConfig.JwtLoginPath = '') or (AConfig.JwtLoginPath[1] <> '/') then
+        begin
+          Log('JWT: caminho de login inválido. Exemplo: /Login');
+          Exit;
+        end;
+      end;
+  end;
   Result := True;
 end;
 
@@ -596,6 +975,8 @@ var
   NowTick: QWord;
   MinText: string;
   MaxText: string;
+  MinLatencyText: string;
+  MaxLatencyText: string;
 begin
   if not Assigned(FRunner) then
   begin
@@ -652,11 +1033,15 @@ begin
   begin
     MinText := 'n/a';
     MaxText := 'n/a';
+    MinLatencyText := 'n/a';
+    MaxLatencyText := 'n/a';
   end
   else
   begin
     MinText := IntToStr(S.MinLatencyMs);
     MaxText := IntToStr(S.MaxLatencyMs);
+    MinLatencyText := MinText;
+    MaxLatencyText := MaxText;
   end;
 
   lblSummary.Caption := Format(
@@ -665,6 +1050,27 @@ begin
      FormatFloat('0.00', RpsAccum), FormatFloat('0.00', RpsInst),
      FormatFloat('0.00', FRpsInstMin), FormatFloat('0.00', FRpsInstMax), FormatFloat('0.00', RpsInstAvg),
      FormatFloat('0.00', AvgLatencyMs), MinText, MaxText]);
+
+  SetStatValue(1, IntToStr(S.TotalRequests));
+  SetStatValue(2, IntToStr(S.SuccessCount));
+  SetStatValue(3, IntToStr(S.FailureCount));
+  SetStatValue(4, IntToStr(ElapsedMs));
+  SetStatValue(5, FormatFloat('0.00', RpsAccum));
+  SetStatValue(6, FormatFloat('0.00', RpsInst));
+  SetStatValue(7, FormatFloat('0.00', FRpsInstMin));
+  SetStatValue(8, FormatFloat('0.00', FRpsInstMax));
+  SetStatValue(9, FormatFloat('0.00', RpsInstAvg));
+  SetStatValue(10, FormatFloat('0.00', AvgLatencyMs));
+  SetStatValue(11, MinLatencyText);
+  SetStatValue(12, MaxLatencyText);
+
+  if (FLastMetricsLogTick = 0) or ((NowTick - FLastMetricsLogTick) >= 2000) then
+  begin
+    Log(Format('snapshot total=%d ok=%d fail=%d rps=%s inst=%s lat=%sms',
+      [S.TotalRequests, S.SuccessCount, S.FailureCount,
+       FormatFloat('0.00', RpsAccum), FormatFloat('0.00', RpsInst), FormatFloat('0.00', AvgLatencyMs)]));
+    FLastMetricsLogTick := NowTick;
+  end;
 end;
 
 end.
