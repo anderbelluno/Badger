@@ -19,6 +19,7 @@
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
         <UnitName Value="Unit1"/>
+        <IsVisibleTab Value="True"/>
         <CursorPos X="5" Y="10"/>
         <UsageCount Value="362"/>
         <Loaded Value="True"/>
@@ -97,12 +98,10 @@
       </Unit>
       <Unit>
         <Filename Value="..\..\..\ThirdParty\Synapse\blcksock.pas"/>
-        <IsVisibleTab Value="True"/>
-        <EditorIndex Value="1"/>
+        <EditorIndex Value="-1"/>
         <TopLine Value="1890"/>
         <CursorPos Y="1907"/>
         <UsageCount Value="10"/>
-        <Loaded Value="True"/>
       </Unit>
     </Units>
     <JumpHistory HistoryIndex="13">

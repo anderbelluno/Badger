@@ -6,7 +6,7 @@ interface
 
 uses
   {$IFDEF BADGER_WINDOWS} Windows,{$ENDIF}
-  {$IFDEF FPC}{$IFDEF UNIX}BaseUnix,{$ENDIF}{$ENDIF}
+  {$IFDEF FPC}{$IFDEF UNIX}BaseUnix, ctypes,{$ENDIF}{$ENDIF}
   SysUtils, SyncObjs, Classes
   ;
 
@@ -56,6 +56,12 @@ var
 implementation
 
 { TBadgerLogger }
+
+{$IFDEF FPC}
+  {$IFDEF UNIX}
+function c_isatty(fd: cint): cint; cdecl; external 'c' name 'isatty';
+  {$ENDIF}
+{$ENDIF}
 
 constructor TBadgerLogger.Create;
   function ReadEnv(const Name: string): string;
@@ -179,7 +185,7 @@ begin
 
   {$IFDEF FPC}
     {$IFDEF UNIX}
-      Result := fpIsATTY(StdOutputHandle) <> 0;
+      Result := c_isatty(1) <> 0;
       Exit;
     {$ENDIF}
   {$ENDIF}
