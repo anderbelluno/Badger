@@ -16,6 +16,12 @@
     <BuildModes>
       <Item Name="Default" Default="True"/>
     </BuildModes>
+    <PublishOptions>
+      <Version Value="2"/>
+    </PublishOptions>
+    <RunParams>
+      <FormatVersion Value="2"/>
+    </RunParams>
     <RequiredPackages>
       <Item>
         <PackageName Value="LCL"/>
@@ -32,7 +38,6 @@
         <ComponentName Value="frmStressMain"/>
         <HasResources Value="True"/>
         <ResourceBaseClass Value="Form"/>
-        <UnitName Value="MainForm"/>
       </Unit>
     </Units>
   </ProjectOptions>
@@ -48,6 +53,9 @@
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Linking>
+      <Debugging>
+        <DebugInfoType Value="dsDwarf3"/>
+      </Debugging>
       <Options>
         <Win32>
           <GraphicApplication Value="True"/>

@@ -108,7 +108,7 @@ begin
 
 
     ServerThread.ParallelProcessing := rdParallel.IsChecked;
-   // ServerThread.MaxConcurrentConnections := 500;
+    ServerThread.MaxConcurrentConnections := 500;
 
     ServerThread.Start;
     edtPorta.Enabled   := False;

@@ -23,6 +23,7 @@ type
     FRouteManager: TRouteManager;
     FMethods: TBadgerMethods;
     FMiddlewares: TList;
+    FMiddlewareLock: TCriticalSection;
     FPort: Integer;
     FNonBlockMode: Boolean;
     FTimeout: Integer;
@@ -32,6 +33,7 @@ type
     FMaxConcurrentConnections: Integer;
     FActiveConnections: Integer;
     FSocketLock: TCriticalSection;
+    FClientSocketsLock: TCriticalSection;
     FShutdownEvent: TEvent;
     FIsShuttingDown: Boolean;
     FClientSockets: TList;
@@ -98,8 +100,10 @@ begin
   FRouteManager := TRouteManager.Create;
   FMethods := TBadgerMethods.Create;
   FMiddlewares := TList.Create;
+  FMiddlewareLock := TCriticalSection.Create;
   FClientSockets := TList.Create;
   FSocketLock := TCriticalSection.Create;
+  FClientSocketsLock := TCriticalSection.Create;
   FShutdownEvent := TEvent.Create(nil, True, False, '');
   FPort := 8080;
   FNonBlockMode := True;
@@ -212,6 +216,13 @@ begin
   end;
 
   try
+    if Assigned(FMiddlewareLock) then FreeAndNil(FMiddlewareLock);
+  except
+    on E: Exception do
+      Logger.Error(Format('Error freeing FMiddlewareLock: %s', [E.Message]));
+  end;
+
+  try
     if Assigned(FClientSockets) then FreeAndNil(FClientSockets);
   except
     on E: Exception do
@@ -230,6 +241,13 @@ begin
   except
     on E: Exception do
       Logger.Error(Format('Error freeing FSocketLock: %s', [E.Message]));
+  end;
+
+  try
+    if Assigned(FClientSocketsLock) then FreeAndNil(FClientSocketsLock);
+  except
+    on E: Exception do
+      Logger.Error(Format('Error freeing FClientSocketsLock: %s', [E.Message]));
   end;
 
   try
@@ -268,9 +286,9 @@ procedure TBadger.AddClientSocket(Socket: TTCPBlockSocket);
 var
   SocketInfo: TClientSocketInfo;
 begin
-  if not Assigned(FClientSockets) or not Assigned(Socket) then Exit;
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) or not Assigned(Socket) then Exit;
 
-  FSocketLock.Acquire;
+  FClientSocketsLock.Acquire;
   try
     SocketInfo := TClientSocketInfo.Create;
     SocketInfo.Socket := Socket;
@@ -278,7 +296,7 @@ begin
     FClientSockets.Add(SocketInfo);
   //  Logger.info(Format('Added client socket. Total: %d', [FClientSockets.Count]));
   finally
-    FSocketLock.Release;
+    FClientSocketsLock.Release;
   end;
 end;
 
@@ -287,9 +305,9 @@ var
   I: Integer;
   SocketInfo: TClientSocketInfo;
 begin
-  if not Assigned(FClientSockets) or not Assigned(Socket) then Exit;
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) or not Assigned(Socket) then Exit;
 
-  FSocketLock.Acquire;
+  FClientSocketsLock.Acquire;
   try
     for I := 0 to FClientSockets.Count - 1 do
     begin
@@ -303,7 +321,7 @@ begin
       end;
     end;
   finally
-    FSocketLock.Release;
+    FClientSocketsLock.Release;
   end;
 end;
 
@@ -312,11 +330,11 @@ var
   I: Integer;
   SocketInfo: TClientSocketInfo;
 begin
-  if not Assigned(FClientSockets) or not Assigned(FSocketLock) then Exit;
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) then Exit;
 
 //  Logger.info(Format('Cleaning up %d client sockets', [FClientSockets.Count]));
 
-  FSocketLock.Acquire;
+  FClientSocketsLock.Acquire;
   try
     for I := FClientSockets.Count - 1 downto 0 do
     begin
@@ -344,7 +362,7 @@ begin
     end;
     FClientSockets.Clear;
   finally
-    FSocketLock.Release;
+    FClientSocketsLock.Release;
   end;
 
 //  Logger.info('Client sockets cleanup completed');
@@ -355,9 +373,9 @@ var
   I: Integer;
   SocketInfo: TClientSocketInfo;
 begin
-  if not Assigned(FClientSockets) or not Assigned(FSocketLock) then Exit;
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) then Exit;
 
-  FSocketLock.Acquire;
+  FClientSocketsLock.Acquire;
   try
     for I := FClientSockets.Count - 1 downto 0 do
     begin
@@ -374,7 +392,7 @@ begin
       end;
     end;
   finally
-    FSocketLock.Release;
+    FClientSocketsLock.Release;
   end;
 end;
 
@@ -430,15 +448,15 @@ end;
 
 procedure TBadger.AddMiddleware(Middleware: TMiddlewareProc);
 begin
-  if not Assigned(FSocketLock) then
+  if not Assigned(FMiddlewareLock) then
     Exit;
 
-  FSocketLock.Acquire;
+  FMiddlewareLock.Acquire;
   try
     if not FIsShuttingDown and Assigned(FMiddlewares) then
       FMiddlewares.Add(TMiddlewareWrapper.Create(Middleware));
   finally
-    FSocketLock.Release;
+    FMiddlewareLock.Release;
   end;
 end;
 
@@ -643,13 +661,13 @@ begin
             if FParallelProcessing then
             begin
               IncActiveConnections;
-              THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares, FSocketLock,
+              THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares, FMiddlewareLock,
                                                 FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
               ClientSocket := nil;
             end
             else
             begin
-              THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares, FSocketLock,
+              THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares, FMiddlewareLock,
                                          FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
               RemoveClientSocket(ClientSocket);
               ClientSocket := nil;

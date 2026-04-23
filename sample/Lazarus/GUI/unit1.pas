@@ -110,7 +110,7 @@ begin
       .AddGet('/produtos', TSampleRouteManager.produtos);
 
     ServerThread.ParallelProcessing:= rdParallel.Checked;
-   { ServerThread.MaxConcurrentConnections:= 30000; }
+    ServerThread.MaxConcurrentConnections:= 50000;
 
     ServerThread.CorsEnabled := False;
 

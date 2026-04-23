@@ -71,8 +71,7 @@ object frmStressMain: TfrmStressMain
       Left = 200
       Height = 15
       Top = 132
-      Width = 752
-      AutoSize = False
+      Width = 54
       Caption = 'Resumo: -'
       WordWrap = True
     end

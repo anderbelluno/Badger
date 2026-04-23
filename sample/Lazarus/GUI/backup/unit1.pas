@@ -117,6 +117,7 @@ begin
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
+    rdParallel.Enabled := False;
     btnSyna.Tag := 1;
     btnSyna.Caption := 'Parar Servidor';
     RadioGroup1.Enabled := False;
@@ -130,6 +131,7 @@ begin
     btnSyna.Caption := 'Iniciar Servidor';
     edtPorta.Enabled := True;
     rdLog.Enabled := True;
+    rdParallel.Enabled := True;
     RadioGroup1.Enabled := True;
     edtTimeOut.Enabled := True;
   end;

@@ -26,6 +26,7 @@ type
     FParentServer: TBadger;
     FIsParallel: Boolean;
     FEnableEventInfo: Boolean;
+    FSocketNotified: Boolean;
   protected
     procedure ParseRequestHeader(ClientSocket: TTCPBlockSocket; aHeaders: TStringList);
     function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean; HeaderCustom: TStringList): string;
@@ -67,6 +68,7 @@ begin
   FParentServer := AParentServer;
   FIsParallel := False;
   FEnableEventInfo := AEnableEventInfo;
+  FSocketNotified := False;
 
   if Assigned(FMiddlewareLock) then
     FMiddlewareLock.Acquire;
@@ -100,6 +102,7 @@ begin
   FParentServer := AParentServer;
   FIsParallel := True;
   FEnableEventInfo := AEnableEventInfo;
+  FSocketNotified := False;
 
   if Assigned(FMiddlewareLock) then
     FMiddlewareLock.Acquire;
@@ -117,7 +120,7 @@ destructor THTTPRequestHandler.Destroy;
 var
   I: Integer;
 begin
-  if FIsParallel and Assigned(FParentServer) then
+  if FIsParallel and Assigned(FParentServer) and (not FSocketNotified) then
   begin
     try
       if Assigned(FClientSocket) then
@@ -163,32 +166,22 @@ var
   SeparatorPos: Integer;
   Key, Value: string;
   TotalHeaderSize: Integer;
-  ReadCount: Integer;
-  B: Byte;
-  Ch: Char;
 begin
   TotalHeaderSize := 0;
   repeat
-    HeaderLine := '';
-    while True do
-    begin
-      ReadCount := ClientSocket.RecvBufferEx(@B, 1, FTimeout);
-      if ReadCount <= 0 then
-        raise Exception.Create('Failed to read header line');
+    HeaderLine := ClientSocket.RecvString(FTimeout);
+    if ClientSocket.LastError <> 0 then
+      raise Exception.Create('Failed to read header line');
 
-      if B = 10 then
-        Break;
-
-      if B <> 13 then
-      begin
-        if Length(HeaderLine) >= MaxHeaderLineSize then
-          raise EHeaderTooLarge.Create('Header line too large');
-        Ch := Chr(B);
-        HeaderLine := HeaderLine + Ch;
-      end;
-    end;
+    // Synapse can keep trailing CR on RecvString; normalize to avoid
+    // waiting FTimeout for the real blank line terminator.
+    while (Length(HeaderLine) > 0) and
+          ((HeaderLine[Length(HeaderLine)] = #13) or (HeaderLine[Length(HeaderLine)] = #10)) do
+      Delete(HeaderLine, Length(HeaderLine), 1);
 
     Inc(TotalHeaderSize, Length(HeaderLine));
+    if Length(HeaderLine) > MaxHeaderLineSize then
+      raise EHeaderTooLarge.Create('Header line too large');
     if TotalHeaderSize > MaxHeaderTotalSize then
       raise EHeaderTooLarge.Create('Request headers too large');
 
@@ -495,6 +488,9 @@ begin
 
         if FClientSocket.LastError <> 0 then Break;
         FRequestLine := FClientSocket.RecvString(FTimeout);
+        while (Length(FRequestLine) > 0) and
+              ((FRequestLine[Length(FRequestLine)] = #13) or (FRequestLine[Length(FRequestLine)] = #10)) do
+          Delete(FRequestLine, Length(FRequestLine), 1);
         if FRequestLine = '' then Break;
 
         if not FMethods.ExtractMethodAndURI(FRequestLine, FMethod, FURI, QueryParams) then
@@ -931,6 +927,16 @@ begin
 
     if Assigned(FClientSocket) then
     begin
+      if FIsParallel and Assigned(FParentServer) then
+      begin
+        try
+          FParentServer.NotifyClientSocketClosed(FClientSocket);
+          FSocketNotified := True;
+        except
+          on E: Exception do
+            Logger.Error(Format('Error in NotifyClientSocketClosed during execute cleanup: %s', [E.Message]));
+        end;
+      end;
       FClientSocket.CloseSocket;
       FreeAndNil(FClientSocket);
     end;
