@@ -4,15 +4,19 @@ unit BadgerUtils;
   {$mode delphi}{$H+}
 {$ENDIF}
 
+{$I BadgerPlatform.inc}
+
 interface
 
 uses
   SysUtils, Classes
-  {$IFDEF MSWINDOWS}, Registry {$ENDIF}  ;
+  {$IFDEF BADGER_WINDOWS}, Windows, Registry {$ENDIF}  ;
 
 
 type
+  {$IFNDEF UNICODE}
   TBytes = array of Byte;
+  {$ENDIF}
 
   TBadgerUtils = class(TObject)
   private
@@ -48,6 +52,7 @@ begin
   FMimeList := TStringList.Create;
   FMimeList.Sorted := True;
   FMimeList.Duplicates := dupIgnore;
+  BuildMimelist(FMimeList);
 end;
 
 destructor TBadgerUtils.Destroy;
@@ -57,7 +62,7 @@ begin
 end;
 
 procedure TBadgerUtils.GetMIMETableFromOS(const AMIMEList: TStringList);
-{$IFDEF WINDOWS}
+{$IFDEF BADGER_WINDOWS}
 var
   reg: TRegistry;
   KeyList: TStringList;
@@ -65,7 +70,7 @@ var
   S, LExt: string;
 {$ENDIF}
 begin
-{$IFNDEF WINDOWS}
+{$IFNDEF BADGER_WINDOWS}
   Exit;
 {$ELSE}
   AMIMEList.Sorted := False;
@@ -545,7 +550,6 @@ var
   Index: Integer;
   LExt: string;
 begin
-  BuildMimelist(FMimeList);
   LExt := LowerCase(ExtractFileExt(AFileName));
   Index := FMimeList.IndexOfName(LExt);
   if (Index = -1) and (FMimeList.Count = 0) then
@@ -628,7 +632,9 @@ var
   OutBuf: array [0 .. 2] of Byte;
   Base64Table: array [Char] of Byte;
   CleanInput: string;
+  Pad2, Pad3: Boolean;
 begin
+  Result := '';
   FillChar(Base64Table, SizeOf(Base64Table), 255);
   for i := 0 to 63 do
     Base64Table[Base64Alphabet[i]] := i;
@@ -637,47 +643,82 @@ begin
 
   CleanInput := StringReplace(Input, '-', '+', [rfReplaceAll]);
   CleanInput := StringReplace(CleanInput, '_', '/', [rfReplaceAll]);
+
+  if CleanInput = '' then
+    Exit;
+
   case Length(CleanInput) mod 4 of
     2:
       CleanInput := CleanInput + '==';
     3:
       CleanInput := CleanInput + '=';
+    1:
+      Exit;
   end;
 
   Len := Length(CleanInput);
+  if Len < 4 then
+    Exit;
+
   SetLength(Bytes, (Len * 3) div 4);
   Pos := 0;
 
   i := 1;
   while i <= Len do
   begin
+    // '=' is only valid in positions 3/4 of the last quartet.
+    if (CleanInput[i] = '=') or (CleanInput[i + 1] = '=') then
+      Exit;
+
+    Pad2 := (CleanInput[i + 2] = '=');
+    Pad3 := (CleanInput[i + 3] = '=');
+    if Pad2 and (not Pad3) then
+      Exit;
+    if (Pad2 or Pad3) and (i + 3 <> Len) then
+      Exit;
+
     InBuf[0] := Base64Table[CleanInput[i]];
     InBuf[1] := Base64Table[CleanInput[i + 1]];
-    InBuf[2] := Base64Table[CleanInput[i + 2]];
-    InBuf[3] := Base64Table[CleanInput[i + 3]];
+    if Pad2 then
+      InBuf[2] := 0
+    else
+      InBuf[2] := Base64Table[CleanInput[i + 2]];
+    if Pad3 then
+      InBuf[3] := 0
+    else
+      InBuf[3] := Base64Table[CleanInput[i + 3]];
+
+    if (InBuf[0] = 255) or (InBuf[1] = 255) then
+      Exit;
+    if (not Pad2) and (InBuf[2] = 255) then
+      Exit;
+    if (not Pad3) and (InBuf[3] = 255) then
+      Exit;
 
     OutBuf[0] := (InBuf[0] shl 2) or ((InBuf[1] shr 4) and 3);
     OutBuf[1] := ((InBuf[1] shl 4) and $F0) or ((InBuf[2] shr 2) and $0F);
     OutBuf[2] := ((InBuf[2] shl 6) and $C0) or (InBuf[3] and $3F);
 
     Bytes[Pos] := OutBuf[0];
-    if CleanInput[i + 2] <> '=' then
-      Bytes[Pos + 1] := OutBuf[1];
-    if CleanInput[i + 3] <> '=' then
-      Bytes[Pos + 2] := OutBuf[2];
+    Inc(Pos);
+    if not Pad2 then
+    begin
+      Bytes[Pos] := OutBuf[1];
+      Inc(Pos);
+    end;
+    if not Pad3 then
+    begin
+      Bytes[Pos] := OutBuf[2];
+      Inc(Pos);
+    end;
 
     Inc(i, 4);
-    Inc(Pos, 3);
   end;
 
-  if CleanInput[Len] = '=' then
-    Dec(Pos);
-  if CleanInput[Len - 1] = '=' then
-    Dec(Pos);
   SetLength(Bytes, Pos);
 
-  SetLength(Result, Length(Bytes));
-  for i := 0 to Length(Bytes) - 1 do
+  SetLength(Result, Pos);
+  for i := 0 to Pos - 1 do
     Result[i + 1] := Chr(Bytes[i]);
 end;
 

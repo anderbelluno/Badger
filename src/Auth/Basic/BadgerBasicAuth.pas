@@ -7,21 +7,27 @@ unit BadgerBasicAuth;
 interface
 
 uses
-  SysUtils, Classes, Badger, BadgerTypes, BadgerHttpStatus, BadgerUtils;
+  SysUtils, Classes, Badger, BadgerTypes, BadgerHttpStatus, BadgerUtils, BadgerJWTUtils;
 
 type
   TBasicAuth = class
   private
     FUsername: string;
-    FPassword: string;
+    FPasswordHash: string;
+    FPasswordSalt: string;
     FProtectedRoutes: TStringList;
-    function Check(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
+    function ConstantTimeEquals(const A, B: string): Boolean;
+    function HashPassword(const APassword: string): string;
+    function BuildPasswordSalt: string;
+    function GetPassword: string;
+    procedure SetPassword(const AValue: string);
+    function Check(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
   public
     constructor Create(const AUsername, APassword: string);
     destructor Destroy; override;
     procedure RegisterProtectedRoutes(Badger: TBadger; const ProtectedRoutes: array of string);
     property Username: string read FUsername write FUsername;
-    property Password: string read FPassword write FPassword;
+    property Password: string read GetPassword write SetPassword;
   end;
 
 implementation
@@ -31,11 +37,51 @@ const
 
 { TBasicAuth }
 
+function NormalizeRoute(const ARoute: string): string;
+begin
+  Result := Trim(ARoute);
+  while (Length(Result) > 1) and (Result[Length(Result)] = '/') do
+    Delete(Result, Length(Result), 1);
+end;
+
+function IsProtectedRoute(const ARequestURI, AProtectedRoute: string): Boolean;
+var
+  RequestURI, ProtectedRoute: string;
+begin
+  RequestURI := NormalizeRoute(ARequestURI);
+  ProtectedRoute := NormalizeRoute(AProtectedRoute);
+
+  if ProtectedRoute = '' then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  if ProtectedRoute = '/' then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if SameText(RequestURI, ProtectedRoute) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  Result :=
+    (Length(RequestURI) > Length(ProtectedRoute)) and
+    (CompareText(Copy(RequestURI, 1, Length(ProtectedRoute)), ProtectedRoute) = 0) and
+    (RequestURI[Length(ProtectedRoute) + 1] = '/');
+end;
+
 constructor TBasicAuth.Create(const AUsername, APassword: string);
 begin
   inherited Create;
+  Randomize;
   FUsername := AUsername;
-  FPassword := APassword;
+  FPasswordSalt := BuildPasswordSalt;
+  SetPassword(APassword);
   FProtectedRoutes := TStringList.Create;
 end;
 
@@ -45,7 +91,59 @@ begin
   inherited;
 end;
 
-function TBasicAuth.Check(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
+function TBasicAuth.BuildPasswordSalt: string;
+begin
+  Result := IntToHex(DateTimeToUnix(Now), 8) + IntToHex(Random(MaxInt), 8);
+end;
+
+function TBasicAuth.HashPassword(const APassword: string): string;
+begin
+  Result := CreateSignature('BASIC_AUTH', CustomEncodeBase64(APassword, True), FPasswordSalt);
+end;
+
+function TBasicAuth.ConstantTimeEquals(const A, B: string): Boolean;
+var
+  I, ALen, BLen, MaxLen: Integer;
+  Diff: Cardinal;
+  CA, CB: Cardinal;
+begin
+  ALen := Length(A);
+  BLen := Length(B);
+  if ALen > BLen then
+    MaxLen := ALen
+  else
+    MaxLen := BLen;
+
+  Diff := Cardinal(ALen xor BLen);
+  for I := 1 to MaxLen do
+  begin
+    if I <= ALen then
+      CA := Ord(A[I])
+    else
+      CA := 0;
+
+    if I <= BLen then
+      CB := Ord(B[I])
+    else
+      CB := 0;
+
+    Diff := Diff or (CA xor CB);
+  end;
+  Result := Diff = 0;
+end;
+
+function TBasicAuth.GetPassword: string;
+begin
+  // Intencionalmente não expõe a senha em claro após inicialização.
+  Result := '';
+end;
+
+procedure TBasicAuth.SetPassword(const AValue: string);
+begin
+  FPasswordHash := HashPassword(AValue);
+end;
+
+function TBasicAuth.Check(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 var
   AuthHeader, DecodedAuth, vUsername, vPassword: string;
   I, ColonPos: Integer;
@@ -53,7 +151,7 @@ var
 begin
   LRouteMatch := False;
   for I := 0 to FProtectedRoutes.Count - 1 do
-    if SameText(Request.URI, FProtectedRoutes[I]) then
+    if IsProtectedRoute(Request.URI, FProtectedRoutes[I]) then
     begin
       LRouteMatch := True;
       Break;
@@ -65,15 +163,7 @@ begin
     Exit;
   end;
 
-  AuthHeader := '';
-  for I := 0 to Request.Headers.Count - 1 do
-  begin
-    if Pos('Authorization=', Request.Headers[I]) > 0 then
-    begin
-      AuthHeader := Trim(Copy(Request.Headers[I], Pos('=', Request.Headers[I]) + 1, Length(Request.Headers[I])));
-      Break;
-    end;
-  end;
+  AuthHeader := Trim(Request.Headers.Values['Authorization']);
 
   if Pos('Basic ', AuthHeader) = 1 then
   begin
@@ -86,7 +176,8 @@ begin
         vUsername := Copy(DecodedAuth, 1, ColonPos - 1);
         vPassword := Copy(DecodedAuth, ColonPos + 1, Length(DecodedAuth));
 
-        if (vUsername = FUsername) and (vPassword = FPassword) then
+        if ConstantTimeEquals(vUsername, FUsername) and
+           ConstantTimeEquals(HashPassword(vPassword), FPasswordHash) then
         begin
           Request.UserID := vUsername;
           Result := False;

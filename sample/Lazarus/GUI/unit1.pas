@@ -25,6 +25,7 @@ type
         Panel2: TPanel;
         RadioGroup1: TRadioGroup;
         rdLog: TCheckBox;
+        rdParallel: TCheckBox;
         procedure btnClearLogClick(Sender: TObject);
         procedure btnSynaClick(Sender: TObject);
         procedure FormCreate(Sender: TObject);
@@ -108,14 +109,15 @@ begin
       .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
       .AddGet('/produtos', TSampleRouteManager.produtos);
 
-    ServerThread.ParallelProcessing:= True;
-   { ServerThread.MaxConcurrentConnections:= 30000; }
+    ServerThread.ParallelProcessing:= rdParallel.Checked;
+    ServerThread.MaxConcurrentConnections:= 50000;
 
     ServerThread.CorsEnabled := False;
 
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
+    rdParallel.Enabled := False;
     btnSyna.Tag := 1;
     btnSyna.Caption := 'Parar Servidor';
     RadioGroup1.Enabled := False;
@@ -129,6 +131,7 @@ begin
     btnSyna.Caption := 'Iniciar Servidor';
     edtPorta.Enabled := True;
     rdLog.Enabled := True;
+    rdParallel.Enabled := True;
     RadioGroup1.Enabled := True;
     edtTimeOut.Enabled := True;
   end;

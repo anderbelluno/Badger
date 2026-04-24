@@ -76,15 +76,16 @@ var
   ContextKey: string;
   CtxIdx: Integer;
   Bucket: TObjectList;
+  RemovedCount: Integer;
 begin
   Result := Self;
+  RemovedCount := 0;
   for I := FRoutes.Count - 1 downto 0 do
   begin
     Entry := TRouteEntry(FRoutes[I]);
     FullRoute := Entry.Verb + ' ' + Entry.Pattern;
     if SameText(FullRoute, Route) then
     begin
-      FRoutes.Delete(I);
       Parts := SplitString(Entry.Pattern, '/');
       try
         if (Parts.Count > 1) and (Copy(Parts[1], 1, 1) <> ':') then
@@ -100,9 +101,13 @@ begin
       finally
         Parts.Free;
       end;
-      Break;
+      FRoutes.Delete(I);
+      Inc(RemovedCount);
     end;
   end;
+
+  if RemovedCount = 0 then
+    raise Exception.CreateFmt('Route not found for unregister: %s', [Route]);
 end;
 
 function TRouteManager.AddDel(const ARoute: string;

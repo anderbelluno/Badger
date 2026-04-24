@@ -15,7 +15,7 @@ type
     FSecret: string;
     FStoragePath: string;
     FProtectedRoutes: TStringList;
-    function MiddlewareProc(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
+    function MiddlewareProc(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 
   public
     constructor Create(const ASecret: string; const AStoragePath: string = '');
@@ -33,6 +33,93 @@ type
 implementation
 
   { TBadgerJWTAuth }
+
+function NormalizeRoute(const ARoute: string): string;
+begin
+  Result := Trim(ARoute);
+  while (Length(Result) > 1) and (Result[Length(Result)] = '/') do
+    Delete(Result, Length(Result), 1);
+end;
+
+function ConstantTimeEquals(const A, B: string): Boolean;
+var
+  I, ALen, BLen, MaxLen: Integer;
+  Diff: Cardinal;
+  CA, CB: Cardinal;
+begin
+  ALen := Length(A);
+  BLen := Length(B);
+  if ALen > BLen then
+    MaxLen := ALen
+  else
+    MaxLen := BLen;
+
+  Diff := Cardinal(ALen xor BLen);
+  for I := 1 to MaxLen do
+  begin
+    if I <= ALen then
+      CA := Ord(A[I])
+    else
+      CA := 0;
+
+    if I <= BLen then
+      CB := Ord(B[I])
+    else
+      CB := 0;
+
+    Diff := Diff or (CA xor CB);
+  end;
+  Result := Diff = 0;
+end;
+
+procedure EnsureJWTHeader(const EncodedHeader, ExpectedTyp: string);
+var
+  HeaderJSON: ISuperObject;
+  Alg, Typ: string;
+begin
+  HeaderJSON := SO(CustomDecodeBase64(EncodedHeader));
+  if not Assigned(HeaderJSON) then
+    raise Exception.Create('Invalid token header');
+
+  Alg := UpperCase(Trim(HeaderJSON.S['alg']));
+  Typ := Trim(HeaderJSON.S['typ']);
+
+  if Alg <> 'HS256' then
+    raise Exception.Create('Invalid token algorithm');
+  if not SameText(Typ, ExpectedTyp) then
+    raise Exception.Create('Invalid token type');
+end;
+
+function IsProtectedRoute(const ARequestURI, AProtectedRoute: string): Boolean;
+var
+  RequestURI, ProtectedRoute: string;
+begin
+  RequestURI := NormalizeRoute(ARequestURI);
+  ProtectedRoute := NormalizeRoute(AProtectedRoute);
+
+  if ProtectedRoute = '' then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  if ProtectedRoute = '/' then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if SameText(RequestURI, ProtectedRoute) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  Result :=
+    (Length(RequestURI) > Length(ProtectedRoute)) and
+    (CompareText(Copy(RequestURI, 1, Length(ProtectedRoute)), ProtectedRoute) = 0) and
+    (RequestURI[Length(ProtectedRoute) + 1] = '/');
+end;
 
 constructor TBadgerJWTAuth.Create(const ASecret: string; const AStoragePath: string);
 begin
@@ -143,8 +230,9 @@ begin
     LPayload := LParts[1];
     LSignature := LParts[2];
 
+    EnsureJWTHeader(LHeader, 'JWT');
     LExpectedSignature := CreateSignature(LHeader, LPayload, FSecret);
-    if LSignature <> LExpectedSignature then
+    if not ConstantTimeEquals(LSignature, LExpectedSignature) then
       raise Exception.Create('Invalid signature');
 
     LJSON := SO(CustomDecodeBase64(LPayload));
@@ -184,8 +272,9 @@ begin
     LPayload := LParts[1];
     LSignature := LParts[2];
 
+    EnsureJWTHeader(LHeader, 'Refresh');
     LExpectedSignature := CreateSignature(LHeader, LPayload, FSecret);
-    if LSignature <> LExpectedSignature then
+    if not ConstantTimeEquals(LSignature, LExpectedSignature) then
       raise Exception.Create('Invalid signature');
 
     LJSON := SO(CustomDecodeBase64(LPayload));
@@ -221,7 +310,7 @@ begin
 end;
 
 
-function TBadgerJWTAuth.MiddlewareProc(Request: THTTPRequest; var Response: THTTPResponse): Boolean;
+function TBadgerJWTAuth.MiddlewareProc(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 var
   I: Integer;
   LToken: string;
@@ -230,7 +319,7 @@ var
 begin
   LRouteMatch := False;
   for I := 0 to FProtectedRoutes.Count - 1 do
-    if SameText(Request.URI, FProtectedRoutes[I]) then
+    if IsProtectedRoute(Request.URI, FProtectedRoutes[I]) then
     begin
       LRouteMatch := True;
       Break;
@@ -242,20 +331,14 @@ begin
     Exit;
   end;
 
-  LToken := '';
-  for I := 0 to Request.Headers.Count - 1 do
-    if Pos('Authorization=', Request.Headers[I]) > 0 then
-    begin
-      LToken := Trim(Copy(Request.Headers[I], Pos('=', Request.Headers[I]) + 1, Length(Request.Headers[I])));
-      if Pos('Bearer ', LToken) = 1 then
-        LToken := Copy(LToken, 8, Length(LToken));
-      Break;
-    end;
+  LToken := Trim(Request.Headers.Values['Authorization']);
+  if Pos('Bearer ', LToken) = 1 then
+    LToken := Copy(LToken, 8, Length(LToken));
 
   if LToken = '' then
   begin
     Response.StatusCode := HTTP_UNAUTHORIZED;
-    Response.Body := '{"error":"Token not provided"}';
+    Response.Body := '{"error":"Unauthorized"}';
     Response.ContentType := APPLICATION_JSON;
     Result := True;
     Exit;
@@ -274,7 +357,7 @@ begin
     on E: Exception do
     begin
       Response.StatusCode := HTTP_UNAUTHORIZED;
-      Response.Body := '{"error":"' + E.Message + '"}';
+      Response.Body := '{"error":"Unauthorized"}';
       Response.ContentType := APPLICATION_JSON;
       Result := True;
     end;

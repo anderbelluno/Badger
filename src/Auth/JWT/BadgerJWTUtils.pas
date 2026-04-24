@@ -4,9 +4,19 @@ unit BadgerJWTUtils;
   {$mode delphi}{$H+}
 {$ENDIF}
 
+{$I ..\..\BadgerPlatform.inc}
+
 interface
 
 uses
+  {$IFDEF BADGER_WINDOWS}
+    Windows,
+  {$ENDIF}
+  {$IFDEF FPC}
+    {$IFDEF UNIX}
+      BaseUnix,
+    {$ENDIF}
+  {$ENDIF}
   SysUtils, Classes, BadgerUtils;
 
     function CreateSignature(const AHeader, APayload, ASecret: string): string;
@@ -17,6 +27,27 @@ uses
     function DateTimeToUnix(ADateTime: TDateTime): Int64;
 
 implementation
+
+{$IFDEF BADGER_WINDOWS}
+const
+  SDDL_REVISION_1 = 1;
+
+type
+  PSECURITY_DESCRIPTOR = Pointer;
+
+function ConvertStringSecurityDescriptorToSecurityDescriptorA(
+  StringSecurityDescriptor: PAnsiChar;
+  StringSDRevision: DWORD;
+  out SecurityDescriptor: PSECURITY_DESCRIPTOR;
+  SecurityDescriptorSize: Pointer
+): BOOL; stdcall; external 'advapi32.dll' name 'ConvertStringSecurityDescriptorToSecurityDescriptorA';
+
+function SetFileSecurityA(
+  lpFileName: PAnsiChar;
+  SecurityInformation: DWORD;
+  pSecurityDescriptor: PSECURITY_DESCRIPTOR
+): BOOL; stdcall; external 'advapi32.dll' name 'SetFileSecurityA';
+{$ENDIF}
 
 type
   TJWTBytes = array of Byte;
@@ -41,15 +72,54 @@ begin
   Result := Round((ADateTime - UnixStartDate) * 86400);
 end;
 
+procedure ApplyTokenFilePermissions(const AFileName: string);
+{$IFDEF BADGER_WINDOWS}
+const
+  // Owner/SYSTEM/Admins and execution contexts (interactive/service) full control, inheritance blocked.
+  TokenFileSDDL = 'D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;IU)(A;;FA;;;SU)';
+var
+  SD: PSECURITY_DESCRIPTOR;
+  AFileNameAnsi: AnsiString;
+{$ENDIF}
+begin
+  {$IFDEF FPC}
+    {$IFDEF UNIX}
+      fpchmod(PChar(AFileName), &700);
+    {$ENDIF}
+  {$ENDIF}
+
+  {$IFDEF BADGER_WINDOWS}
+    SD := nil;
+    AFileNameAnsi := AnsiString(AFileName);
+    if ConvertStringSecurityDescriptorToSecurityDescriptorA(
+         PAnsiChar(AnsiString(TokenFileSDDL)),
+         SDDL_REVISION_1,
+         SD,
+         nil) then
+    begin
+      try
+        SetFileSecurityA(PAnsiChar(AFileNameAnsi), DACL_SECURITY_INFORMATION, SD);
+      finally
+        LocalFree(HLOCAL(SD));
+      end;
+    end;
+  {$ENDIF}
+end;
+
+function StringToAnsiBytes(const S: string): TJWTBytes;
+var
+  I: Integer;
+begin
+  SetLength(Result, Length(S));
+  for I := 1 to Length(S) do
+    Result[I - 1] := Byte(AnsiChar(S[I]));
+end;
+
 procedure SaveToken(const AUserID, AToken, AStoragePath: string);
 var
   LFileName: string;
   FS: TFileStream;
-{$IFDEF UNICODE}
-  Buffer: TArray<Byte>;
-{$ELSE}
-  Buffer: TBytes;
-{$ENDIF}
+  Buffer: TJWTBytes;
 begin
   if AStoragePath = '' then
     Exit;
@@ -59,16 +129,13 @@ begin
     DeleteFile(LFileName);
   FS := TFileStream.Create(LFileName, fmCreate);
   try
-{$IFDEF UNICODE}
-    Buffer := TEncoding.ANSI.GetBytes(AToken);
-{$ELSE}
-    Buffer := TBytes(AToken);
-{$ENDIF}
+    Buffer := StringToAnsiBytes(AToken);
     if Length(Buffer) > 0 then
       FS.WriteBuffer(Buffer[0], Length(Buffer));
   finally
     FS.Free;
   end;
+  ApplyTokenFilePermissions(LFileName);
 end;
 
 function LoadToken(const AUserID, AStoragePath: string): string;
@@ -107,11 +174,7 @@ procedure SaveRefreshToken(const AUserID, AToken, AStoragePath: string);
 var
   LFileName: string;
   FS: TFileStream;
-{$IFDEF UNICODE}
-  Buffer: TArray<Byte>;
-{$ELSE}
-  Buffer: TBytes;
-{$ENDIF}
+  Buffer: TJWTBytes;
 begin
   if AStoragePath = '' then
     Exit;
@@ -121,20 +184,13 @@ begin
     DeleteFile(LFileName);
   FS := TFileStream.Create(LFileName, fmCreate);
   try
-    {$IFNDEF FPC}
-      {$IF CompilerVersion >= 20}
-          Buffer := TEncoding.ANSI.GetBytes(AToken);
-      {$ELSE}
-          Buffer := TBytes(AToken);
-      {$IFEND}
-    {$ELSE}
-          Buffer := TBytes(AToken);
-    {$ENDIF}
+    Buffer := StringToAnsiBytes(AToken);
     if Length(Buffer) > 0 then
       FS.WriteBuffer(Buffer[0], Length(Buffer));
   finally
     FS.Free;
   end;
+  ApplyTokenFilePermissions(LFileName);
 end;
 
 function LoadRefreshToken(const AUserID, AStoragePath: string): string;

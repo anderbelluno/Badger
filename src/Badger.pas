@@ -5,7 +5,7 @@ unit Badger;
 interface
 
 uses
-  {$IFDEF MSWINDOWS}Windows, {$ENDIF}
+  {$IFDEF BADGER_WINDOWS}Windows, {$ENDIF}
   {$IFDEF FPC}
     {$IFDEF UNIX}BaseUnix, Unix, {$ENDIF}
   {$ENDIF}
@@ -23,6 +23,7 @@ type
     FRouteManager: TRouteManager;
     FMethods: TBadgerMethods;
     FMiddlewares: TList;
+    FMiddlewareLock: TCriticalSection;
     FPort: Integer;
     FNonBlockMode: Boolean;
     FTimeout: Integer;
@@ -32,6 +33,7 @@ type
     FMaxConcurrentConnections: Integer;
     FActiveConnections: Integer;
     FSocketLock: TCriticalSection;
+    FClientSocketsLock: TCriticalSection;
     FShutdownEvent: TEvent;
     FIsShuttingDown: Boolean;
     FClientSockets: TList;
@@ -49,6 +51,7 @@ type
     function CanAcceptNewConnection: Boolean;
     procedure IncActiveConnections;
     procedure SafeCloseSocket;
+    procedure CloseClientSocketsForShutdown;
     procedure AddClientSocket(Socket: TTCPBlockSocket);
     procedure RemoveClientSocket(Socket: TTCPBlockSocket);
     procedure CleanupClientSockets;
@@ -97,8 +100,10 @@ begin
   FRouteManager := TRouteManager.Create;
   FMethods := TBadgerMethods.Create;
   FMiddlewares := TList.Create;
+  FMiddlewareLock := TCriticalSection.Create;
   FClientSockets := TList.Create;
   FSocketLock := TCriticalSection.Create;
+  FClientSocketsLock := TCriticalSection.Create;
   FShutdownEvent := TEvent.Create(nil, True, False, '');
   FPort := 8080;
   FNonBlockMode := True;
@@ -117,7 +122,6 @@ begin
   FCorsAllowedMethods.CaseSensitive := False;
   FCorsAllowedHeaders.CaseSensitive := False;
   FCorsExposeHeaders.CaseSensitive := False;
-  FCorsAllowedOrigins.Add('*');
   FCorsAllowedMethods.Add('GET');
   FCorsAllowedMethods.Add('POST');
   FCorsAllowedMethods.Add('PUT');
@@ -212,6 +216,13 @@ begin
   end;
 
   try
+    if Assigned(FMiddlewareLock) then FreeAndNil(FMiddlewareLock);
+  except
+    on E: Exception do
+      Logger.Error(Format('Error freeing FMiddlewareLock: %s', [E.Message]));
+  end;
+
+  try
     if Assigned(FClientSockets) then FreeAndNil(FClientSockets);
   except
     on E: Exception do
@@ -230,6 +241,13 @@ begin
   except
     on E: Exception do
       Logger.Error(Format('Error freeing FSocketLock: %s', [E.Message]));
+  end;
+
+  try
+    if Assigned(FClientSocketsLock) then FreeAndNil(FClientSocketsLock);
+  except
+    on E: Exception do
+      Logger.Error(Format('Error freeing FClientSocketsLock: %s', [E.Message]));
   end;
 
   try
@@ -268,9 +286,9 @@ procedure TBadger.AddClientSocket(Socket: TTCPBlockSocket);
 var
   SocketInfo: TClientSocketInfo;
 begin
-  if not Assigned(FClientSockets) or not Assigned(Socket) then Exit;
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) or not Assigned(Socket) then Exit;
 
-  FSocketLock.Acquire;
+  FClientSocketsLock.Acquire;
   try
     SocketInfo := TClientSocketInfo.Create;
     SocketInfo.Socket := Socket;
@@ -278,7 +296,7 @@ begin
     FClientSockets.Add(SocketInfo);
   //  Logger.info(Format('Added client socket. Total: %d', [FClientSockets.Count]));
   finally
-    FSocketLock.Release;
+    FClientSocketsLock.Release;
   end;
 end;
 
@@ -287,9 +305,9 @@ var
   I: Integer;
   SocketInfo: TClientSocketInfo;
 begin
-  if not Assigned(FClientSockets) or not Assigned(Socket) then Exit;
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) or not Assigned(Socket) then Exit;
 
-  FSocketLock.Acquire;
+  FClientSocketsLock.Acquire;
   try
     for I := 0 to FClientSockets.Count - 1 do
     begin
@@ -303,7 +321,7 @@ begin
       end;
     end;
   finally
-    FSocketLock.Release;
+    FClientSocketsLock.Release;
   end;
 end;
 
@@ -312,11 +330,11 @@ var
   I: Integer;
   SocketInfo: TClientSocketInfo;
 begin
-  if not Assigned(FClientSockets) or not Assigned(FSocketLock) then Exit;
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) then Exit;
 
 //  Logger.info(Format('Cleaning up %d client sockets', [FClientSockets.Count]));
 
-  FSocketLock.Acquire;
+  FClientSocketsLock.Acquire;
   try
     for I := FClientSockets.Count - 1 downto 0 do
     begin
@@ -344,10 +362,38 @@ begin
     end;
     FClientSockets.Clear;
   finally
-    FSocketLock.Release;
+    FClientSocketsLock.Release;
   end;
 
 //  Logger.info('Client sockets cleanup completed');
+end;
+
+procedure TBadger.CloseClientSocketsForShutdown;
+var
+  I: Integer;
+  SocketInfo: TClientSocketInfo;
+begin
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) then Exit;
+
+  FClientSocketsLock.Acquire;
+  try
+    for I := FClientSockets.Count - 1 downto 0 do
+    begin
+      SocketInfo := TClientSocketInfo(FClientSockets[I]);
+      if Assigned(SocketInfo) and Assigned(SocketInfo.Socket) then
+      begin
+        try
+          if SocketInfo.Socket.Socket <> INVALID_SOCKET then
+            SocketInfo.Socket.CloseSocket;
+        except
+          on E: Exception do
+            Logger.Error(Format('Error closing client socket during shutdown %d: %s', [I, E.Message]));
+        end;
+      end;
+    end;
+  finally
+    FClientSocketsLock.Release;
+  end;
 end;
 
 {$IFDEF UNIX}
@@ -375,19 +421,23 @@ begin
 end;
 
 procedure TBadger.DecActiveConnections;
+var
+  NewValue: Integer;
 begin
-  if not FIsShuttingDown then
+  {$IFDEF Delphi2009Plus}
+    NewValue := TInterlocked.Decrement(FActiveConnections);
+  {$ELSE}
+    NewValue := InterlockedDecrement(FActiveConnections);
+  {$ENDIF}
+
+  if NewValue < 0 then
   begin
     {$IFDEF Delphi2009Plus}
-      TInterlocked.Decrement(FActiveConnections)
+      TInterlocked.Exchange(FActiveConnections, 0);
     {$ELSE}
-      InterlockedDecrement(FActiveConnections);
+      InterlockedExchange(FActiveConnections, 0);
     {$ENDIF}
-
- //   Logger.info(Format('Decremented active connections: %d', [FActiveConnections]));
-  end
-  else
-    Logger.Warning('Warning: Server is shutting down, skipping DecActiveConnections');
+  end;
 end;
 
 procedure TBadger.NotifyClientSocketClosed(Socket: TTCPBlockSocket);
@@ -398,8 +448,16 @@ end;
 
 procedure TBadger.AddMiddleware(Middleware: TMiddlewareProc);
 begin
-  if not FIsShuttingDown and Assigned(FMiddlewares) then
-    FMiddlewares.Add(TMiddlewareWrapper.Create(Middleware));
+  if not Assigned(FMiddlewareLock) then
+    Exit;
+
+  FMiddlewareLock.Acquire;
+  try
+    if not FIsShuttingDown and Assigned(FMiddlewares) then
+      FMiddlewares.Add(TMiddlewareWrapper.Create(Middleware));
+  finally
+    FMiddlewareLock.Release;
+  end;
 end;
 
 procedure TBadger.Start;
@@ -477,7 +535,7 @@ end;
 procedure TBadger.Stop;
 var
   TimeoutCounter: Integer;
-  {$IFDEF MSWINDOWS}
+  {$IFDEF BADGER_WINDOWS}
   WaitResult: DWORD;
   {$ENDIF}
 const
@@ -504,6 +562,7 @@ begin
     FShutdownEvent.SetEvent;
 
   SafeCloseSocket;
+  CloseClientSocketsForShutdown;
 
   if FParallelProcessing then
   begin
@@ -521,7 +580,7 @@ begin
   Terminate;
 
   try
-    {$IFDEF MSWINDOWS}
+    {$IFDEF BADGER_WINDOWS}
     // Windows: usa WaitForSingleObject
     TimeoutCounter := 0;
     WaitResult := WaitForSingleObject(Handle, 100);
@@ -555,6 +614,7 @@ procedure TBadger.Execute;
 var
   ClientSocket: TTCPBlockSocket;
   ResponseInfo: TResponseInfo;
+  Accepted: Boolean;
 begin
   // OutputDebugString(PChar('TBadger.Execute: Server thread started'));
   FIsRunning := True;
@@ -564,74 +624,85 @@ begin
       try
         if not Assigned(FSocketLock) or not Assigned(FServerSocket) then Break;
 
-        FSocketLock.Acquire;
+        if FParallelProcessing and not CanAcceptNewConnection then
+        begin
+          // n�o segura lock global enquanto aguarda capacidade
+          Sleep(10);
+          Continue;
+        end;
+
+        if not Assigned(FServerSocket) or (FServerSocket.Socket = INVALID_SOCKET) then
+          Continue;
+
+        if not FServerSocket.CanRead(100) then
+          Continue;
+
+        ClientSocket := TTCPBlockSocket.Create;
         try
-          if Terminated or FIsShuttingDown then Break;
-
-          if Assigned(FServerSocket) and (FServerSocket.Socket <> INVALID_SOCKET) and
-             FServerSocket.CanRead(100) then
-          begin
-            if FParallelProcessing and not CanAcceptNewConnection then
-            begin
-              // OutputDebugString(PChar(Format('TBadger.Execute: Max concurrent connections reached: %d', [FActiveConnections])));
-              Sleep(10);
+          Accepted := False;
+          FSocketLock.Acquire;
+          try
+            if Terminated or FIsShuttingDown then
               Continue;
+
+            if not Assigned(FServerSocket) or (FServerSocket.Socket = INVALID_SOCKET) then
+              Continue;
+
+            ClientSocket.Socket := FServerSocket.Accept;
+            Accepted := (ClientSocket.LastError = 0);
+          finally
+            FSocketLock.Release;
+          end;
+
+          if Accepted then
+          begin
+            AddClientSocket(ClientSocket);
+
+            if FParallelProcessing then
+            begin
+              IncActiveConnections;
+              THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares, FMiddlewareLock,
+                                                FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
+              ClientSocket := nil;
+            end
+            else
+            begin
+              THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares, FMiddlewareLock,
+                                         FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
+              RemoveClientSocket(ClientSocket);
+              ClientSocket := nil;
             end;
-
-            // OutputDebugString(PChar('TBadger.Execute: Creating client socket'));
-            ClientSocket := TTCPBlockSocket.Create;
-            try
-              // OutputDebugString(PChar('TBadger.Execute: Accepting connection'));
-              ClientSocket.Socket := FServerSocket.Accept;
-              if ClientSocket.LastError = 0 then
-              begin
-                // OutputDebugString(PChar(Format('TBadger.Execute: New connection accepted. Active connections: %d', [FActiveConnections + 1])));
-                AddClientSocket(ClientSocket);
-
-                if FParallelProcessing then
-                begin
-                  IncActiveConnections;
-                  THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares,
-                                                    FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
-                  ClientSocket := nil;
-                end
-                else
-                begin
-                  THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares,
-                                             FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
-                  RemoveClientSocket(ClientSocket);
-                  ClientSocket := nil;
-                end;
-              end
-              else
-              begin
-                // OutputDebugString(PChar(Format('TBadger.Execute: Error accepting connection: %s', [ClientSocket.LastErrorDesc])));
-                if Assigned(FOnResponse) then
-                begin
-                  ResponseInfo.StatusCode := 500;
-                  ResponseInfo.StatusText := 'Internal Server Error';
-                  ResponseInfo.Body := 'Error accepting connection: ' + ClientSocket.LastErrorDesc;
-                  FOnResponse(ResponseInfo);
-                end;
-              end;
-            finally
-              if Assigned(ClientSocket) then
-              begin
-                RemoveClientSocket(ClientSocket);
-                try
-                  ClientSocket.CloseSocket;
-                  FreeAndNil(ClientSocket);
-                  // OutputDebugString(PChar('TBadger.Execute: ClientSocket freed due to error'));
-                except
-                  on E: Exception do
-                    // OutputDebugString(PChar(Format('TBadger.Execute: Error freeing ClientSocket: %s', [E.Message])));
-                end;
+          end
+          else
+          begin
+            if Assigned(FOnResponse) then
+            begin
+              FillChar(ResponseInfo, SizeOf(ResponseInfo), 0);
+              ResponseInfo.Headers := TStringList.Create;
+              try
+                ResponseInfo.StatusCode := 500;
+                ResponseInfo.StatusText := 'Internal Server Error';
+                ResponseInfo.Body := 'Error accepting connection: ' + ClientSocket.LastErrorDesc;
+                FOnResponse(ResponseInfo);
+              finally
+                ResponseInfo.Headers.Free;
               end;
             end;
           end;
         finally
-          FSocketLock.Release;
+          if Assigned(ClientSocket) then
+          begin
+            RemoveClientSocket(ClientSocket);
+            try
+              ClientSocket.CloseSocket;
+              FreeAndNil(ClientSocket);
+            except
+              on E: Exception do
+                ;
+            end;
+          end;
         end;
+
         if Terminated or FIsShuttingDown then Break;
         //Sleep(10);
       except

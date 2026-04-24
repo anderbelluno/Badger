@@ -111,5 +111,15 @@ object Form1: TForm1
       TabOrder = 2
       OnClick = btnClearLogClick
     end
+    object rdParallel: TCheckBox
+      Left = 16
+      Top = 32
+      Width = 129
+      Height = 17
+      Caption = 'Parallel Processing'
+      Checked = True
+      State = cbChecked
+      TabOrder = 3
+    end
   end
 end

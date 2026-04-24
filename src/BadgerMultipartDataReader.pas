@@ -3,7 +3,7 @@ unit BadgerMultipartDataReader;
 interface
 
 uses
-  SysUtils, Classes, Contnrs;
+  SysUtils, Classes, Contnrs, BadgerUploadUtils;
 
 type
   TFormDataFile = class
@@ -80,14 +80,15 @@ var
   MemoryStream: TMemoryStream;
 {$IFDEF VER150} // Delphi 7
   i: Integer; // Usando Integer para o loop no Delphi 7
-  Buffer: PChar;
+  BoundaryPtr, CurPtr: PChar;
   BoundaryLen: Integer;
 {$ELSE} // Delphi 2009+ e Lazarus
-  i: Int64;   // Usando Int64 para streams grandes em versıes novas
+  i: Int64;   // Usando Int64 para streams grandes em vers√µes novas
   BoundaryBytes: TBytes;
-  Buffer: PByte;
+  BoundaryPtr, CurPtr: PByte;
   BoundaryLen: Integer;
 {$ENDIF}
+  MaxPos: Int64;
 begin
   Result := -1;
 
@@ -97,6 +98,9 @@ begin
   BoundaryBytes := TEncoding.ANSI.GetBytes(Boundary);
   BoundaryLen := Length(BoundaryBytes);
 {$ENDIF}
+
+  if BoundaryLen <= 0 then
+    Exit;
 
   if Stream is TMemoryStream then
     MemoryStream := Stream as TMemoryStream
@@ -112,40 +116,44 @@ begin
   end;
 
   try
+    if MemoryStream.Size < BoundaryLen then
+      Exit;
+    if StartPos < 0 then
+      StartPos := 0;
+
+    MaxPos := MemoryStream.Size - BoundaryLen;
+    if StartPos > MaxPos then
+      Exit;
+
 {$IFDEF VER150} // Delphi 7
-    GetMem(Buffer, BoundaryLen);
-{$ELSE} // Delphi 2009+ e Lazarus
-    GetMem(Buffer, BoundaryLen);
-{$ENDIF}
-    try
-{$IFDEF VER150} // Delphi 7
-      for i := StartPos to MemoryStream.Size - BoundaryLen do
+    BoundaryPtr := PChar(Boundary);
+    CurPtr := PChar(MemoryStream.Memory);
+    Inc(CurPtr, Integer(StartPos));
+    for i := Integer(StartPos) to Integer(MaxPos) do
+    begin
+      if CompareMem(CurPtr, BoundaryPtr, BoundaryLen) then
       begin
-        MemoryStream.Position := i;
-        MemoryStream.ReadBuffer(Buffer^, BoundaryLen);
-        if CompareMem(Buffer, PChar(Boundary), BoundaryLen) then
-        begin
-          Result := i;
-          Break;
-        end;
+        Result := i;
+        Break;
       end;
-{$ELSE} // Delphi 2009+ e Lazarus
-      i := StartPos;
-      while i <= MemoryStream.Size - BoundaryLen do
-      begin
-        MemoryStream.Position := i;
-        MemoryStream.ReadBuffer(Buffer^, BoundaryLen);
-        if CompareMem(Buffer, @BoundaryBytes[0], BoundaryLen) then
-        begin
-          Result := i;
-          Break;
-        end;
-        Inc(i);
-      end;
-{$ENDIF}
-    finally
-      FreeMem(Buffer);
+      Inc(CurPtr);
     end;
+{$ELSE} // Delphi 2009+ e Lazarus
+    BoundaryPtr := @BoundaryBytes[0];
+    CurPtr := PByte(MemoryStream.Memory);
+    Inc(CurPtr, StartPos);
+    i := StartPos;
+    while i <= MaxPos do
+    begin
+      if CompareMem(CurPtr, BoundaryPtr, BoundaryLen) then
+      begin
+        Result := i;
+        Break;
+      end;
+      Inc(CurPtr);
+      Inc(i);
+    end;
+{$ENDIF}
   finally
     if not (Stream is TMemoryStream) then
       MemoryStream.Free;
@@ -176,19 +184,20 @@ begin
       Result := SubString;
   end;
 
-  if Trim(Result) = '' then
-    Result := 'unnamed_file_' + IntToStr(Random(10000)) + '.bin';
+  Result := SanitizeUploadFileName(Result);
 end;
 
 function TFormDataReader.UniqueFileName(const BaseName: string): string;
 var
   Counter: Integer;
+  SafeBaseName: string;
 begin
-  Result := BaseName;
+  SafeBaseName := SanitizeUploadFileName(BaseName);
+  Result := SafeBaseName;
   Counter := 1;
   while FileExists(Result) do
   begin
-    Result := ChangeFileExt(BaseName, '') + '_' + IntToStr(Counter) + ExtractFileExt(BaseName);
+    Result := ChangeFileExt(SafeBaseName, '') + '_' + IntToStr(Counter) + ExtractFileExt(SafeBaseName);
     Inc(Counter);
   end;
 end;
@@ -206,11 +215,13 @@ begin
   Result := TObjectList.Create(True);
   MemoryContent := TMemoryStream.Create;
   try
-   { if (not Assigned(AStream)) or (AStream.Size = 0) then
+    if (not Assigned(AStream)) or (AStream.Size = 0) then
     begin
-      ShowMessage('Stream de entrada inv·lido ou vazio.');
       Exit;
-    end;  }
+    end;
+
+    if ABoundary = '' then
+      Exit;
 
     MemoryContent.CopyFrom(AStream, AStream.Size);
     MemoryContent.Position := 0;
@@ -260,8 +271,6 @@ begin
           DataStream.CopyFrom(MemoryContent, PartEnd - HeaderEndPos);
           FormDataFile := TFormDataFile.Create(FileName, DataStream);
           Result.Add(FormDataFile);
-
-          //ShowMessage(Format('Parte processada - PartStart: %d, PartEnd: %d, FileName: %s, Tamanho: %d', [PartStart, PartEnd, FileName, DataStream.Size]));
         finally
           DataStream.Free;
         end;
@@ -270,8 +279,6 @@ begin
       PartStart := PartEnd;
     end;
 
-    {if Result.Count = 0 then
-      ShowMessage('Nenhum arquivo encontrado no multipart/form-data.');}
   finally
     MemoryContent.Free;
   end;

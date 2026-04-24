@@ -1,4 +1,4 @@
-﻿unit BadgerRequestHandler;
+unit BadgerRequestHandler;
 
 {$I BadgerDefines.inc}
 
@@ -20,19 +20,22 @@ type
     FRequestLine: string;
     FMethods: TBadgerMethods;
     FMiddlewares: TList;
+    FOwnMiddlewareObjects: Boolean;
+    FMiddlewareLock: TCriticalSection;
     FTimeout: Integer;
     FParentServer: TBadger;
     FIsParallel: Boolean;
     FEnableEventInfo: Boolean;
+    FSocketNotified: Boolean;
   protected
     procedure ParseRequestHeader(ClientSocket: TTCPBlockSocket; aHeaders: TStringList);
     function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean; HeaderCustom: TStringList): string;
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-                      AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
+                      AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
                       AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
     constructor CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-                              AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
+                              AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
                               AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
     destructor Destroy; override;
     procedure Execute; override;
@@ -40,10 +43,13 @@ type
 
 implementation
 
+type
+  EHeaderTooLarge = class(Exception);
+
 { THTTPRequestHandler }
 
 constructor THTTPRequestHandler.Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-  AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
+  AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
   AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
 var
   I: Integer;
@@ -55,19 +61,29 @@ begin
   FOnResponse := AOnResponse;
   FRouteManager := ARouteManager;
   FMethods := AMethods;
+  FMiddlewareLock := AMiddlewareLock;
   FMiddlewares := TList.Create;
+  FOwnMiddlewareObjects := False;
   FTimeout := ATimeout;
   FParentServer := AParentServer;
   FIsParallel := False;
   FEnableEventInfo := AEnableEventInfo;
+  FSocketNotified := False;
 
-  for I := 0 to AMiddlewares.Count - 1 do
-    FMiddlewares.Add(TMiddlewareWrapper.Create(TMiddlewareWrapper(AMiddlewares[I]).Middleware));
+  if Assigned(FMiddlewareLock) then
+    FMiddlewareLock.Acquire;
+  try
+    for I := 0 to AMiddlewares.Count - 1 do
+      FMiddlewares.Add(AMiddlewares[I]);
+  finally
+    if Assigned(FMiddlewareLock) then
+      FMiddlewareLock.Release;
+  end;
   Resume;
 end;
 
 constructor THTTPRequestHandler.CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-  AMethods: TBadgerMethods; AMiddlewares: TList; ATimeout: Integer;
+  AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
   AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
 var
   I: Integer;
@@ -79,14 +95,24 @@ begin
   FOnResponse := AOnResponse;
   FRouteManager := ARouteManager;
   FMethods := AMethods;
+  FMiddlewareLock := AMiddlewareLock;
   FMiddlewares := TList.Create;
+  FOwnMiddlewareObjects := False;
   FTimeout := ATimeout;
   FParentServer := AParentServer;
   FIsParallel := True;
   FEnableEventInfo := AEnableEventInfo;
+  FSocketNotified := False;
 
-  for I := 0 to AMiddlewares.Count - 1 do
-    FMiddlewares.Add(TMiddlewareWrapper.Create(TMiddlewareWrapper(AMiddlewares[I]).Middleware));
+  if Assigned(FMiddlewareLock) then
+    FMiddlewareLock.Acquire;
+  try
+    for I := 0 to AMiddlewares.Count - 1 do
+      FMiddlewares.Add(AMiddlewares[I]);
+  finally
+    if Assigned(FMiddlewareLock) then
+      FMiddlewareLock.Release;
+  end;
   Resume;
 end;
 
@@ -94,13 +120,16 @@ destructor THTTPRequestHandler.Destroy;
 var
   I: Integer;
 begin
-  if FIsParallel and Assigned(FParentServer) then
+  if FIsParallel and Assigned(FParentServer) and (not FSocketNotified) then
   begin
     try
-      FParentServer.DecActiveConnections;
+      if Assigned(FClientSocket) then
+        FParentServer.NotifyClientSocketClosed(FClientSocket)
+      else
+        FParentServer.DecActiveConnections;
     except
       on E: Exception do
-        Logger.Error(Format('Error in DecActiveConnections: %s', [E.Message]));
+        Logger.Error(Format('Error in NotifyClientSocketClosed/DecActiveConnections: %s', [E.Message]));
     end;
   end;
 
@@ -121,45 +150,85 @@ begin
     end;
   end;
 
-  for I := 0 to FMiddlewares.Count - 1 do
-    TObject(FMiddlewares[I]).Free;
+  if FOwnMiddlewareObjects then
+    for I := 0 to FMiddlewares.Count - 1 do
+      TObject(FMiddlewares[I]).Free;
   FMiddlewares.Free;
   inherited;
 end;
 
 procedure THTTPRequestHandler.ParseRequestHeader(ClientSocket: TTCPBlockSocket; aHeaders: TStringList);
+const
+  MaxHeaderLineSize = 16384; // 16KB por linha
+  MaxHeaderTotalSize = 65536; // 64KB acumulado
 var
   HeaderLine: string;
   SeparatorPos: Integer;
   Key, Value: string;
+  TotalHeaderSize: Integer;
 begin
-  try
-    repeat
-      HeaderLine := ClientSocket.RecvString(FTimeout);
-      if HeaderLine <> '' then
+  TotalHeaderSize := 0;
+  repeat
+    HeaderLine := ClientSocket.RecvString(FTimeout);
+    if ClientSocket.LastError <> 0 then
+      raise Exception.Create('Failed to read header line');
+
+    // Synapse can keep trailing CR on RecvString; normalize to avoid
+    // waiting FTimeout for the real blank line terminator.
+    while (Length(HeaderLine) > 0) and
+          ((HeaderLine[Length(HeaderLine)] = #13) or (HeaderLine[Length(HeaderLine)] = #10)) do
+      Delete(HeaderLine, Length(HeaderLine), 1);
+
+    Inc(TotalHeaderSize, Length(HeaderLine));
+    if Length(HeaderLine) > MaxHeaderLineSize then
+      raise EHeaderTooLarge.Create('Header line too large');
+    if TotalHeaderSize > MaxHeaderTotalSize then
+      raise EHeaderTooLarge.Create('Request headers too large');
+
+    if HeaderLine <> '' then
+    begin
+      SeparatorPos := Pos(':', HeaderLine);
+      if SeparatorPos > 0 then
       begin
-        SeparatorPos := Pos(':', HeaderLine);
-        if SeparatorPos > 0 then
-        begin
-          Key := Trim(Copy(HeaderLine, 1, SeparatorPos - 1));
-          Value := Trim(Copy(HeaderLine, SeparatorPos + 1, Length(HeaderLine)));
-          aHeaders.Add(Key + '=' + Value);
-        end
-        else
-          aHeaders.Add(HeaderLine + '=');
-      end;
-    until HeaderLine = '';
-  except
-    raise;
-  end;
+        Key := Trim(Copy(HeaderLine, 1, SeparatorPos - 1));
+        Value := Trim(Copy(HeaderLine, SeparatorPos + 1, Length(HeaderLine)));
+        aHeaders.Add(Key + '=' + Value);
+      end
+      else
+        aHeaders.Add(HeaderLine + '=');
+    end;
+  until HeaderLine = '';
 end;
 
 function THTTPRequestHandler.BuildHTTPResponse(StatusCode: Integer;
   Body: string; Stream: TStream; ContentType: string;
   CloseConnection: Boolean; HeaderCustom: TStringList): string;
+  function StripCRLF(const S: string): string;
+  begin
+    Result := StringReplace(S, #13, '', [rfReplaceAll]);
+    Result := StringReplace(Result, #10, '', [rfReplaceAll]);
+  end;
+
+  function SanitizeHeaderName(const S: string): string;
+  var
+    J: Integer;
+    Ch: Char;
+  begin
+    Result := '';
+    for J := 1 to Length(S) do
+    begin
+      Ch := S[J];
+      if (Ord(Ch) > 31) and (Ch <> ':') then
+        Result := Result + Ch
+      else
+        Result := Result + '_';
+    end;
+    Result := Trim(Result);
+  end;
 var
   EffectiveContentType: string;
   i: Integer;
+  HeaderName, HeaderValue: string;
 {$IFDEF Delphi2009Plus}
   UTF8Body: RawByteString;
 {$ELSE}
@@ -198,7 +267,10 @@ begin
   begin
     for i := 0 to Pred(HeaderCustom.Count) do
     begin
-      Result := Result + HeaderCustom.Names[i] + ':' + HeaderCustom.ValueFromIndex[i]+ CRLF;
+      HeaderName := SanitizeHeaderName(HeaderCustom.Names[i]);
+      HeaderValue := StripCRLF(HeaderCustom.ValueFromIndex[i]);
+      if HeaderName <> '' then
+        Result := Result + HeaderName + ':' + HeaderValue + CRLF;
     end;
   end;
 
@@ -222,6 +294,105 @@ procedure THTTPRequestHandler.Execute;
     Callback(ARequest, Response);
   end;
   {$ENDIF}
+
+  function ReadChunkedBodyToStream(AStream: TMemoryStream; out ATotalBytes: Integer): Boolean;
+  const
+    ChunkReadBufferSize = 1048576;
+    ChunkMaxRequestBodySize = 52428800;
+  var
+    ChunkLine, ChunkSizeHex: string;
+    ChunkSize, NeedRead, Got, P: Integer;
+{$IFDEF Delphi2009Plus}
+    LocalBytes: TBytes;
+{$ELSE}
+    LocalBytes: array of Byte;
+{$ENDIF}
+  begin
+    Result := False;
+    ATotalBytes := 0;
+
+    while True do
+    begin
+      ChunkLine := Trim(FClientSocket.RecvString(FTimeout));
+      if FClientSocket.LastError <> 0 then
+        Exit;
+
+      if ChunkLine = '' then
+        Continue;
+
+      P := Pos(';', ChunkLine); // ignora chunk extensions
+      if P > 0 then
+        ChunkSizeHex := Trim(Copy(ChunkLine, 1, P - 1))
+      else
+        ChunkSizeHex := ChunkLine;
+
+      try
+        ChunkSize := StrToInt('$' + ChunkSizeHex);
+      except
+        Exit;
+      end;
+
+      if ChunkSize < 0 then
+        Exit;
+
+      if ChunkSize = 0 then
+      begin
+        // L� trailers at� linha em branco final
+        repeat
+          ChunkLine := FClientSocket.RecvString(FTimeout);
+          if FClientSocket.LastError <> 0 then
+            Exit;
+        until ChunkLine = '';
+        Result := True;
+        Exit;
+      end;
+
+      if (ATotalBytes + ChunkSize) > ChunkMaxRequestBodySize then
+        Exit;
+
+      NeedRead := ChunkSize;
+      while NeedRead > 0 do
+      begin
+        SetLength(LocalBytes, Min(NeedRead, ChunkReadBufferSize));
+        Got := FClientSocket.RecvBufferEx(@LocalBytes[0], Length(LocalBytes), FTimeout);
+        if Got <= 0 then
+          Exit;
+        AStream.WriteBuffer(LocalBytes[0], Got);
+        Inc(ATotalBytes, Got);
+        Dec(NeedRead, Got);
+      end;
+
+      // consome CRLF ao final do chunk
+      ChunkLine := FClientSocket.RecvString(FTimeout);
+      if (FClientSocket.LastError <> 0) or (ChunkLine <> '') then
+        Exit;
+    end;
+  end;
+
+  procedure SplitCommaTokens(const AValue: string; ADest: TStringList);
+  var
+    I: Integer;
+    Token: string;
+  begin
+    ADest.Clear;
+    Token := '';
+    for I := 1 to Length(AValue) do
+    begin
+      if AValue[I] = ',' then
+      begin
+        Token := Trim(Token);
+        if Token <> '' then
+          ADest.Add(Token);
+        Token := '';
+      end
+      else
+        Token := Token + AValue[I];
+    end;
+
+    Token := Trim(Token);
+    if Token <> '' then
+      ADest.Add(Token);
+  end;
 
 const
   MaxBufferSize = 1048576;       // 1MB buffer de leitura
@@ -256,27 +427,70 @@ var
   RequestInfo: TRequestInfo;
   ResponseInfo: TResponseInfo;
   Handled: Boolean;
+  TransferEncoding: string;
+  IsChunked: Boolean;
   Origin, ACRM, ACRH, AllowOrigin, MethodsStr, HeadersStr, ExposeStr: string;
   HdrParts: TStringList;
   HdrPart: string;
+  OriginAllowed: Boolean;
+  AllowWildcardOrigin: Boolean;
+  SkipRequestProcessing: Boolean;
 begin
-  QueryParams := TStringList.Create;
-  Req.QueryParams := TStringList.Create;
-  Req.Headers := TStringList.Create;
+  FillChar(Req, SizeOf(Req), 0);
+  FillChar(Resp, SizeOf(Resp), 0);
+  QueryParams := nil;
+  Req.QueryParams := nil;
+  Req.Headers := nil;
   Req.Body := '';
   Req.BodyStream := nil;
-  Req.RouteParams := TStringList.Create;
+  Req.RouteParams := nil;
   Resp.Stream := nil;
-  Resp.HeadersCustom := TStringList.Create; // da branch1
-  RouteParams := TStringList.Create;
+  Resp.HeadersCustom := nil; // da branch1
+  RouteParams := nil;
   Headers := nil;
   BodyStream := nil;
   Handled := False;
   try
+    QueryParams := TStringList.Create;
+    Req.QueryParams := TStringList.Create;
+    Req.Headers := TStringList.Create;
+    Req.RouteParams := TStringList.Create;
+    Resp.HeadersCustom := TStringList.Create;
+    RouteParams := TStringList.Create;
+
     try
       repeat
+        // Reset per-request state to avoid keep-alive cross-request leakage
+        QueryParams.Clear;
+        RouteParams.Clear;
+        Req.QueryParams.Clear;
+        Req.Headers.Clear;
+        Req.RouteParams.Clear;
+        Req.Body := '';
+        if Assigned(Req.BodyStream) then
+          FreeAndNil(Req.BodyStream);
+        Req.Method := '';
+        Req.URI := '';
+        Req.RequestLine := '';
+        Resp.StatusCode := 0;
+        Resp.Body := '';
+        Resp.ContentType := '';
+        if Assigned(Resp.Stream) then
+          FreeAndNil(Resp.Stream);
+        Resp.HeadersCustom.Clear;
+        Headers := nil;
+        BodyStream := nil;
+        Handled := False;
+        SkipRequestProcessing := False;
+        Origin := '';
+        ACRM := '';
+        ACRH := '';
+
         if FClientSocket.LastError <> 0 then Break;
         FRequestLine := FClientSocket.RecvString(FTimeout);
+        while (Length(FRequestLine) > 0) and
+              ((FRequestLine[Length(FRequestLine)] = #13) or (FRequestLine[Length(FRequestLine)] = #10)) do
+          Delete(FRequestLine, Length(FRequestLine), 1);
         if FRequestLine = '' then Break;
 
         if not FMethods.ExtractMethodAndURI(FRequestLine, FMethod, FURI, QueryParams) then
@@ -284,58 +498,119 @@ begin
           Resp.StatusCode := HTTP_BAD_REQUEST;
           Resp.Body := 'Bad Request';
           Resp.ContentType := TEXT_PLAIN;
-          Break;
+          Handled := True;
+          CloseConnection := True;
+          SkipRequestProcessing := True;
         end;
 
-        Req.Method := FMethod;
-        Req.URI := FURI;
-        Req.RequestLine := FRequestLine;
-        Req.QueryParams.Assign(QueryParams);
-        Req.Socket := FClientSocket;
-        Req.FRemoteIP := FClientSocket.GetRemoteSinIP;
-        LRouteStr := UpperCase(Req.Method) + ' ' + LowerCase(Req.URI);
+        if not SkipRequestProcessing then
+        begin
+          Req.Method := FMethod;
+          Req.URI := FURI;
+          Req.RequestLine := FRequestLine;
+          Req.QueryParams.Assign(QueryParams);
+          Req.Socket := FClientSocket;
+          Req.FRemoteIP := FClientSocket.GetRemoteSinIP;
+          LRouteStr := UpperCase(Req.Method) + ' ' + LowerCase(Req.URI);
+        end;
 
         Headers := TStringList.Create();
         try
-          ParseRequestHeader(FClientSocket, Headers);
-          Req.Headers.Assign(Headers);
+          try
+            ParseRequestHeader(FClientSocket, Headers);
+            Req.Headers.Assign(Headers);
+          except
+            on E: EHeaderTooLarge do
+            begin
+              Resp.StatusCode := HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE;
+              Resp.Body := '{"error":"Request headers too large"}';
+              Resp.ContentType := APPLICATION_JSON;
+              Handled := True;
+              CloseConnection := True;
+              SkipRequestProcessing := True;
+            end;
+            on E: Exception do
+            begin
+              Resp.StatusCode := HTTP_BAD_REQUEST;
+              Resp.Body := '{"error":"Invalid request headers"}';
+              Resp.ContentType := APPLICATION_JSON;
+              Handled := True;
+              CloseConnection := True;
+              SkipRequestProcessing := True;
+            end;
+          end;
 
           ContentLength := StrToIntDef(Headers.Values['Content-Length'], 0);
           ContentType := Headers.Values['Content-Type'];
+          TransferEncoding := LowerCase(Trim(Headers.Values['Transfer-Encoding']));
+          IsChunked := Pos('chunked', TransferEncoding) > 0;
 
-          if ContentLength > MaxRequestBodySize then
+          if (not IsChunked) and (ContentLength > MaxRequestBodySize) then
           begin
             Resp.StatusCode := HTTP_PAYLOAD_TOO_LARGE;
             Resp.Body := '{"error":"Request body too large"}';
             Resp.ContentType := APPLICATION_JSON;
-            Break;
+            Handled := True;
+            CloseConnection := True;
+            SkipRequestProcessing := True;
           end;
 
-          if ContentLength > 0 then
+          if (not IsChunked) and (ContentLength < 0) then
+          begin
+            Resp.StatusCode := HTTP_BAD_REQUEST;
+            Resp.Body := '{"error":"Invalid Content-Length"}';
+            Resp.ContentType := APPLICATION_JSON;
+            Handled := True;
+            CloseConnection := True;
+            SkipRequestProcessing := True;
+          end;
+
+          if (not SkipRequestProcessing) and (IsChunked or (ContentLength > 0)) then
           begin
             BodyStream := TMemoryStream.Create;
             try
               TotalBytes := 0;
-              SetLength(TempBytes, Min(ContentLength, MaxBufferSize));
-              while (TotalBytes < ContentLength) and (FClientSocket.LastError = 0) do
-              begin
-                BytesRead := FClientSocket.RecvBufferEx(@TempBytes[0], Length(TempBytes), FTimeout);
-                if BytesRead <= 0 then Break;
-                BodyStream.Write(TempBytes[0], BytesRead);
-                Inc(TotalBytes, BytesRead);
-              end;
-              BodyStream.Position := 0;
 
+              if IsChunked then
+              begin
+                if not ReadChunkedBodyToStream(BodyStream, TotalBytes) then
+                begin
+                  Resp.StatusCode := HTTP_BAD_REQUEST;
+                  Resp.Body := '{"error":"Invalid chunked request body"}';
+                  Resp.ContentType := APPLICATION_JSON;
+                  Handled := True;
+                  CloseConnection := True;
+                  SkipRequestProcessing := True;
+                end;
+              end
+              else
+              begin
+                SetLength(TempBytes, Min(ContentLength, MaxBufferSize));
+                while (TotalBytes < ContentLength) and (FClientSocket.LastError = 0) do
+                begin
+                  BytesRead := FClientSocket.RecvBufferEx(@TempBytes[0], Length(TempBytes), FTimeout);
+                  if BytesRead <= 0 then Break;
+                  BodyStream.Write(TempBytes[0], BytesRead);
+                  Inc(TotalBytes, BytesRead);
+                end;
+              end;
+
+              BodyStream.Position := 0;
               if (Pos('application/json', LowerCase(ContentType)) > 0) or (Pos('text/', LowerCase(ContentType)) > 0) then
               begin
-                SetLength(TempBytes, TotalBytes);
-                BodyStream.ReadBuffer(TempBytes[0], TotalBytes);
-                SetString(Req.Body, PChar(@TempBytes[0]), TotalBytes);
-                {$IFDEF Delphi2009Plus}
-                Req.Body := TEncoding.UTF8.GetString(TempBytes);
-                {$ELSE}
-                Req.Body := CharsetConversion(Req.Body, UTF_8, GetCurCP);
-                {$ENDIF}
+                if TotalBytes > 0 then
+                begin
+                  SetLength(TempBytes, TotalBytes);
+                  BodyStream.ReadBuffer(TempBytes[0], TotalBytes);
+                  SetString(Req.Body, PChar(@TempBytes[0]), TotalBytes);
+                  {$IFDEF Delphi2009Plus}
+                  Req.Body := TEncoding.UTF8.GetString(TempBytes);
+                  {$ELSE}
+                  Req.Body := CharsetConversion(Req.Body, UTF_8, GetCurCP);
+                  {$ENDIF}
+                end
+                else
+                  Req.Body := '';
                 FreeAndNil(BodyStream);
               end
               else
@@ -364,9 +639,15 @@ begin
           ACRM := Headers.Values['Access-Control-Request-Method'];
           ACRH := Headers.Values['Access-Control-Request-Headers'];
 
-          if SameText(FMethod, 'OPTIONS') and (Origin <> '') and (ACRM <> '') and Assigned(FParentServer) and FParentServer.CorsEnabled then
+          if (not SkipRequestProcessing) and SameText(FMethod, 'OPTIONS') and (Origin <> '') and (ACRM <> '') and Assigned(FParentServer) and FParentServer.CorsEnabled then
           begin
-            if (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) or (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0) then
+            AllowWildcardOrigin := (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0);
+            if FParentServer.CorsAllowCredentials then
+              OriginAllowed := (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0)
+            else
+              OriginAllowed := AllowWildcardOrigin or (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0);
+
+            if OriginAllowed then
             begin
               if FParentServer.CorsAllowedMethods.IndexOf(UpperCase(ACRM)) < 0 then
               begin
@@ -384,11 +665,7 @@ begin
                 HeadersStr := '';
                 HdrParts := TStringList.Create;
                 try
-                  HdrParts.Delimiter := ',';
-                  {$IFNDEF VER150}
-                    HdrParts.StrictDelimiter := True;
-                  {$ENDIF}
-                  HdrParts.DelimitedText := ACRH;
+                  SplitCommaTokens(ACRH, HdrParts);
                   for I := 0 to HdrParts.Count - 1 do
                   begin
                     HdrPart := Trim(HdrParts[I]);
@@ -417,9 +694,9 @@ begin
               else
                 HeadersStr := FParentServer.CorsAllowedHeaders.CommaText;
 
-              if FParentServer.CorsAllowCredentials and (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) then
+              if FParentServer.CorsAllowCredentials then
                 AllowOrigin := Origin
-              else if (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) then
+              else if AllowWildcardOrigin then
                 AllowOrigin := '*'
               else
                 AllowOrigin := Origin;
@@ -456,24 +733,26 @@ begin
 
 
           // --- MIDDLEWARES ---
-          Handled := False;
-          for I := 0 to FMiddlewares.Count - 1 do
+          if not SkipRequestProcessing then
           begin
-            MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
-            try
-              if MiddlewareWrapper.Middleware(Req, Resp) then
-              begin
-                Handled := True;
-                Break;
-              end;
-            except
-              on E: Exception do
-              begin
-                Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-                Resp.Body := '{"error":"Middleware exception: ' + E.Message + '"}';
-                Resp.ContentType := APPLICATION_JSON;
-                Handled := True;
-                Break;
+            for I := 0 to FMiddlewares.Count - 1 do
+            begin
+              MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
+              try
+                if MiddlewareWrapper.Middleware(Req, Resp) then
+                begin
+                  Handled := True;
+                  Break;
+                end;
+              except
+                on E: Exception do
+                begin
+                  Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
+                  Resp.Body := '{"error":"Middleware exception: ' + E.Message + '"}';
+                  Resp.ContentType := APPLICATION_JSON;
+                  Handled := True;
+                  Break;
+                end;
               end;
             end;
           end;
@@ -506,11 +785,17 @@ begin
           // --- RESPOSTA ---
           if Assigned(FParentServer) and FParentServer.CorsEnabled and (Origin <> '') then
           begin
-            if (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) or (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0) then
+            AllowWildcardOrigin := (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0);
+            if FParentServer.CorsAllowCredentials then
+              OriginAllowed := (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0)
+            else
+              OriginAllowed := AllowWildcardOrigin or (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0);
+
+            if OriginAllowed then
             begin
-              if FParentServer.CorsAllowCredentials and (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) then
+              if FParentServer.CorsAllowCredentials then
                 AllowOrigin := Origin
-              else if (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0) then
+              else if AllowWildcardOrigin then
                 AllowOrigin := '*'
               else
                 AllowOrigin := Origin;
@@ -642,6 +927,16 @@ begin
 
     if Assigned(FClientSocket) then
     begin
+      if FIsParallel and Assigned(FParentServer) then
+      begin
+        try
+          FParentServer.NotifyClientSocketClosed(FClientSocket);
+          FSocketNotified := True;
+        except
+          on E: Exception do
+            Logger.Error(Format('Error in NotifyClientSocketClosed during execute cleanup: %s', [E.Message]));
+        end;
+      end;
       FClientSocket.CloseSocket;
       FreeAndNil(FClientSocket);
     end;
