@@ -1,0 +1,19 @@
+# Build artifacts produced by FPC and Delphi
+*.exe
+*.dcu
+*.o
+*.ppu
+*.compiled
+*.identcache
+*.local
+*.dproj.local
+*.tvsconfig
+*.dsk
+*.dsm
+*.~*
+__history/
+__recovery/
+Win32/
+Win64/
+debug/
+release/
