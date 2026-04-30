@@ -5,7 +5,7 @@ unit BadgerRequestHandler;
 interface
 
 uses
-  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, Math, Classes, SysUtils, StrUtils,
+  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, synacode, Math, Classes, SysUtils, StrUtils,
   BadgerRouteManager, BadgerMethods, BadgerHttpStatus, BadgerTypes, Badger, BadgerLogger;
 
 type
@@ -29,6 +29,7 @@ type
     FSocketNotified: Boolean;
   protected
     procedure ParseRequestHeader(ClientSocket: TTCPBlockSocket; aHeaders: TStringList);
+    procedure ProcessWebSocketHandshakeAndLoop(ClientSocket: TTCPBlockSocket; const URI, WSKey: string);
     function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean; HeaderCustom: TStringList): string;
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
@@ -214,6 +215,32 @@ begin
         aHeaders.Add(HeaderLine + '=');
     end;
   until HeaderLine = '';
+end;
+
+procedure THTTPRequestHandler.ProcessWebSocketHandshakeAndLoop(ClientSocket: TTCPBlockSocket; const URI, WSKey: string);
+const
+  WS_MAGIC_STRING = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+var
+  AcceptKey, ResponseHeader: string;
+begin
+  AcceptKey := EncodeBase64(SHA1(WSKey + WS_MAGIC_STRING));
+
+  ResponseHeader :=
+    'HTTP/1.1 101 Switching Protocols' + #13#10 +
+    'Upgrade: websocket' + #13#10 +
+    'Connection: Upgrade' + #13#10 +
+    'Sec-WebSocket-Accept: ' + AcceptKey + #13#10 + #13#10;
+
+  ClientSocket.SendString(ResponseHeader);
+
+  Logger.Info('WebSocket handshake established for ' + URI);
+
+  while ClientSocket.LastError = 0 do
+  begin
+    Sleep(50);
+  end;
+
+  Logger.Info('WebSocket connection closed for ' + URI);
 end;
 
 function THTTPRequestHandler.BuildHTTPResponse(StatusCode: Integer;
@@ -535,6 +562,16 @@ begin
           try
             ParseRequestHeader(FClientSocket, Headers);
             Req.Headers.Assign(Headers);
+
+            // WebSocket Interception
+            if SameText(Headers.Values['Upgrade'], 'websocket') and
+               (Pos('Upgrade', Headers.Values['Connection']) > 0) then
+            begin
+              SkipRequestProcessing := True;
+              Handled := True;
+              ProcessWebSocketHandshakeAndLoop(FClientSocket, Req.URI, Headers.Values['Sec-WebSocket-Key']);
+              Break;
+            end;
           except
             on E: EHeaderTooLarge do
             begin
