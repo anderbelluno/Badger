@@ -9,9 +9,25 @@ uses
   {$IFDEF FPC}
     {$IFDEF UNIX}BaseUnix, Unix, {$ENDIF}
   {$ENDIF}
+  {$IF (DEFINED(LINUX) OR DEFINED(POSIX)) AND NOT DEFINED(FPC)}
+  Posix.StrOpts,
+  {$IFEND}
   blcksock, synsock, SyncObjs, Classes, SysUtils, BadgerRouteManager, BadgerMethods, BadgerTypes, BadgerLogger, BadgerUtils;
 
 type
+  // On Delphi Linux, Synapse may use the macOS ioctl value for FIONREAD ($4004667F
+  // instead of Linux's $541B), causing WaitingData to always return 0 and
+  // RecvPacket to set WSAECONNRESET instead of reading available data.
+  // Override WaitingData here to use the correct Linux constant directly.
+  {$IF (DEFINED(LINUX) OR DEFINED(POSIX)) AND NOT DEFINED(FPC)}
+  TBadgerClientSocket = class(TTCPBlockSocket)
+  public
+    function WaitingData: Integer; override;
+  end;
+  {$ELSE}
+  TBadgerClientSocket = TTCPBlockSocket;
+  {$IFEND}
+
   TClientSocketInfo = class
     Socket: TTCPBlockSocket;
     InUse: Boolean;
@@ -55,9 +71,9 @@ type
     procedure AddClientSocket(Socket: TTCPBlockSocket);
     procedure RemoveClientSocket(Socket: TTCPBlockSocket);
     procedure CleanupClientSockets;
-    {$IFDEF UNIX}
+    {$IF DEFINED(UNIX) OR DEFINED(LINUX) OR DEFINED(POSIX)}
     function WaitForThreadTermination(TimeoutMs: Integer): Boolean;
-    {$ENDIF}
+    {$IFEND}
   public
     constructor Create;
     destructor Destroy; override;
@@ -89,6 +105,25 @@ implementation
 
 uses
   BadgerRequestHandler;
+
+{$IF (DEFINED(LINUX) OR DEFINED(POSIX)) AND NOT DEFINED(FPC)}
+{ TBadgerClientSocket }
+
+function TBadgerClientSocket.WaitingData: Integer;
+const
+  LINUX_FIONREAD = $541B;
+var
+  x: Integer;
+begin
+  x := 0;
+  if Posix.StrOpts.ioctl(FSocket, LINUX_FIONREAD, @x) = 0 then
+    Result := x
+  else
+    Result := 0;
+  if Result > 65536 then
+    Result := 65536;
+end;
+{$IFEND}
 
 { TBadger }
 
@@ -396,13 +431,13 @@ begin
   end;
 end;
 
-{$IFDEF UNIX}
+{$IF DEFINED(UNIX) OR DEFINED(LINUX) OR DEFINED(POSIX)}
 function TBadger.WaitForThreadTermination(TimeoutMs: Integer): Boolean;
 begin
   WaitFor;
   Result := Finished;
 end;
-{$ENDIF}
+{$IFEND}
 
 function TBadger.CanAcceptNewConnection: Boolean;
 begin
@@ -495,7 +530,6 @@ begin
       FServerSocket.EnableReuse(True);
       FServerSocket.CreateSocket;
       FServerSocket.setLinger(True, 10000);
-      FServerSocket.NonBlockMode := FNonBlockMode;
 //      Logger.Info(Format('TBadger.Start: Binding to port %d', [FPort]));
       FServerSocket.Bind('0.0.0.0', IntToStr(FPort));
       if FServerSocket.LastError = 0 then
@@ -525,11 +559,11 @@ begin
 
   FShutdownEvent.ResetEvent;
 
-  {$IFDEF FPC}
-    inherited Start;
+  {$IF DEFINED(FPC) OR DEFINED(DelphiXEPlus)}
+  inherited Start;
   {$ELSE}
-    Resume;
-  {$ENDIF}
+  Resume;
+  {$IFEND}
 end;
 
 procedure TBadger.Stop;
@@ -597,9 +631,9 @@ begin
     end;
     {$ENDIF}
 
-    {$IFDEF UNIX}
+    {$IF DEFINED(UNIX) OR DEFINED(LINUX) OR DEFINED(POSIX)}
     WaitFor;
-    {$ENDIF}
+    {$IFEND}
   except
     on E: Exception do
     begin
@@ -637,7 +671,7 @@ begin
         if not FServerSocket.CanRead(100) then
           Continue;
 
-        ClientSocket := TTCPBlockSocket.Create;
+        ClientSocket := TBadgerClientSocket.Create;
         try
           Accepted := False;
           FSocketLock.Acquire;

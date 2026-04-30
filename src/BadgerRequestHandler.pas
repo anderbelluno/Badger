@@ -54,7 +54,6 @@ constructor THTTPRequestHandler.Create(AClientSocket: TTCPBlockSocket; ARouteMan
 var
   I: Integer;
 begin
-  inherited Create(True);
   FreeOnTerminate := True;
   FClientSocket := AClientSocket;
   FOnRequest := AOnRequest;
@@ -79,7 +78,16 @@ begin
     if Assigned(FMiddlewareLock) then
       FMiddlewareLock.Release;
   end;
+  {$IF DEFINED(DelphiXEPlus) AND NOT DEFINED(FPC)}
+  inherited Create(False);  // AfterConstruction auto-starts; no explicit Start needed
+  {$ELSE}
+  inherited Create(True);
+  {$IFDEF FPC}
+  Start;
+  {$ELSE}
   Resume;
+  {$ENDIF}
+  {$IFEND}
 end;
 
 constructor THTTPRequestHandler.CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
@@ -88,7 +96,6 @@ constructor THTTPRequestHandler.CreateParallel(AClientSocket: TTCPBlockSocket; A
 var
   I: Integer;
 begin
-  inherited Create(True);
   FreeOnTerminate := True;
   FClientSocket := AClientSocket;
   FOnRequest := AOnRequest;
@@ -113,7 +120,16 @@ begin
     if Assigned(FMiddlewareLock) then
       FMiddlewareLock.Release;
   end;
+  {$IF DEFINED(DelphiXEPlus) AND NOT DEFINED(FPC)}
+  inherited Create(False);  // AfterConstruction auto-starts; no explicit Start needed
+  {$ELSE}
+  inherited Create(True);
+  {$IFDEF FPC}
+  Start;
+  {$ELSE}
   Resume;
+  {$ENDIF}
+  {$IFEND}
 end;
 
 destructor THTTPRequestHandler.Destroy;
