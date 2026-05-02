@@ -5,7 +5,7 @@ unit BadgerRequestHandler;
 interface
 
 uses
-  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, Math, Classes, SysUtils, StrUtils,
+  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, synacode, Math, Classes, SysUtils, StrUtils,
   BadgerRouteManager, BadgerMethods, BadgerHttpStatus, BadgerTypes, Badger, BadgerLogger;
 
 type
@@ -29,6 +29,7 @@ type
     FSocketNotified: Boolean;
   protected
     procedure ParseRequestHeader(ClientSocket: TTCPBlockSocket; aHeaders: TStringList);
+    procedure ProcessWebSocketHandshakeAndLoop(ClientSocket: TTCPBlockSocket; const URI, WSKey: string);
     function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean; HeaderCustom: TStringList): string;
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
@@ -214,6 +215,103 @@ begin
         aHeaders.Add(HeaderLine + '=');
     end;
   until HeaderLine = '';
+end;
+
+procedure THTTPRequestHandler.ProcessWebSocketHandshakeAndLoop(ClientSocket: TTCPBlockSocket; const URI, WSKey: string);
+const
+  WS_MAGIC_STRING = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+  WS_MAX_PAYLOAD  = 65535; // 64KB — rejeita frames maiores (proteção DoS)
+var
+  AcceptKey, ResponseHeader: string;
+  WSInput: AnsiString;
+  B1, B2: Byte;
+  FrameOpcode: Byte;
+  IsMasked: Boolean;
+  PayloadLen: Int64;
+  MaskKey: array[0..3] of Byte;
+  I: Integer;
+  DecodedStr: AnsiString;
+begin
+  // AnsiString() cast: no-op em D7/FPC; conversão explícita em D2009+ (seguro: WSKey é Base64 ASCII)
+  WSInput := AnsiString(WSKey) + AnsiString(WS_MAGIC_STRING);
+  AcceptKey := Trim(string(EncodeBase64(SHA1(WSInput))));
+
+  ResponseHeader :=
+    'HTTP/1.1 101 Switching Protocols' + #13#10 +
+    'Upgrade: websocket' + #13#10 +
+    'Connection: Upgrade' + #13#10 +
+    'Sec-WebSocket-Accept: ' + AcceptKey + #13#10 + #13#10;
+
+  ClientSocket.SendString(ResponseHeader);
+
+  Logger.Info('WebSocket handshake established for ' + URI);
+
+  // CanRead é cross-platform (select interno do Synapse).
+  // Retorna True quando há dado OU conexão fechada; False em timeout normal.
+  // Não depende de códigos de erro específicos do SO (10060/ETIMEDOUT).
+  repeat
+    if not ClientSocket.CanRead(200) then
+    begin
+      if ClientSocket.LastError <> 0 then Break; // erro real no select
+      Continue;                                   // timeout normal — verifica Terminated
+    end;
+
+    B1 := ClientSocket.RecvByte(1000);
+    if ClientSocket.LastError <> 0 then Break;
+
+    FrameOpcode := B1 and $0F;
+
+    // Opcode 8 = close frame (RFC 6455 §5.5.1)
+    if FrameOpcode = 8 then Break;
+
+    B2 := ClientSocket.RecvByte(1000);
+    if ClientSocket.LastError <> 0 then Break;
+    IsMasked   := (B2 and $80) = $80;
+    PayloadLen := B2 and $7F;
+
+    if PayloadLen = 126 then
+    begin
+      // 16-bit extended payload length (big-endian)
+      PayloadLen := (Int64(ClientSocket.RecvByte(1000)) shl 8) or ClientSocket.RecvByte(1000);
+      if ClientSocket.LastError <> 0 then Break;
+    end
+    else if PayloadLen = 127 then
+    begin
+      // 64-bit extended payload length — lê TODOS os 8 bytes; sem isso o stream dessincroniza.
+      PayloadLen := 0;
+      for I := 1 to 8 do
+        PayloadLen := (PayloadLen shl 8) or Int64(ClientSocket.RecvByte(1000));
+      if ClientSocket.LastError <> 0 then Break;
+      if PayloadLen > WS_MAX_PAYLOAD then Break; // frame gigante: fecha (DoS protection)
+    end;
+
+    if IsMasked then
+    begin
+      for I := 0 to 3 do
+        MaskKey[I] := ClientSocket.RecvByte(1000);
+      if ClientSocket.LastError <> 0 then Break;
+    end;
+
+    if PayloadLen > 0 then
+    begin
+      SetLength(DecodedStr, Integer(PayloadLen));
+      ClientSocket.RecvBufferEx(Pointer(DecodedStr), Integer(PayloadLen), 1000);
+      if ClientSocket.LastError <> 0 then Break;
+
+      if IsMasked then
+        for I := 0 to Integer(PayloadLen) - 1 do
+          DecodedStr[I + 1] := AnsiChar(Ord(DecodedStr[I + 1]) xor MaskKey[I mod 4]);
+
+      // Opcode 1 = text frame
+      if (FrameOpcode = 1) and
+         Assigned(FParentServer) and Assigned(FParentServer.OnWebSocketMessage) then
+        FParentServer.OnWebSocketMessage(
+          FParentServer.GetClientSocketInfo(ClientSocket), URI, DecodedStr);
+    end;
+
+  until Terminated;
+
+  Logger.Info('WebSocket connection closed for ' + URI);
 end;
 
 function THTTPRequestHandler.BuildHTTPResponse(StatusCode: Integer;
@@ -553,6 +651,42 @@ begin
               Handled := True;
               CloseConnection := True;
               SkipRequestProcessing := True;
+            end;
+          end;
+
+          // WebSocket upgrade — fora do try..except de headers: exceções no handshake
+          // não podem ser confundidas com erros de parse. 'Connection' é case-insensitive (RFC 7230).
+          if (not SkipRequestProcessing) and
+             SameText(Headers.Values['Upgrade'], 'websocket') and
+             (Pos('upgrade', LowerCase(Headers.Values['Connection'])) > 0) then
+          begin
+            if Headers.Values['Sec-WebSocket-Key'] = '' then
+            begin
+              Resp.StatusCode := HTTP_BAD_REQUEST;
+              Resp.Body := '{"error":"Missing Sec-WebSocket-Key"}';
+              Resp.ContentType := APPLICATION_JSON;
+              Handled := True;
+              CloseConnection := True;
+              SkipRequestProcessing := True;
+            end
+            else if Headers.Values['Sec-WebSocket-Version'] <> '13' then
+            begin
+              Resp.StatusCode := HTTP_BAD_REQUEST;
+              Resp.Body := '{"error":"Unsupported WebSocket version"}';
+              Resp.ContentType := APPLICATION_JSON;
+              Resp.HeadersCustom.Values['Sec-WebSocket-Version'] := '13';
+              Handled := True;
+              CloseConnection := True;
+              SkipRequestProcessing := True;
+            end
+            else
+            begin
+              SkipRequestProcessing := True;
+              Handled := True;
+              if Assigned(FParentServer) then
+                FParentServer.SetClientSocketURI(FClientSocket, FURI);
+              ProcessWebSocketHandshakeAndLoop(FClientSocket, FURI, Headers.Values['Sec-WebSocket-Key']);
+              Break;
             end;
           end;
 

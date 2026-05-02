@@ -3,9 +3,18 @@ unit BadgerTypes;
 interface
 
 uses
-  Classes, SysUtils, Contnrs, blcksock;
+  Classes, SysUtils, Contnrs, blcksock, SyncObjs;
 
 type
+  TClientSocketInfo = class
+    Socket: TTCPBlockSocket;
+    InUse: Boolean;
+    URI: string;
+    IOLock: TCriticalSection;
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
   THTTPRequest = record
     Socket: TTCPBlockSocket;
     URI, Method, RequestLine: string;
@@ -53,6 +62,8 @@ type
   TMiddlewareProc = function(var Request: THTTPRequest; var Response: THTTPResponse): Boolean of object;
   TRoutingCallback = procedure(Request: THTTPRequest; var Response: THTTPResponse) of object;
 
+  TWebSocketMessageEvent = procedure(ClientInfo: TClientSocketInfo; const URI, AMessage: string) of object;
+
   TMiddlewareWrapper = class
   public
     Middleware: TMiddlewareProc;
@@ -60,6 +71,20 @@ type
   end;
 
 implementation
+
+{ TClientSocketInfo }
+
+constructor TClientSocketInfo.Create;
+begin
+  inherited Create;
+  IOLock := TCriticalSection.Create;
+end;
+
+destructor TClientSocketInfo.Destroy;
+begin
+  IOLock.Free;
+  inherited Destroy;
+end;
 
 { TMiddlewareWrapper }
 
