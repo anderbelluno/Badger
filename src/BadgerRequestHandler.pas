@@ -222,6 +222,14 @@ const
   WS_MAGIC_STRING = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 var
   AcceptKey, ResponseHeader: string;
+  B1, B2: Byte;
+  FrameOpcode: Byte;
+  IsMasked: Boolean;
+  PayloadLen: Int64;
+  MaskKey: array[0..3] of Byte;
+  I: Integer;
+  DecodedStr: AnsiString;
+  RawByte: Byte;
 begin
   AcceptKey := EncodeBase64(SHA1(WSKey + WS_MAGIC_STRING));
 
@@ -235,9 +243,64 @@ begin
 
   Logger.Info('WebSocket handshake established for ' + URI);
 
-  while ClientSocket.LastError = 0 do
+  // Fica girando até que ocorra um erro fatal na rede.
+  // 10060 é timeout normal de inatividade (quando passamos 50ms na porta e não chegou pacote).
+  while (ClientSocket.LastError = 0) or (ClientSocket.LastError = 10060) do
   begin
-    Sleep(50);
+    if ClientSocket.CanRead(50) then
+    begin
+      B1 := ClientSocket.RecvByte(0);
+      if (ClientSocket.LastError <> 0) and (ClientSocket.LastError <> 10060) then Break;
+      if ClientSocket.LastError = 10060 then Continue;
+
+      FrameOpcode := B1 and $0F;
+      
+      // Se opcode = 8, cliente disparou ws.close()
+      if FrameOpcode = 8 then Break;
+
+      B2 := ClientSocket.RecvByte(100);
+      IsMasked := (B2 and $80) = $80;
+      PayloadLen := B2 and $7F;
+
+      if PayloadLen = 126 then
+      begin
+        PayloadLen := (Integer(ClientSocket.RecvByte(100)) shl 8) + ClientSocket.RecvByte(100);
+      end
+      else if PayloadLen = 127 then
+      begin
+        for I := 1 to 8 do ClientSocket.RecvByte(100); // Descarta gigabytes SCADA por segurança
+        PayloadLen := 0; 
+      end;
+
+      if IsMasked then
+      begin
+        for I := 0 to 3 do MaskKey[I] := ClientSocket.RecvByte(100);
+      end;
+
+      if PayloadLen > 0 then
+      begin
+        SetLength(DecodedStr, PayloadLen);
+        ClientSocket.RecvBufferEx(Pointer(DecodedStr), PayloadLen, 1000);
+        
+        if IsMasked then
+        begin
+          for I := 0 to PayloadLen - 1 do
+          begin
+            RawByte := Ord(DecodedStr[I + 1]);
+            DecodedStr[I + 1] := Chr(RawByte xor MaskKey[I mod 4]);
+          end;
+        end;
+
+        // Se for um pacote de texto válido (1), joga pro evento!
+        if FrameOpcode = 1 then
+        begin
+          if Assigned(FParentServer) and Assigned(FParentServer.OnWebSocketMessage) then
+          begin
+            FParentServer.OnWebSocketMessage(FParentServer.GetClientSocketInfo(ClientSocket), URI, DecodedStr);
+          end;
+        end;
+      end;
+    end;
   end;
 
   Logger.Info('WebSocket connection closed for ' + URI);
@@ -569,6 +632,8 @@ begin
             begin
               SkipRequestProcessing := True;
               Handled := True;
+              if Assigned(FParentServer) then
+                FParentServer.SetClientSocketURI(FClientSocket, Req.URI);
               ProcessWebSocketHandshakeAndLoop(FClientSocket, Req.URI, Headers.Values['Sec-WebSocket-Key']);
               Break;
             end;

@@ -28,10 +28,7 @@ type
   TBadgerClientSocket = TTCPBlockSocket;
   {$IFEND}
 
-  TClientSocketInfo = class
-    Socket: TTCPBlockSocket;
-    InUse: Boolean;
-  end;
+
 
   TBadger = class(TThread)
   private
@@ -45,6 +42,7 @@ type
     FTimeout: Integer;
     FOnRequest: TOnRequest;
     FOnResponse: TOnResponse;
+    FOnWebSocketMessage: TWebSocketMessageEvent;
     FParallelProcessing: Boolean;
     FMaxConcurrentConnections: Integer;
     FActiveConnections: Integer;
@@ -82,6 +80,11 @@ type
     procedure Stop;
     procedure DecActiveConnections;
     procedure NotifyClientSocketClosed(Socket: TTCPBlockSocket);
+    procedure SendWebSocketTextFrame(Socket: TTCPBlockSocket; const AMessage: string);
+    procedure BroadcastWebSocketText(const AMessage: string);
+    procedure SendToWebSocketRoute(const AURI, AMessage: string);
+    procedure SetClientSocketURI(Socket: TTCPBlockSocket; const AURI: string);
+    function GetClientSocketInfo(Socket: TTCPBlockSocket): TClientSocketInfo;
     property NonBlockMode: Boolean read FNonBlockMode write FNonBlockMode;
     property Port: Integer read FPort write FPort;
     property RouteManager: TRouteManager read FRouteManager;
@@ -90,6 +93,7 @@ type
     property MaxConcurrentConnections: Integer read FMaxConcurrentConnections write FMaxConcurrentConnections default 100;
     property OnRequest: TOnRequest read FOnRequest write FOnRequest;
     property OnResponse: TOnResponse read FOnResponse write FOnResponse;
+    property OnWebSocketMessage: TWebSocketMessageEvent read FOnWebSocketMessage write FOnWebSocketMessage;
     property IsRunning: Boolean read FIsRunning;
     property EnableEventInfo: Boolean read FEnableEventInfo write FEnableEventInfo;
     property CorsEnabled: Boolean read FCorsEnabled write FCorsEnabled;
@@ -328,6 +332,7 @@ begin
     SocketInfo := TClientSocketInfo.Create;
     SocketInfo.Socket := Socket;
     SocketInfo.InUse := True;
+    SocketInfo.URI := '';
     FClientSockets.Add(SocketInfo);
   //  Logger.info(Format('Added client socket. Total: %d', [FClientSockets.Count]));
   finally
@@ -479,6 +484,148 @@ procedure TBadger.NotifyClientSocketClosed(Socket: TTCPBlockSocket);
 begin
   RemoveClientSocket(Socket);
   DecActiveConnections;
+end;
+
+procedure TBadger.SendWebSocketTextFrame(Socket: TTCPBlockSocket; const AMessage: string);
+var
+  Len: Int64;
+  Header: array[0..3] of Byte;
+  HeaderSize: Integer;
+  UTF8Msg: AnsiString;
+begin
+  if not Assigned(Socket) or (Socket.Socket = INVALID_SOCKET) then Exit;
+
+  UTF8Msg := UTF8Encode(AMessage); 
+  Len := Length(UTF8Msg);
+  
+  Header[0] := $81; // FIN = 1, Opcode = 1 (Texto)
+
+  if Len <= 125 then
+  begin
+    Header[1] := Byte(Len);
+    HeaderSize := 2;
+  end
+  else if Len <= 65535 then
+  begin
+    Header[1] := 126;
+    Header[2] := Byte((Len shr 8) and $FF); // Big Endian High
+    Header[3] := Byte(Len and $FF);         // Big Endian Low
+    HeaderSize := 4;
+  end
+  else
+  begin
+    Exit; // Proteção, ignora strings maiores que 65kb pra websocket SCADA.
+  end;
+
+  // Envia Header Binário
+  Socket.SendBuffer(@Header[0], HeaderSize);
+  
+  // Envia o Corpo
+  if Len > 0 then
+    Socket.SendBuffer(Pointer(UTF8Msg), Len);
+end;
+
+procedure TBadger.BroadcastWebSocketText(const AMessage: string);
+var
+  I: Integer;
+  SocketInfo: TClientSocketInfo;
+begin
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) then Exit;
+
+  FClientSocketsLock.Acquire;
+  try
+    for I := 0 to FClientSockets.Count - 1 do
+    begin
+      SocketInfo := TClientSocketInfo(FClientSockets[I]);
+      if Assigned(SocketInfo) and Assigned(SocketInfo.Socket) then
+      begin
+        try
+          if SocketInfo.Socket.Socket <> INVALID_SOCKET then
+            SendWebSocketTextFrame(SocketInfo.Socket, AMessage);
+        except
+        end;
+      end;
+    end;
+  finally
+    FClientSocketsLock.Release;
+  end;
+end;
+
+procedure TBadger.SetClientSocketURI(Socket: TTCPBlockSocket; const AURI: string);
+var
+  I: Integer;
+  SocketInfo: TClientSocketInfo;
+begin
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) then Exit;
+
+  FClientSocketsLock.Acquire;
+  try
+    for I := 0 to FClientSockets.Count - 1 do
+    begin
+      SocketInfo := TClientSocketInfo(FClientSockets[I]);
+      if Assigned(SocketInfo) and (SocketInfo.Socket = Socket) then
+      begin
+        SocketInfo.URI := AURI;
+        Break;
+      end;
+    end;
+  finally
+    FClientSocketsLock.Release;
+  end;
+end;
+
+function TBadger.GetClientSocketInfo(Socket: TTCPBlockSocket): TClientSocketInfo;
+var
+  I: Integer;
+begin
+  Result := nil;
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) then Exit;
+
+  FClientSocketsLock.Acquire;
+  try
+    for I := 0 to FClientSockets.Count - 1 do
+      if TClientSocketInfo(FClientSockets[I]).Socket = Socket then
+      begin
+        Result := TClientSocketInfo(FClientSockets[I]);
+        Break;
+      end;
+  finally
+    FClientSocketsLock.Release;
+  end;
+end;
+
+procedure TBadger.SendToWebSocketRoute(const AURI, AMessage: string);
+var
+  I: Integer;
+  SocketInfo: TClientSocketInfo;
+begin
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) then Exit;
+
+  FClientSocketsLock.Acquire;
+  try
+    for I := 0 to FClientSockets.Count - 1 do
+    begin
+      SocketInfo := TClientSocketInfo(FClientSockets[I]);
+      if Assigned(SocketInfo) and Assigned(SocketInfo.Socket) and
+         (SameText(SocketInfo.URI, AURI) or (AURI = '*')) then
+      begin
+        try
+          if SocketInfo.Socket.Socket <> INVALID_SOCKET then
+          begin
+            SocketInfo.IOLock.Acquire;
+            try
+              SendWebSocketTextFrame(SocketInfo.Socket, AMessage);
+            finally
+              SocketInfo.IOLock.Release;
+            end;
+          end;
+        except
+        end;
+      end;
+    end;
+  finally
+    FClientSocketsLock.Release;
+  end;
 end;
 
 procedure TBadger.AddMiddleware(Middleware: TMiddlewareProc);
