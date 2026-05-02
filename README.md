@@ -23,7 +23,7 @@
 - 99th percentile: **42 ms**
 - Errors: **0%**
 
-> Important: the tests were performed with **Keep-Alive = true** (persistent connections). This significantly reduces connection setup overhead and is a critical factor contributing to the high throughput observed.
+> Important: Tests were performed with **Keep-Alive = true** (persistent connections) on Windows only — on Linux, this must be set to false. Persistent connections significantly reduce connection-setup overhead and are a key factor behind the high throughput observed.
 
 ![JMeter Benchmark](https://github.com/anderbelluno/Badger/blob/main/img/JMeter_benchmark.png?raw=true)
 
@@ -38,6 +38,83 @@
 - **MIME Type Handling**: Utility functions for recognizing MIME types of files.
 - **Cross-Platform**: Designed to work with both Delphi and Lazarus (FPC).
 - **Logger**: Flexible and thread-safe logging via `BadgerLogger`.
+
+---
+
+## 🔌 WebSocket Support
+
+Badger provides full-featured WebSocket support following the **RFC 6455** standard, enabling real-time bidirectional communication between clients and servers.
+
+### Architecture & Implementation
+
+The WebSocket implementation was developed progressively across three key stages:
+
+1. **RFC 6455 Handshake** ([commit 89600b5](https://github.com/anderbelluno/Badger/commit/89600b57d0bca3cb8a13dabba57464511d2f663f)) - Implements native WebSocket handshake and connection upgrade, intercepting HTTP Upgrade requests, performing RFC 6455 handshake using Base64 + SHA1, and transitioning to persistent bidirectional communication.
+
+2. **Bidirectional Communication** ([commit 0bc70b7](https://github.com/anderbelluno/Badger/commit/0bc70b7bd21ad285a583c610bc5bfd9835a2e470)) - Enables robust bidirectional communication by adding inbound data decoding with proper payload unmasking using XOR, migrating TClientSocketInfo for proper struct sharing, and implementing thread-safe message broadcasting with mutex locks.
+
+3. **Security & DoS Protection** ([commit 2a8dff9](https://github.com/anderbelluno/Badger/commit/2a8dff91c4a5ee5a2bbd3a10212425b873755c44)) - Improves robustness with payload size validation, extended length handling (126 and 127 opcodes), graceful close frame handling, and comprehensive validation of Sec-WebSocket-Key and version requirements.
+
+### Key Features
+
+- ✅ Full RFC 6455 compliance with proper handshake and frame formatting
+- ✅ Bidirectional real-time messaging with persistent connections
+- ✅ Payload masking/unmasking with bitwise XOR operations
+- ✅ DoS protection with configurable maximum payload size (default: 65,535 bytes)
+- ✅ Extended payload support for frames larger than 125 bytes
+- ✅ Graceful connection closure handling
+- ✅ Thread-safe message broadcasting for concurrent clients
+- ✅ Cross-platform reliability with timeout-based read loops
+
+### Usage Example - Server
+
+```pascal
+uses
+  Badger, BadgerTypes, BadgerLogger;
+
+procedure HandleWebSocketMessage(Sender: TObject; ClientInfo: TClientSocketInfo; 
+  const Message: string);
+begin
+  Logger.Info('WebSocket message from client: ' + Message);
+  // Handle incoming message, echo back, or broadcast to other clients
+end;
+
+begin
+  ServerThread := TBadger.Create;
+  ServerThread.Port := 8080;
+  ServerThread.Timeout := 5000;
+  ServerThread.NonBlockMode := True;
+  
+  ServerThread.OnRequest := HandleRequest;
+  ServerThread.OnResponse := HandleResponse;
+  ServerThread.OnWebSocketMessage := HandleWebSocketMessage;
+  
+  ServerThread.Start;
+end.
+```
+
+### Usage Example - Client (JavaScript)
+
+```javascript
+const ws = new WebSocket('ws://localhost:8080/chat');
+
+ws.onopen = function(event) {
+  console.log('Connected to Badger server');
+  ws.send('Hello from browser!');
+};
+
+ws.onmessage = function(event) {
+  console.log('Message received:', event.data);
+};
+
+ws.onerror = function(error) {
+  console.error('WebSocket error:', error);
+};
+
+ws.onclose = function(event) {
+  console.log('Disconnected from server');
+};
+```
 
 ---
 
