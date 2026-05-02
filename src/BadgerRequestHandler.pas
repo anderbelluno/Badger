@@ -220,8 +220,10 @@ end;
 procedure THTTPRequestHandler.ProcessWebSocketHandshakeAndLoop(ClientSocket: TTCPBlockSocket; const URI, WSKey: string);
 const
   WS_MAGIC_STRING = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+  WS_MAX_PAYLOAD  = 65535; // 64KB — rejeita frames maiores (proteção DoS)
 var
   AcceptKey, ResponseHeader: string;
+  WSInput: AnsiString;
   B1, B2: Byte;
   FrameOpcode: Byte;
   IsMasked: Boolean;
@@ -229,9 +231,10 @@ var
   MaskKey: array[0..3] of Byte;
   I: Integer;
   DecodedStr: AnsiString;
-  RawByte: Byte;
 begin
-  AcceptKey := EncodeBase64(SHA1(WSKey + WS_MAGIC_STRING));
+  // AnsiString() cast: no-op em D7/FPC; conversão explícita em D2009+ (seguro: WSKey é Base64 ASCII)
+  WSInput := AnsiString(WSKey) + AnsiString(WS_MAGIC_STRING);
+  AcceptKey := Trim(string(EncodeBase64(SHA1(WSInput))));
 
   ResponseHeader :=
     'HTTP/1.1 101 Switching Protocols' + #13#10 +
@@ -243,65 +246,70 @@ begin
 
   Logger.Info('WebSocket handshake established for ' + URI);
 
-  // Fica girando até que ocorra um erro fatal na rede.
-  // 10060 é timeout normal de inatividade (quando passamos 50ms na porta e não chegou pacote).
-  while (ClientSocket.LastError = 0) or (ClientSocket.LastError = 10060) do
-  begin
-    if ClientSocket.CanRead(50) then
+  // CanRead é cross-platform (select interno do Synapse).
+  // Retorna True quando há dado OU conexão fechada; False em timeout normal.
+  // Não depende de códigos de erro específicos do SO (10060/ETIMEDOUT).
+  repeat
+    if not ClientSocket.CanRead(200) then
     begin
-      B1 := ClientSocket.RecvByte(0);
-      if (ClientSocket.LastError <> 0) and (ClientSocket.LastError <> 10060) then Break;
-      if ClientSocket.LastError = 10060 then Continue;
+      if ClientSocket.LastError <> 0 then Break; // erro real no select
+      Continue;                                   // timeout normal — verifica Terminated
+    end;
 
-      FrameOpcode := B1 and $0F;
-      
-      // Se opcode = 8, cliente disparou ws.close()
-      if FrameOpcode = 8 then Break;
+    B1 := ClientSocket.RecvByte(1000);
+    if ClientSocket.LastError <> 0 then Break;
 
-      B2 := ClientSocket.RecvByte(100);
-      IsMasked := (B2 and $80) = $80;
-      PayloadLen := B2 and $7F;
+    FrameOpcode := B1 and $0F;
 
-      if PayloadLen = 126 then
-      begin
-        PayloadLen := (Integer(ClientSocket.RecvByte(100)) shl 8) + ClientSocket.RecvByte(100);
-      end
-      else if PayloadLen = 127 then
-      begin
-        for I := 1 to 8 do ClientSocket.RecvByte(100); // Descarta gigabytes SCADA por segurança
-        PayloadLen := 0; 
-      end;
+    // Opcode 8 = close frame (RFC 6455 §5.5.1)
+    if FrameOpcode = 8 then Break;
+
+    B2 := ClientSocket.RecvByte(1000);
+    if ClientSocket.LastError <> 0 then Break;
+    IsMasked   := (B2 and $80) = $80;
+    PayloadLen := B2 and $7F;
+
+    if PayloadLen = 126 then
+    begin
+      // 16-bit extended payload length (big-endian)
+      PayloadLen := (Int64(ClientSocket.RecvByte(1000)) shl 8) or ClientSocket.RecvByte(1000);
+      if ClientSocket.LastError <> 0 then Break;
+    end
+    else if PayloadLen = 127 then
+    begin
+      // 64-bit extended payload length — lê TODOS os 8 bytes; sem isso o stream dessincroniza.
+      PayloadLen := 0;
+      for I := 1 to 8 do
+        PayloadLen := (PayloadLen shl 8) or Int64(ClientSocket.RecvByte(1000));
+      if ClientSocket.LastError <> 0 then Break;
+      if PayloadLen > WS_MAX_PAYLOAD then Break; // frame gigante: fecha (DoS protection)
+    end;
+
+    if IsMasked then
+    begin
+      for I := 0 to 3 do
+        MaskKey[I] := ClientSocket.RecvByte(1000);
+      if ClientSocket.LastError <> 0 then Break;
+    end;
+
+    if PayloadLen > 0 then
+    begin
+      SetLength(DecodedStr, Integer(PayloadLen));
+      ClientSocket.RecvBufferEx(Pointer(DecodedStr), Integer(PayloadLen), 1000);
+      if ClientSocket.LastError <> 0 then Break;
 
       if IsMasked then
-      begin
-        for I := 0 to 3 do MaskKey[I] := ClientSocket.RecvByte(100);
-      end;
+        for I := 0 to Integer(PayloadLen) - 1 do
+          DecodedStr[I + 1] := AnsiChar(Ord(DecodedStr[I + 1]) xor MaskKey[I mod 4]);
 
-      if PayloadLen > 0 then
-      begin
-        SetLength(DecodedStr, PayloadLen);
-        ClientSocket.RecvBufferEx(Pointer(DecodedStr), PayloadLen, 1000);
-        
-        if IsMasked then
-        begin
-          for I := 0 to PayloadLen - 1 do
-          begin
-            RawByte := Ord(DecodedStr[I + 1]);
-            DecodedStr[I + 1] := Chr(RawByte xor MaskKey[I mod 4]);
-          end;
-        end;
-
-        // Se for um pacote de texto válido (1), joga pro evento!
-        if FrameOpcode = 1 then
-        begin
-          if Assigned(FParentServer) and Assigned(FParentServer.OnWebSocketMessage) then
-          begin
-            FParentServer.OnWebSocketMessage(FParentServer.GetClientSocketInfo(ClientSocket), URI, DecodedStr);
-          end;
-        end;
-      end;
+      // Opcode 1 = text frame
+      if (FrameOpcode = 1) and
+         Assigned(FParentServer) and Assigned(FParentServer.OnWebSocketMessage) then
+        FParentServer.OnWebSocketMessage(
+          FParentServer.GetClientSocketInfo(ClientSocket), URI, DecodedStr);
     end;
-  end;
+
+  until Terminated;
 
   Logger.Info('WebSocket connection closed for ' + URI);
 end;
@@ -625,18 +633,6 @@ begin
           try
             ParseRequestHeader(FClientSocket, Headers);
             Req.Headers.Assign(Headers);
-
-            // WebSocket Interception
-            if SameText(Headers.Values['Upgrade'], 'websocket') and
-               (Pos('Upgrade', Headers.Values['Connection']) > 0) then
-            begin
-              SkipRequestProcessing := True;
-              Handled := True;
-              if Assigned(FParentServer) then
-                FParentServer.SetClientSocketURI(FClientSocket, Req.URI);
-              ProcessWebSocketHandshakeAndLoop(FClientSocket, Req.URI, Headers.Values['Sec-WebSocket-Key']);
-              Break;
-            end;
           except
             on E: EHeaderTooLarge do
             begin
@@ -655,6 +651,42 @@ begin
               Handled := True;
               CloseConnection := True;
               SkipRequestProcessing := True;
+            end;
+          end;
+
+          // WebSocket upgrade — fora do try..except de headers: exceções no handshake
+          // não podem ser confundidas com erros de parse. 'Connection' é case-insensitive (RFC 7230).
+          if (not SkipRequestProcessing) and
+             SameText(Headers.Values['Upgrade'], 'websocket') and
+             (Pos('upgrade', LowerCase(Headers.Values['Connection'])) > 0) then
+          begin
+            if Headers.Values['Sec-WebSocket-Key'] = '' then
+            begin
+              Resp.StatusCode := HTTP_BAD_REQUEST;
+              Resp.Body := '{"error":"Missing Sec-WebSocket-Key"}';
+              Resp.ContentType := APPLICATION_JSON;
+              Handled := True;
+              CloseConnection := True;
+              SkipRequestProcessing := True;
+            end
+            else if Headers.Values['Sec-WebSocket-Version'] <> '13' then
+            begin
+              Resp.StatusCode := HTTP_BAD_REQUEST;
+              Resp.Body := '{"error":"Unsupported WebSocket version"}';
+              Resp.ContentType := APPLICATION_JSON;
+              Resp.HeadersCustom.Values['Sec-WebSocket-Version'] := '13';
+              Handled := True;
+              CloseConnection := True;
+              SkipRequestProcessing := True;
+            end
+            else
+            begin
+              SkipRequestProcessing := True;
+              Handled := True;
+              if Assigned(FParentServer) then
+                FParentServer.SetClientSocketURI(FClientSocket, FURI);
+              ProcessWebSocketHandshakeAndLoop(FClientSocket, FURI, Headers.Values['Sec-WebSocket-Key']);
+              Break;
             end;
           end;
 
