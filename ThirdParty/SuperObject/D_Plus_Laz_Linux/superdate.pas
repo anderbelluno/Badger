@@ -1368,7 +1368,8 @@ begin
         LValue := DateTimeToSQLTimeStamp(Value);
         Value := SQLTimeStampToDateTime(LocalToUTC(FTzInfo, LValue));
         {$ELSE !SQLTIMESTAMP}
-        {$if defined(FPC) and defined(fpc_version) and ((fpc_version<3) or ( (fpc_version=3) and ((fpc_release<3) or ((fpc_release=3) and (fpc_patch=0))) ))}
+        //{$if defined(FPC) and defined(fpc_version) and ((fpc_version<3) or ( (fpc_version=3) and ((fpc_release<3) or ((fpc_release=3) and (fpc_patch=0))) ))}
+        {$if defined(FPC)}
         Value := LocalTimeToUniversal(Value); // no member "TTimeZone.Local"
         {$else}
         Value := TTimeZone.Local.ToUniversalTime(Value);
