@@ -544,6 +544,7 @@ var
   TransferEncoding: string;
   IsChunked: Boolean;
   Origin, ACRM, ACRH, AllowOrigin, MethodsStr, HeadersStr, ExposeStr: string;
+  LForwardedFor: string;
   HdrParts: TStringList;
   HdrPart: string;
   OriginAllowed: Boolean;
@@ -633,6 +634,27 @@ begin
           try
             ParseRequestHeader(FClientSocket, Headers);
             Req.Headers.Assign(Headers);
+
+            // Proxy reverso (nginx): sobrescreve o IP do socket (127.0.0.1) pelo IP real do cliente.
+            // X-Real-IP tem precedência; X-Forwarded-For pode ser lista "clientIP, proxy1, proxy2".
+            if not SkipRequestProcessing then
+            begin
+              LForwardedFor := Trim(Headers.Values['X-Real-IP']);
+              if LForwardedFor <> '' then
+                Req.FRemoteIP := LForwardedFor
+              else
+              begin
+                LForwardedFor := Headers.Values['X-Forwarded-For'];
+                if LForwardedFor <> '' then
+                begin
+                  I := Pos(',', LForwardedFor);
+                  if I > 0 then
+                    Req.FRemoteIP := Trim(Copy(LForwardedFor, 1, I - 1))
+                  else
+                    Req.FRemoteIP := Trim(LForwardedFor);
+                end;
+              end;
+            end;
           except
             on E: EHeaderTooLarge do
             begin

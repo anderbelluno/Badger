@@ -9573,12 +9573,14 @@ var
       begin
         case AObjectType of
           stObject:
+            {$IFNDEF FPC}
             case LTypeKind of
               tkClass:
                 Result := GetObjectDefault(LRttiField, Result);
               else
                 Result := GetFieldDefault(LRttiField, Result);
             end;
+            {$ENDIF}
         end;
       end;
     end;
