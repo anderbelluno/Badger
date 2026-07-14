@@ -65,7 +65,8 @@ type
 
   TMiddlewareProc = function(var Request: THTTPRequest; var Response: THTTPResponse): Boolean of object;
   { Runs after the route (and after before-middlewares), even when a before-middleware
-    short-circuited with Handled=True. Intended for cleanup (e.g. DB pool Release). }
+    short-circuited with Handled=True — and BEFORE the response is written to the socket,
+    so mutations to Resp reach the client. Also used for cleanup (e.g. DB pool Release). }
   TAfterMiddlewareProc = procedure(var Request: THTTPRequest; var Response: THTTPResponse) of object;
   TRoutingCallback = procedure(Request: THTTPRequest; var Response: THTTPResponse) of object;
 

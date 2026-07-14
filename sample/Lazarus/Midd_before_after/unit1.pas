@@ -7,7 +7,7 @@ interface
 uses
   {$IFDEF MSWINDOWS}Windows, {$ENDIF} Messages, Classes, SysUtils, SyncObjs,
   Forms, Controls, Graphics, Dialogs, ExtCtrls, StdCtrls,
-  Badger, BadgerBasicAuth, BadgerTypes, BadgerLogger, DemoRoutes, superobject;
+  Badger, BadgerBasicAuth, BadgerTypes, BadgerLogger, DemoRoutes, JsonEnvelopeAfter;
 
 type
 
@@ -33,11 +33,10 @@ type
   private
     ServerThread: TBadger;
     BasicAuth: TBasicAuth;
+    JsonAfter: TJsonEnvelopeAfter;
     FLogLock: TCriticalSection;
     FLogQueue: TStringList;
     procedure SyncFlushLog;
-    { After-middleware: wraps the route body in a JSON envelope via SuperObject. }
-    procedure AfterJsonEnvelope(var Request: THTTPRequest; var Response: THTTPResponse);
   public
     procedure HandleRequest(const RequestInfo: TRequestInfo);
     procedure HandleResponse(const ResponseInfo: TResponseInfo);
@@ -75,36 +74,6 @@ begin
   end;
 end;
 
-procedure TForm1.AfterJsonEnvelope(var Request: THTTPRequest;
-  var Response: THTTPResponse);
-var
-  Root, Meta, Data: ISuperObject;
-begin
-  Root := SO();
-  Data := nil;
-  if Trim(Response.Body) <> '' then
-  begin
-    try
-      Data := SO(Response.Body);
-    except
-      Data := nil;
-    end;
-  end;
-  if Assigned(Data) then
-    Root.O['data'] := Data
-  else
-    Root.S['data'] := Response.Body;
-
-  Meta := SO();
-  Meta.S['method'] := Request.Method;
-  Meta.S['uri'] := Request.URI;
-  Meta.I['status'] := Response.StatusCode;
-  Root.O['meta'] := Meta;
-
-  Response.ContentType := 'application/json';
-  Response.Body := Root.AsJSON;
-end;
-
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
   Logger.isActive := True;
@@ -121,11 +90,11 @@ begin
     ServerThread.OnRequest := HandleRequest;
     ServerThread.OnResponse := HandleResponse;
 
-    { Before = TBasicAuth (same as GUI sample). After = JSON envelope (SuperObject). }
+    { Before + After: same RegisterProtectedRoutes pattern. }
     if RadioGroup1.ItemIndex = 1 then
     begin
       BasicAuth.RegisterProtectedRoutes(ServerThread, ['/ping']);
-      ServerThread.AddAfterMiddleware(AfterJsonEnvelope);
+      JsonAfter.RegisterProtectedRoutes(ServerThread, ['/ping']);
     end;
 
     ServerThread.RouteManager.AddGet('/ping', TDemoRoutes.Ping);
@@ -169,6 +138,7 @@ begin
   FLogLock := TCriticalSection.Create;
   FLogQueue := TStringList.Create;
   BasicAuth := TBasicAuth.Create('username', 'password');
+  JsonAfter := TJsonEnvelopeAfter.Create;
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
@@ -178,6 +148,7 @@ begin
     ServerThread.Stop;
     FreeAndNil(ServerThread);
   end;
+  FreeAndNil(JsonAfter);
   FreeAndNil(BasicAuth);
   FreeAndNil(FLogQueue);
   FreeAndNil(FLogLock);

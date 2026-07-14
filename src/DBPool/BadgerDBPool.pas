@@ -7,7 +7,11 @@ unit BadgerDBPool;
 { Generic connection pool for Badger.
   Pass any TComponent-based connector from a DataModule (Zeos, FireDAC,
   UniDAC, TSQLConnection, ...) and the desired pool size. Cloning and
-  reconnect are handled internally — no per-library helper required. }
+  reconnect are handled internally — no per-library helper required.
+
+  APoolN is a hard cap on live connections (idle + borrowed). Acquire raises
+  when the pool is exhausted. Release is idempotent for unknown handles
+  (double-release is a no-op). Destroy closes both idle and borrowed. }
 
 interface
 
@@ -18,15 +22,18 @@ type
   TBadgerDBPool = class
   private
     FTemplate: TComponent;
-    FIdle: TThreadList;
+    FLock: TCriticalSection;
+    FIdle: TList;
+    FBorrowed: TList;
     FPoolN: Integer;
     function CloneTemplate: TComponent;
     procedure EnsureConnected(AConn: TObject);
     function CreateConnection: TObject;
     procedure Log(const AMsg: string);
+    procedure FreeListObjects(AList: TList);
   public
     { ATemplate: connector on a DataModule (not pooled itself).
-      APoolN: number of clones kept idle. }
+      APoolN: hard maximum of concurrent connections. }
     constructor Create(ATemplate: TComponent; APoolN: Integer);
     destructor Destroy; override;
 
@@ -68,6 +75,17 @@ end;
 procedure TBadgerDBPool.Log(const AMsg: string);
 begin
   Logger.Info('[BadgerDBPool] ' + AMsg);
+end;
+
+procedure TBadgerDBPool.FreeListObjects(AList: TList);
+var
+  I: Integer;
+begin
+  if not Assigned(AList) then
+    Exit;
+  for I := 0 to AList.Count - 1 do
+    TObject(AList[I]).Free;
+  AList.Clear;
 end;
 
 procedure TBadgerDBPool.EnsureConnected(AConn: TObject);
@@ -137,28 +155,38 @@ begin
 
   FTemplate := ATemplate;
   FPoolN := APoolN;
-  FIdle := TThreadList.Create;
+  FLock := TCriticalSection.Create;
+  FIdle := TList.Create;
+  FBorrowed := TList.Create;
 
   for I := 1 to FPoolN do
     FIdle.Add(CreateConnection);
 
-  Log(Format('pool started with %d connection(s) of %s', [FPoolN, FTemplate.ClassName]));
+  Log(Format('pool started with %d connection(s) of %s (hard cap)',
+    [FPoolN, FTemplate.ClassName]));
 end;
 
 destructor TBadgerDBPool.Destroy;
-var
-  List: TList;
-  I: Integer;
 begin
-  List := FIdle.LockList;
-  try
-    for I := 0 to List.Count - 1 do
-      TObject(List[I]).Free;
-    List.Clear;
-  finally
-    FIdle.UnlockList;
+  if Assigned(FLock) then
+  begin
+    FLock.Acquire;
+    try
+      FreeListObjects(FBorrowed);
+      FreeListObjects(FIdle);
+    finally
+      FLock.Release;
+    end;
+  end
+  else
+  begin
+    FreeListObjects(FBorrowed);
+    FreeListObjects(FIdle);
   end;
+
+  FreeAndNil(FBorrowed);
   FreeAndNil(FIdle);
+  FreeAndNil(FLock);
   inherited Destroy;
 end;
 
@@ -169,62 +197,90 @@ end;
 
 function TBadgerDBPool.Acquire: TObject;
 var
-  List: TList;
+  Broken: TObject;
+  ReplaceMsg: string;
 begin
   Result := nil;
-  List := FIdle.LockList;
+  ReplaceMsg := '';
+
+  FLock.Acquire;
   try
-    if List.Count > 0 then
-    begin
-      Result := TObject(List[List.Count - 1]);
-      List.Delete(List.Count - 1);
-    end;
+    if FIdle.Count = 0 then
+      raise Exception.CreateFmt(
+        'TBadgerDBPool: pool exhausted (%d connection(s) in use)', [FPoolN]);
+
+    Result := TObject(FIdle[FIdle.Count - 1]);
+    FIdle.Delete(FIdle.Count - 1);
+    FBorrowed.Add(Result);
   finally
-    FIdle.UnlockList;
+    FLock.Release;
   end;
 
-  if not Assigned(Result) then
-  begin
-    Result := CreateConnection;
-    Log('pool exhausted; extra connection created');
-  end
-  else
-  begin
-    try
-      EnsureConnected(Result);
-    except
-      on E: Exception do
-      begin
-        Result.Free;
-        Result := CreateConnection;
-        Log('idle connection reopen failed; replaced: ' + E.Message);
+  try
+    EnsureConnected(Result);
+  except
+    on E: Exception do
+    begin
+      Broken := Result;
+      Result := nil;
+      ReplaceMsg := E.Message;
+
+      FLock.Acquire;
+      try
+        FBorrowed.Remove(Broken);
+      finally
+        FLock.Release;
       end;
+      Broken.Free;
+
+      try
+        Result := CreateConnection;
+      except
+        on E2: Exception do
+          raise Exception.CreateFmt(
+            'TBadgerDBPool: reconnect failed after idle open error (%s): %s',
+            [ReplaceMsg, E2.Message]);
+      end;
+
+      FLock.Acquire;
+      try
+        FBorrowed.Add(Result);
+      finally
+        FLock.Release;
+      end;
+      Log('idle connection reopen failed; replaced: ' + ReplaceMsg);
     end;
   end;
 end;
 
 procedure TBadgerDBPool.Release(AConn: TObject);
 var
-  List: TList;
-  KeepIdle: Boolean;
+  Idx: Integer;
 begin
   if not Assigned(AConn) then
     Exit;
 
-  KeepIdle := False;
-  List := FIdle.LockList;
+  FLock.Acquire;
   try
-    KeepIdle := List.Count < FPoolN;
-    if KeepIdle then
-      List.Add(AConn);
-  finally
-    FIdle.UnlockList;
-  end;
+    Idx := FBorrowed.IndexOf(AConn);
+    if Idx < 0 then
+    begin
+      { Unknown or already released — ignore (idempotent / double-release safe). }
+      Exit;
+    end;
 
-  if not KeepIdle then
-  begin
-    AConn.Free;
-    Log('extra connection freed');
+    FBorrowed.Delete(Idx);
+
+    if FIdle.IndexOf(AConn) >= 0 then
+    begin
+      { Should be unreachable if Release is only used for borrowed handles. }
+      Log('Release: connection already idle; ignored duplicate');
+      Exit;
+    end;
+
+    FIdle.Add(AConn);
+  finally
+    FLock.Release;
   end;
 end;
 

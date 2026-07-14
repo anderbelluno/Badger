@@ -948,8 +948,9 @@ begin
           end;
 
 
-          // --- BEFORE MIDDLEWARES + ROUTE + RESPONSE ---
-          // After-middlewares always run (LIFO) so resources like DB connections are released.
+          // --- BEFORE + ROUTE, then AFTER (LIFO), then send ---
+          // After runs in finally so cleanup still happens if the route raises,
+          // but ALWAYS before BuildHTTPResponse so body/header changes reach the client.
           try
             // --- MIDDLEWARES ---
             if not SkipRequestProcessing then
@@ -1001,7 +1002,7 @@ begin
               end;
             end;
 
-            // --- RESPOSTA ---
+            // --- CORS headers on Resp (before after-middleware / BuildHTTPResponse) ---
             if Assigned(FParentServer) and FParentServer.CorsEnabled and (Origin <> '') then
             begin
               AllowWildcardOrigin := (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0);
@@ -1028,79 +1029,81 @@ begin
                   Resp.HeadersCustom.Values['Vary'] := 'Origin';
               end;
             end;
-            ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection, Resp.HeadersCustom);
-            FClientSocket.SendString(ResponseHeader);
-
-            // --- ENVIO DO CORPO (TEXTO) ---
-            if (Resp.Body <> '') and (
-               (Resp.ContentType = '') or
-               (Pos('text/', Resp.ContentType) = 1) or
-               (Pos('application/json', Resp.ContentType) = 1)
-            ) then
-            begin
-              {$IFDEF Delphi2009Plus}
-              ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
-              {$ELSE}
-              UTF8Body := UTF8Encode(Resp.Body);
-              SetLength(ResponseBodyBytes, Length(UTF8Body));
-              Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
-              {$ENDIF}
-              if Length(ResponseBodyBytes) > 0 then
-                FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
-            end;
-
-            // --- ENVIO DO STREAM ---
-            if Assigned(Resp.Stream) and (Resp.Stream.Size > 0) then
-            begin
-              Resp.Stream.Position := 0;
-              BufferSize := Min(MaxBufferSize, Resp.Stream.Size);
-              SetLength(ResponseBodyBytes, BufferSize);
-              repeat
-                BytesRead := Resp.Stream.Read(ResponseBodyBytes[0], Length(ResponseBodyBytes));
-                if BytesRead > 0 then
-                  FClientSocket.SendBuffer(@ResponseBodyBytes[0], BytesRead);
-              until BytesRead = 0;
-              FreeAndNil(Resp.Stream);
-            end;
-
-            // --- LOGS ---
-            if FEnableEventInfo and Assigned(FOnRequest) then
-            begin
-              RequestInfo.Headers := TStringList.Create;
-              RequestInfo.QueryParams := TStringList.Create;
-              try
-                RequestInfo.RemoteIP := Req.FRemoteIP;
-                RequestInfo.Method := Req.Method;
-                RequestInfo.URI := Req.URI;
-                RequestInfo.RequestLine := Req.RequestLine;
-                RequestInfo.Headers.Assign(Req.Headers);
-                RequestInfo.Body := Req.Body;
-                RequestInfo.QueryParams.Assign(Req.QueryParams);
-                RequestInfo.Timestamp := Now;
-                FOnRequest(RequestInfo);
-              finally
-                RequestInfo.Headers.Free;
-                RequestInfo.QueryParams.Free;
-              end;
-            end;
-
-            if FEnableEventInfo and Assigned(FOnResponse) then
-            begin
-              ResponseInfo.Headers := TStringList.Create;
-              try
-                ResponseInfo.StatusCode := Resp.StatusCode;
-                ResponseInfo.StatusText := THTTPStatus.GetStatusText(Resp.StatusCode);
-                ResponseInfo.Body := Resp.Body;
-                ResponseInfo.ContentType := Resp.ContentType;
-                ResponseInfo.Headers.Text := ResponseHeader;
-                ResponseInfo.Timestamp := Now;
-                FOnResponse(ResponseInfo);
-              finally
-                ResponseInfo.Headers.Free;
-              end;
-            end;
           finally
             RunAfterMiddlewares(Req, Resp);
+          end;
+
+          // --- RESPOSTA (usa Resp já processado pelos after-middlewares) ---
+          ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection, Resp.HeadersCustom);
+          FClientSocket.SendString(ResponseHeader);
+
+          // --- ENVIO DO CORPO (TEXTO) ---
+          if (Resp.Body <> '') and (
+             (Resp.ContentType = '') or
+             (Pos('text/', Resp.ContentType) = 1) or
+             (Pos('application/json', Resp.ContentType) = 1)
+          ) then
+          begin
+            {$IFDEF Delphi2009Plus}
+            ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
+            {$ELSE}
+            UTF8Body := UTF8Encode(Resp.Body);
+            SetLength(ResponseBodyBytes, Length(UTF8Body));
+            Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
+            {$ENDIF}
+            if Length(ResponseBodyBytes) > 0 then
+              FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
+          end;
+
+          // --- ENVIO DO STREAM ---
+          if Assigned(Resp.Stream) and (Resp.Stream.Size > 0) then
+          begin
+            Resp.Stream.Position := 0;
+            BufferSize := Min(MaxBufferSize, Resp.Stream.Size);
+            SetLength(ResponseBodyBytes, BufferSize);
+            repeat
+              BytesRead := Resp.Stream.Read(ResponseBodyBytes[0], Length(ResponseBodyBytes));
+              if BytesRead > 0 then
+                FClientSocket.SendBuffer(@ResponseBodyBytes[0], BytesRead);
+            until BytesRead = 0;
+            FreeAndNil(Resp.Stream);
+          end;
+
+          // --- LOGS ---
+          if FEnableEventInfo and Assigned(FOnRequest) then
+          begin
+            RequestInfo.Headers := TStringList.Create;
+            RequestInfo.QueryParams := TStringList.Create;
+            try
+              RequestInfo.RemoteIP := Req.FRemoteIP;
+              RequestInfo.Method := Req.Method;
+              RequestInfo.URI := Req.URI;
+              RequestInfo.RequestLine := Req.RequestLine;
+              RequestInfo.Headers.Assign(Req.Headers);
+              RequestInfo.Body := Req.Body;
+              RequestInfo.QueryParams.Assign(Req.QueryParams);
+              RequestInfo.Timestamp := Now;
+              FOnRequest(RequestInfo);
+            finally
+              RequestInfo.Headers.Free;
+              RequestInfo.QueryParams.Free;
+            end;
+          end;
+
+          if FEnableEventInfo and Assigned(FOnResponse) then
+          begin
+            ResponseInfo.Headers := TStringList.Create;
+            try
+              ResponseInfo.StatusCode := Resp.StatusCode;
+              ResponseInfo.StatusText := THTTPStatus.GetStatusText(Resp.StatusCode);
+              ResponseInfo.Body := Resp.Body;
+              ResponseInfo.ContentType := Resp.ContentType;
+              ResponseInfo.Headers.Text := ResponseHeader;
+              ResponseInfo.Timestamp := Now;
+              FOnResponse(ResponseInfo);
+            finally
+              ResponseInfo.Headers.Free;
+            end;
           end;
 
           if CloseConnection then Break;

@@ -44,15 +44,15 @@
   <table>
     <tr><th>Tipo</th><th>API</th><th>Quando</th><th>Contrato</th></tr>
     <tr><td>Before</td><td><code>AddMiddleware</code></td><td>Antes da rota</td><td><code>True</code> = interrompe; <code>False</code> = continua</td></tr>
-    <tr><td>After</td><td><code>AddAfterMiddleware</code></td><td>Depois da rota / resposta</td><td>procedure (cleanup)</td></tr>
+    <tr><td>After</td><td><code>AddAfterMiddleware</code></td><td>Depois da rota, antes do send</td><td>procedure (mutate Resp e/ou cleanup)</td></tr>
   </table>
-  <p>After em LIFO, mesmo se um before short-circuitar. Wrappers clonados por handler. Declarações em <code>src/BadgerTypes.pas</code>.</p>
-  <pre>before₁ → before₂ → rota → resposta HTTP → after₂ → after₁</pre>
+  <p>After em LIFO, mesmo se um before short-circuitar — e <strong>antes</strong> de gravar no socket. Wrappers clonados por handler. Declarações em <code>src/BadgerTypes.pas</code>.</p>
+  <pre>before₁ → before₂ → rota → after₂ → after₁ → BuildHTTPResponse / send</pre>
 
   <h2>Pool de conexões (DB)</h2>
   <p>Units: <code>src/DBPool/BadgerDBPool.pas</code>, <code>src/DBPool/BadgerDBBridge.pas</code>.</p>
   <ul>
-    <li><strong>TBadgerDBPool</strong>: template <code>TComponent</code> + <code>APoolN</code>; clone interno via streaming/RTTI.</li>
+    <li><strong>TBadgerDBPool</strong>: template <code>TComponent</code> + <code>APoolN</code> (hard cap); clone interno via streaming/RTTI; <code>Acquire</code> esgota com exceção; <code>Release</code> idempotente; <code>Destroy</code> libera idle e borrowed.</li>
     <li><strong>TBadgerDBBridge</strong>: before injeta <code>Request.DbPool</code>; after faz safety-net <code>ReleaseConn</code>.</li>
     <li><strong>AcquireConn</strong> / <strong>ReleaseConn</strong>: devolver ao pool — não <code>Free</code> a conexão emprestada.</li>
   </ul>

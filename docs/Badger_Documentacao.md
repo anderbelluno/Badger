@@ -41,7 +41,7 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
 4. Roteamento via `TRouteManager.MatchRoute` e execução do callback: `src/BadgerRouteManager.pas:179–227`
 5. Envio de headers, corpo (texto/JSON) ou stream: `src/BadgerRequestHandler.pas:380–408`
 6. Eventos de aplicação, conforme `EnableEventInfo`
-7. Middlewares **after** (`AddAfterMiddleware`), em ordem LIFO — cleanup mesmo se um before short-circuitou
+7. Middlewares **after** (`AddAfterMiddleware`), em ordem LIFO — rodam **antes** de gravar a resposta no socket (podem alterar body/headers) e mesmo se um before short-circuitou
 
 ## Roteamento
 
@@ -58,7 +58,7 @@ Badger tem dois ganchos no ciclo da requisição:
 | Tipo | API | Quando | Contrato |
 |------|-----|--------|----------|
 | Before | `AddMiddleware` | Antes da rota | `True` = interrompe (handled); `False` = continua |
-| After | `AddAfterMiddleware` | Depois da rota / resposta | procedure (cleanup) |
+| After | `AddAfterMiddleware` | Depois da rota, antes do send | procedure (mutate Resp e/ou cleanup) |
 
 - Declarações: `TMiddlewareProc` / `TAfterMiddlewareProc` em `src/BadgerTypes.pas`.
 - Registro: `TBadger.AddMiddleware` / `TBadger.AddAfterMiddleware` em `src/Badger.pas`.
@@ -69,7 +69,7 @@ Badger tem dois ganchos no ciclo da requisição:
 Fluxo resumido:
 
 ```
-before₁ → before₂ → rota → resposta HTTP → after₂ → after₁
+before₁ → before₂ → rota → after₂ → after₁ → BuildHTTPResponse / send
 ```
 
 ## Pool de conexões (DB)
@@ -78,7 +78,7 @@ Units: `src/DBPool/BadgerDBPool.pas`, `src/DBPool/BadgerDBBridge.pas`.
 
 ### Peças
 
-- **`TBadgerDBPool`**: pool genérico. Recebe um conector `TComponent` do DataModule (Zeos, FireDAC, UniDAC, `TSQLConnection`, …) e `APoolN`. Clona o template internamente (`WriteComponent`/`ReadComponent` + propriedade `Connected` via RTTI). O template **não** entra no pool.
+- **`TBadgerDBPool`**: pool genérico. Recebe um conector `TComponent` do DataModule (Zeos, FireDAC, UniDAC, `TSQLConnection`, …) e `APoolN` (**hard cap** de conexões idle+borrowed). Clona o template internamente (`WriteComponent`/`ReadComponent` + propriedade `Connected` via RTTI). O template **não** entra no pool. `Acquire` lança se o pool estiver esgotado; `Release` é idempotente (double-release é no-op); `Destroy` fecha idle e borrowed.
 - **`TBadgerDBBridge`**: registra before (injeta `Request.DbPool`) e after (safety-net `ReleaseConn`).
 - **`AcquireConn` / `ReleaseConn`**: helpers na request. `Release` **devolve** ao pool — não use `FreeAndNil` na conexão emprestada.
 

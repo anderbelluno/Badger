@@ -20,7 +20,7 @@ implementation
 class procedure TDemoRoutes.Ping(Request: THTTPRequest; var Response: THTTPResponse);
 begin
   Response.StatusCode := HTTP_OK;
-  Response.ContentType := 'application/json';
+  Response.ContentType := APPLICATION_JSON;
   Response.Body := '{"ok":true,"message":"pong"}';
 end;
 

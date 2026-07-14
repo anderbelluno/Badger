@@ -27,7 +27,7 @@ Open `src/ConnPool.lpi` in Lazarus (Zeos packages required).
 
 1. **Test DB** — opens the Zeos template connection  
 2. **Start server** — creates pool (`Pool N`) and Badger on **HTTP Port** (8088)  
-3. **Stress pool** — N threads × loops calling `Acquire` / `Release`  
+3. **Stress pool** — N threads × loops calling `Acquire` / `Release` (if threads > pool size, extras fail with “pool exhausted”)  
 4. Or HTTP:
 
 ```bash

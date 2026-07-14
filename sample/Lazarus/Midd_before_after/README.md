@@ -10,15 +10,15 @@ GUI no estilo de `sample/Lazarus/GUI`.
 
 | Peça | Quem |
 |------|------|
-| **Before** | `TBasicAuth` — `RegisterProtectedRoutes(..., ['/ping'])` |
+| **Before** | `TBasicAuth.RegisterProtectedRoutes(..., ['/ping'])` |
 | **Rota** | `GET /ping` → `{"ok":true,"message":"pong"}` |
-| **After** | `AddAfterMiddleware(AfterJsonEnvelope)` — envelopa o body com SuperObject |
+| **After** | `TJsonEnvelopeAfter.RegisterProtectedRoutes(..., ['/ping'])` — SuperObject |
 
-Com **Basic + After JSON** selecionado:
+Mesmo padrão nos dois: a lista de rotas define onde cada middleware age.
 
 ```pascal
 BasicAuth.RegisterProtectedRoutes(ServerThread, ['/ping']);
-ServerThread.AddAfterMiddleware(AfterJsonEnvelope);
+JsonAfter.RegisterProtectedRoutes(ServerThread, ['/ping']);
 ServerThread.RouteManager.AddGet('/ping', TDemoRoutes.Ping);
 ```
 

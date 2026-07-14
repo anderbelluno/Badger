@@ -35,7 +35,7 @@ type
     function BeforeMiddleware(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
     procedure AfterMiddleware(var Request: THTTPRequest; var Response: THTTPResponse);
   public
-    { ATemplate = connector no DataModule; APoolN = size of pool.
+    { ATemplate = connector no DataModule; APoolN = hard max of live connections.
       Clones are created internally. }
     constructor Create(ATemplate: TComponent; APoolN: Integer); overload;
     constructor Create(APool: TBadgerDBPool; AOwnsPool: Boolean); overload;
