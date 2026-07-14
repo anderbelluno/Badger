@@ -9,18 +9,21 @@
     h1, h2, h3 { line-height: 1.25; }
     code, pre { background: #f6f8fa; padding: 2px 4px; border-radius: 4px; }
     pre { padding: 12px; overflow-x: auto; }
-    ul { margin: 0 0 1em 1.2em; }
+    ul, ol { margin: 0 0 1em 1.2em; }
+    table { border-collapse: collapse; margin: 0 0 1em 0; }
+    th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+    th { background: #f6f8fa; }
   </style>
   </head>
 <body>
   <h1>Badger – Documentação Técnica Completa</h1>
   <h2>Visão Geral</h2>
-  <p>Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, com suporte a rotas estáticas e dinâmicas, middlewares, eventos de aplicação (OnRequest/OnResponse) e autenticação via exemplos.</p>
+  <p>Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, com suporte a rotas estáticas e dinâmicas, middlewares (before/after), eventos de aplicação (OnRequest/OnResponse), autenticação via exemplos e pool genérico de conexões de banco (<code>TBadgerDBPool</code> / <code>TBadgerDBBridge</code>).</p>
 
   <h2>Arquitetura</h2>
   <ul>
     <li><strong>TBadger</strong>: accept loop, concorrência e criação de handlers. Referências: <code>src/Badger.pas:24–71</code>, <code>src/Badger.pas:80–100</code>, <code>src/Badger.pas:564–647</code>.</li>
-    <li><strong>THTTPRequestHandler</strong>: parsing, roteamento, execução e resposta. Referências: <code>src/BadgerRequestHandler.pas:12–38</code>, <code>src/BadgerRequestHandler.pas:45–89</code>, <code>src/BadgerRequestHandler.pas:117–143</code>, <code>src/BadgerRequestHandler.pas:145–176</code>, <code>src/BadgerRequestHandler.pas:361–451</code>, <code>src/BadgerRequestHandler.pas:380–445</code>.</li>
+    <li><strong>THTTPRequestHandler</strong>: parsing, middlewares, roteamento, execução e resposta. Referências: <code>src/BadgerRequestHandler.pas</code>.</li>
     <li><strong>TRouteManager</strong>: cadastro e matching com buckets por contexto. Referências: <code>src/BadgerRouteManager.pas:25–49</code>, <code>src/BadgerRouteManager.pas:107–124</code>, <code>src/BadgerRouteManager.pas:179–227</code>.</li>
   </ul>
 
@@ -28,17 +31,41 @@
   <ol>
     <li>Accept e criação de handler: <code>src/Badger.pas:591–612</code>.</li>
     <li>Parsing de headers (linha a linha): <code>src/BadgerRequestHandler.pas:117–143</code>.</li>
-    <li>Roteamento: <code>src/BadgerRouteManager.pas:179–227</code>.</li>
-    <li>Callback de rota e <code>THTTPResponse</code>: <code>src/BadgerRequestHandler.pas:145–176</code>.</li>
-    <li>Envio de corpo/stream: <code>src/BadgerRequestHandler.pas:380–408</code>.</li>
-    <li>Eventos (condicionais por <code>EnableEventInfo</code>): <code>src/BadgerRequestHandler.pas:410–445</code>.</li>
+    <li>Middlewares <strong>before</strong> (<code>AddMiddleware</code>) — <code>True</code> = handled.</li>
+    <li>Roteamento e callback: <code>src/BadgerRouteManager.pas:179–227</code>.</li>
+    <li>Envio de corpo/stream e eventos (<code>EnableEventInfo</code>).</li>
+    <li>Middlewares <strong>after</strong> (<code>AddAfterMiddleware</code>), ordem LIFO.</li>
   </ol>
 
   <h2>Roteamento por Contexto</h2>
   <p>O primeiro segmento do path é usado para escolher um bucket de rotas. Rotas com primeiro segmento dinâmico entram no bucket vazio.</p>
 
   <h2>Middlewares</h2>
-  <p>Wrappers clonados por handler; liberação no destrutor.</p>
+  <table>
+    <tr><th>Tipo</th><th>API</th><th>Quando</th><th>Contrato</th></tr>
+    <tr><td>Before</td><td><code>AddMiddleware</code></td><td>Antes da rota</td><td><code>True</code> = interrompe; <code>False</code> = continua</td></tr>
+    <tr><td>After</td><td><code>AddAfterMiddleware</code></td><td>Depois da rota / resposta</td><td>procedure (cleanup)</td></tr>
+  </table>
+  <p>After em LIFO, mesmo se um before short-circuitar. Wrappers clonados por handler. Declarações em <code>src/BadgerTypes.pas</code>.</p>
+  <pre>before₁ → before₂ → rota → resposta HTTP → after₂ → after₁</pre>
+
+  <h2>Pool de conexões (DB)</h2>
+  <p>Units: <code>src/DBPool/BadgerDBPool.pas</code>, <code>src/DBPool/BadgerDBBridge.pas</code>.</p>
+  <ul>
+    <li><strong>TBadgerDBPool</strong>: template <code>TComponent</code> + <code>APoolN</code>; clone interno via streaming/RTTI.</li>
+    <li><strong>TBadgerDBBridge</strong>: before injeta <code>Request.DbPool</code>; after faz safety-net <code>ReleaseConn</code>.</li>
+    <li><strong>AcquireConn</strong> / <strong>ReleaseConn</strong>: devolver ao pool — não <code>Free</code> a conexão emprestada.</li>
+  </ul>
+  <pre>DbBridge := TBadgerDBBridge.Create(dm.ZConnection1, 15);
+DbBridge.Register(Server);
+
+Conn := TZConnection(AcquireConn(Request));
+try
+  // queries...
+finally
+  ReleaseConn(Request);
+end;</pre>
+  <p>Sample: <code>sample/Lazarus/ConnPool</code> (PostgreSQL + stress + <code>/db/*</code>).</p>
 
   <h2>Eventos e Logging</h2>
   <ul>
@@ -53,7 +80,6 @@
     <li>Preflight: valida método e cabeçalhos; responde <code>204</code> com <code>Access-Control-Allow-*</code> e <code>Max-Age</code>. Referência: <code>src/BadgerRequestHandler.pas:365–451</code>.</li>
     <li>Respostas normais: injeta <code>Access-Control-Allow-Origin</code> (<code>*</code> ou origem), <code>Access-Control-Allow-Credentials</code>, <code>Access-Control-Expose-Headers</code>.</li>
     <li>Boas práticas: evitar <code>*</code> com credenciais, listar <code>Authorization</code> em <code>Allow-Headers</code>, usar <code>MaxAge</code>.</li>
-    <li>Testes: <code>curl -i -X OPTIONS http://localhost:8080/teste/ping -H "Origin: http://localhost:3000" -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: Content-Type"</code>; <code>curl -i http://localhost:8080/teste/ping -H "Origin: http://localhost:3000"</code>.</li>
   </ul>
 
   <h2>Concorrência e Desempenho</h2>
@@ -68,6 +94,7 @@
     <li>Desativar eventos/logging em teste de throughput.</li>
     <li>Ajustar <code>MaxConcurrentConnections</code> gradualmente.</li>
     <li>Preferir contextos estáveis (evitar primeiro segmento dinâmico).</li>
+    <li>DB pool: sempre <code>ReleaseConn</code>; destruir o bridge após <code>Server.Stop</code>.</li>
   </ul>
 
   <h2>Troubleshooting</h2>
@@ -79,8 +106,9 @@
   <h2>Referências</h2>
   <ul>
     <li><code>src/Badger.pas:564–647</code></li>
-    <li><code>src/BadgerRequestHandler.pas:117–176</code>, <code>src/BadgerRequestHandler.pas:380–445</code></li>
+    <li><code>src/BadgerRequestHandler.pas</code> (parsing, before/after, resposta)</li>
     <li><code>src/BadgerRouteManager.pas:107–124</code>, <code>src/BadgerRouteManager.pas:179–227</code></li>
+    <li><code>src/DBPool/BadgerDBPool.pas</code>, <code>src/DBPool/BadgerDBBridge.pas</code></li>
   </ul>
 
 </body>

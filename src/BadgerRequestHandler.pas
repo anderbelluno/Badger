@@ -20,6 +20,7 @@ type
     FRequestLine: string;
     FMethods: TBadgerMethods;
     FMiddlewares: TList;
+    FAfterMiddlewares: TList;
     FOwnMiddlewareObjects: Boolean;
     FMiddlewareLock: TCriticalSection;
     FTimeout: Integer;
@@ -27,16 +28,17 @@ type
     FIsParallel: Boolean;
     FEnableEventInfo: Boolean;
     FSocketNotified: Boolean;
+    procedure RunAfterMiddlewares(var Req: THTTPRequest; var Resp: THTTPResponse);
   protected
     procedure ParseRequestHeader(ClientSocket: TTCPBlockSocket; aHeaders: TStringList);
     procedure ProcessWebSocketHandshakeAndLoop(ClientSocket: TTCPBlockSocket; const URI, WSKey: string);
     function BuildHTTPResponse(StatusCode: Integer; Body: string; Stream: TStream; ContentType: string; CloseConnection: Boolean; HeaderCustom: TStringList): string;
   public
     constructor Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-                      AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
+                      AMethods: TBadgerMethods; AMiddlewares, AAfterMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
                       AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
     constructor CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-                              AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
+                              AMethods: TBadgerMethods; AMiddlewares, AAfterMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
                               AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
     destructor Destroy; override;
     procedure Execute; override;
@@ -50,7 +52,7 @@ type
 { THTTPRequestHandler }
 
 constructor THTTPRequestHandler.Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-  AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
+  AMethods: TBadgerMethods; AMiddlewares, AAfterMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
   AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
 var
   I: Integer;
@@ -63,6 +65,7 @@ begin
   FMethods := AMethods;
   FMiddlewareLock := AMiddlewareLock;
   FMiddlewares := TList.Create;
+  FAfterMiddlewares := TList.Create;
   FOwnMiddlewareObjects := False;
   FTimeout := ATimeout;
   FParentServer := AParentServer;
@@ -73,8 +76,12 @@ begin
   if Assigned(FMiddlewareLock) then
     FMiddlewareLock.Acquire;
   try
-    for I := 0 to AMiddlewares.Count - 1 do
-      FMiddlewares.Add(AMiddlewares[I]);
+    if Assigned(AMiddlewares) then
+      for I := 0 to AMiddlewares.Count - 1 do
+        FMiddlewares.Add(AMiddlewares[I]);
+    if Assigned(AAfterMiddlewares) then
+      for I := 0 to AAfterMiddlewares.Count - 1 do
+        FAfterMiddlewares.Add(AAfterMiddlewares[I]);
   finally
     if Assigned(FMiddlewareLock) then
       FMiddlewareLock.Release;
@@ -92,7 +99,7 @@ begin
 end;
 
 constructor THTTPRequestHandler.CreateParallel(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
-  AMethods: TBadgerMethods; AMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
+  AMethods: TBadgerMethods; AMiddlewares, AAfterMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
   AOnRequest: TOnRequest; AOnResponse: TOnResponse; AParentServer: TBadger; AEnableEventInfo: Boolean);
 var
   I: Integer;
@@ -105,6 +112,7 @@ begin
   FMethods := AMethods;
   FMiddlewareLock := AMiddlewareLock;
   FMiddlewares := TList.Create;
+  FAfterMiddlewares := TList.Create;
   FOwnMiddlewareObjects := False;
   FTimeout := ATimeout;
   FParentServer := AParentServer;
@@ -115,8 +123,12 @@ begin
   if Assigned(FMiddlewareLock) then
     FMiddlewareLock.Acquire;
   try
-    for I := 0 to AMiddlewares.Count - 1 do
-      FMiddlewares.Add(AMiddlewares[I]);
+    if Assigned(AMiddlewares) then
+      for I := 0 to AMiddlewares.Count - 1 do
+        FMiddlewares.Add(AMiddlewares[I]);
+    if Assigned(AAfterMiddlewares) then
+      for I := 0 to AAfterMiddlewares.Count - 1 do
+        FAfterMiddlewares.Add(AAfterMiddlewares[I]);
   finally
     if Assigned(FMiddlewareLock) then
       FMiddlewareLock.Release;
@@ -168,10 +180,38 @@ begin
   end;
 
   if FOwnMiddlewareObjects then
+  begin
     for I := 0 to FMiddlewares.Count - 1 do
       TObject(FMiddlewares[I]).Free;
+    for I := 0 to FAfterMiddlewares.Count - 1 do
+      TObject(FAfterMiddlewares[I]).Free;
+  end;
   FMiddlewares.Free;
+  FAfterMiddlewares.Free;
   inherited;
+end;
+
+procedure THTTPRequestHandler.RunAfterMiddlewares(var Req: THTTPRequest; var Resp: THTTPResponse);
+var
+  I: Integer;
+  AfterWrapper: TAfterMiddlewareWrapper;
+begin
+  if not Assigned(FAfterMiddlewares) then
+    Exit;
+
+  { LIFO — outermost after runs last (Horse onion). }
+  for I := FAfterMiddlewares.Count - 1 downto 0 do
+  begin
+    AfterWrapper := TAfterMiddlewareWrapper(FAfterMiddlewares[I]);
+    if not Assigned(AfterWrapper) or not Assigned(AfterWrapper.Middleware) then
+      Continue;
+    try
+      AfterWrapper.Middleware(Req, Resp);
+    except
+      on E: Exception do
+        Logger.Error(Format('After-middleware exception: %s', [E.Message]));
+    end;
+  end;
 end;
 
 procedure THTTPRequestHandler.ParseRequestHeader(ClientSocket: TTCPBlockSocket; aHeaders: TStringList);
@@ -587,6 +627,10 @@ begin
         Req.Method := '';
         Req.URI := '';
         Req.RequestLine := '';
+        Req.UserID := '';
+        Req.UserRole := '';
+        Req.DbPool := nil;
+        Req.DbConn := nil;
         Resp.StatusCode := 0;
         Resp.Body := '';
         Resp.ContentType := '';
@@ -904,153 +948,159 @@ begin
           end;
 
 
-          // --- MIDDLEWARES ---
-          if not SkipRequestProcessing then
-          begin
-            for I := 0 to FMiddlewares.Count - 1 do
+          // --- BEFORE MIDDLEWARES + ROUTE + RESPONSE ---
+          // After-middlewares always run (LIFO) so resources like DB connections are released.
+          try
+            // --- MIDDLEWARES ---
+            if not SkipRequestProcessing then
             begin
-              MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
-              try
-                if MiddlewareWrapper.Middleware(Req, Resp) then
-                begin
-                  Handled := True;
-                  Break;
-                end;
-              except
-                on E: Exception do
-                begin
-                  Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-                  Resp.Body := '{"error":"Middleware exception: ' + E.Message + '"}';
-                  Resp.ContentType := APPLICATION_JSON;
-                  Handled := True;
-                  Break;
+              for I := 0 to FMiddlewares.Count - 1 do
+              begin
+                MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
+                try
+                  if MiddlewareWrapper.Middleware(Req, Resp) then
+                  begin
+                    Handled := True;
+                    Break;
+                  end;
+                except
+                  on E: Exception do
+                  begin
+                    Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
+                    Resp.Body := '{"error":"Middleware exception: ' + E.Message + '"}';
+                    Resp.ContentType := APPLICATION_JSON;
+                    Handled := True;
+                    Break;
+                  end;
                 end;
               end;
             end;
-          end;
 
-          if not Handled then
-          begin
-            // --- MATCH ROTA COM :param ---
-            if FRouteManager.MatchRoute(UpperCase(FMethod), LowerCase(FURI), RouteEntry, RouteParams) then
+            if not Handled then
             begin
-              if Assigned(RouteEntry) and Assigned(TMethod(RouteEntry.Callback).Code) then
+              // --- MATCH ROTA COM :param ---
+              if FRouteManager.MatchRoute(UpperCase(FMethod), LowerCase(FURI), RouteEntry, RouteParams) then
               begin
-                Req.RouteParams.Assign(RouteParams);
-                RouteEntry.Callback(Req, Resp);
+                if Assigned(RouteEntry) and Assigned(TMethod(RouteEntry.Callback).Code) then
+                begin
+                  Req.RouteParams.Assign(RouteParams);
+                  RouteEntry.Callback(Req, Resp);
+                end
+                else
+                begin
+                  Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
+                  Resp.Body := '{"error":"Route handler not assigned"}';
+                  Resp.ContentType := APPLICATION_JSON;
+                end;
               end
               else
               begin
-                Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-                Resp.Body := '{"error":"Route handler not assigned"}';
-                Resp.ContentType := APPLICATION_JSON;
+                Resp.StatusCode := HTTP_NOT_FOUND;
+                Resp.Body := 'Not Found';
+                Resp.ContentType := TEXT_PLAIN;
               end;
-            end
-            else
-            begin
-              Resp.StatusCode := HTTP_NOT_FOUND;
-              Resp.Body := 'Not Found';
-              Resp.ContentType := TEXT_PLAIN;
             end;
-          end;
 
-          // --- RESPOSTA ---
-          if Assigned(FParentServer) and FParentServer.CorsEnabled and (Origin <> '') then
-          begin
-            AllowWildcardOrigin := (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0);
-            if FParentServer.CorsAllowCredentials then
-              OriginAllowed := (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0)
-            else
-              OriginAllowed := AllowWildcardOrigin or (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0);
-
-            if OriginAllowed then
+            // --- RESPOSTA ---
+            if Assigned(FParentServer) and FParentServer.CorsEnabled and (Origin <> '') then
             begin
+              AllowWildcardOrigin := (FParentServer.CorsAllowedOrigins.IndexOf('*') >= 0);
               if FParentServer.CorsAllowCredentials then
-                AllowOrigin := Origin
-              else if AllowWildcardOrigin then
-                AllowOrigin := '*'
+                OriginAllowed := (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0)
               else
-                AllowOrigin := Origin;
-              Resp.HeadersCustom.Values['Access-Control-Allow-Origin'] := AllowOrigin;
-              if FParentServer.CorsAllowCredentials then
-                Resp.HeadersCustom.Values['Access-Control-Allow-Credentials'] := 'true';
-              ExposeStr := FParentServer.CorsExposeHeaders.CommaText;
-              if ExposeStr <> '' then
-                Resp.HeadersCustom.Values['Access-Control-Expose-Headers'] := ExposeStr;
-              if AllowOrigin <> '*' then
-                Resp.HeadersCustom.Values['Vary'] := 'Origin';
+                OriginAllowed := AllowWildcardOrigin or (FParentServer.CorsAllowedOrigins.IndexOf(Origin) >= 0);
+
+              if OriginAllowed then
+              begin
+                if FParentServer.CorsAllowCredentials then
+                  AllowOrigin := Origin
+                else if AllowWildcardOrigin then
+                  AllowOrigin := '*'
+                else
+                  AllowOrigin := Origin;
+                Resp.HeadersCustom.Values['Access-Control-Allow-Origin'] := AllowOrigin;
+                if FParentServer.CorsAllowCredentials then
+                  Resp.HeadersCustom.Values['Access-Control-Allow-Credentials'] := 'true';
+                ExposeStr := FParentServer.CorsExposeHeaders.CommaText;
+                if ExposeStr <> '' then
+                  Resp.HeadersCustom.Values['Access-Control-Expose-Headers'] := ExposeStr;
+                if AllowOrigin <> '*' then
+                  Resp.HeadersCustom.Values['Vary'] := 'Origin';
+              end;
             end;
-          end;
-          ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection, Resp.HeadersCustom);
-          FClientSocket.SendString(ResponseHeader);
+            ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection, Resp.HeadersCustom);
+            FClientSocket.SendString(ResponseHeader);
 
-          // --- ENVIO DO CORPO (TEXTO) ---
-          if (Resp.Body <> '') and (
-             (Resp.ContentType = '') or
-             (Pos('text/', Resp.ContentType) = 1) or
-             (Pos('application/json', Resp.ContentType) = 1)
-          ) then
-          begin
-            {$IFDEF Delphi2009Plus}
-            ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
-            {$ELSE}
-            UTF8Body := UTF8Encode(Resp.Body);
-            SetLength(ResponseBodyBytes, Length(UTF8Body));
-            Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
-            {$ENDIF}
-            if Length(ResponseBodyBytes) > 0 then
-              FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
-          end;
-
-          // --- ENVIO DO STREAM ---
-          if Assigned(Resp.Stream) and (Resp.Stream.Size > 0) then
-          begin
-            Resp.Stream.Position := 0;
-            BufferSize := Min(MaxBufferSize, Resp.Stream.Size);
-            SetLength(ResponseBodyBytes, BufferSize);
-            repeat
-              BytesRead := Resp.Stream.Read(ResponseBodyBytes[0], Length(ResponseBodyBytes));
-              if BytesRead > 0 then
-                FClientSocket.SendBuffer(@ResponseBodyBytes[0], BytesRead);
-            until BytesRead = 0;
-            FreeAndNil(Resp.Stream);
-          end;
-
-          // --- LOGS ---
-          if FEnableEventInfo and Assigned(FOnRequest) then
-          begin
-            RequestInfo.Headers := TStringList.Create;
-            RequestInfo.QueryParams := TStringList.Create;
-            try
-              RequestInfo.RemoteIP := Req.FRemoteIP;
-              RequestInfo.Method := Req.Method;
-              RequestInfo.URI := Req.URI;
-              RequestInfo.RequestLine := Req.RequestLine;
-              RequestInfo.Headers.Assign(Req.Headers);
-              RequestInfo.Body := Req.Body;
-              RequestInfo.QueryParams.Assign(Req.QueryParams);
-              RequestInfo.Timestamp := Now;
-              FOnRequest(RequestInfo);
-            finally
-              RequestInfo.Headers.Free;
-              RequestInfo.QueryParams.Free;
+            // --- ENVIO DO CORPO (TEXTO) ---
+            if (Resp.Body <> '') and (
+               (Resp.ContentType = '') or
+               (Pos('text/', Resp.ContentType) = 1) or
+               (Pos('application/json', Resp.ContentType) = 1)
+            ) then
+            begin
+              {$IFDEF Delphi2009Plus}
+              ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
+              {$ELSE}
+              UTF8Body := UTF8Encode(Resp.Body);
+              SetLength(ResponseBodyBytes, Length(UTF8Body));
+              Move(UTF8Body[1], ResponseBodyBytes[0], Length(UTF8Body));
+              {$ENDIF}
+              if Length(ResponseBodyBytes) > 0 then
+                FClientSocket.SendBuffer(@ResponseBodyBytes[0], Length(ResponseBodyBytes));
             end;
-          end;
 
-          if FEnableEventInfo and Assigned(FOnResponse) then
-          begin
-            ResponseInfo.Headers := TStringList.Create;
-            try
-              ResponseInfo.StatusCode := Resp.StatusCode;
-              ResponseInfo.StatusText := THTTPStatus.GetStatusText(Resp.StatusCode);
-              ResponseInfo.Body := Resp.Body;
-              ResponseInfo.ContentType := Resp.ContentType;
-              ResponseInfo.Headers.Text := ResponseHeader;
-              ResponseInfo.Timestamp := Now;
-              FOnResponse(ResponseInfo);
-            finally
-              ResponseInfo.Headers.Free;
+            // --- ENVIO DO STREAM ---
+            if Assigned(Resp.Stream) and (Resp.Stream.Size > 0) then
+            begin
+              Resp.Stream.Position := 0;
+              BufferSize := Min(MaxBufferSize, Resp.Stream.Size);
+              SetLength(ResponseBodyBytes, BufferSize);
+              repeat
+                BytesRead := Resp.Stream.Read(ResponseBodyBytes[0], Length(ResponseBodyBytes));
+                if BytesRead > 0 then
+                  FClientSocket.SendBuffer(@ResponseBodyBytes[0], BytesRead);
+              until BytesRead = 0;
+              FreeAndNil(Resp.Stream);
             end;
+
+            // --- LOGS ---
+            if FEnableEventInfo and Assigned(FOnRequest) then
+            begin
+              RequestInfo.Headers := TStringList.Create;
+              RequestInfo.QueryParams := TStringList.Create;
+              try
+                RequestInfo.RemoteIP := Req.FRemoteIP;
+                RequestInfo.Method := Req.Method;
+                RequestInfo.URI := Req.URI;
+                RequestInfo.RequestLine := Req.RequestLine;
+                RequestInfo.Headers.Assign(Req.Headers);
+                RequestInfo.Body := Req.Body;
+                RequestInfo.QueryParams.Assign(Req.QueryParams);
+                RequestInfo.Timestamp := Now;
+                FOnRequest(RequestInfo);
+              finally
+                RequestInfo.Headers.Free;
+                RequestInfo.QueryParams.Free;
+              end;
+            end;
+
+            if FEnableEventInfo and Assigned(FOnResponse) then
+            begin
+              ResponseInfo.Headers := TStringList.Create;
+              try
+                ResponseInfo.StatusCode := Resp.StatusCode;
+                ResponseInfo.StatusText := THTTPStatus.GetStatusText(Resp.StatusCode);
+                ResponseInfo.Body := Resp.Body;
+                ResponseInfo.ContentType := Resp.ContentType;
+                ResponseInfo.Headers.Text := ResponseHeader;
+                ResponseInfo.Timestamp := Now;
+                FOnResponse(ResponseInfo);
+              finally
+                ResponseInfo.Headers.Free;
+              end;
+            end;
+          finally
+            RunAfterMiddlewares(Req, Resp);
           end;
 
           if CloseConnection then Break;

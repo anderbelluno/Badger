@@ -1,0 +1,25 @@
+object DataModule1: TDataModule1
+  OldCreateOrder = False
+  Height = 240
+  HorizontalOffset = 400
+  VerticalOffset = 120
+  Width = 360
+  object ZConnection1: TZConnection
+    ControlsCodePage = cCP_UTF8
+    DisableSavepoints = False
+    HostName = '127.0.0.1'
+    Port = 5432
+    Database = 'badger_pool'
+    User = 'postgres'
+    Password = 'postgres'
+    Protocol = 'postgresql'
+    LoginPrompt = False
+    Left = 48
+    Top = 40
+  end
+  object ZQuery1: TZQuery
+    Params = <>
+    Left = 48
+    Top = 112
+  end
+end

@@ -26,6 +26,10 @@ type
     UserID   : String;
     UserRole : String;
     RouteParams: TStringList;
+    { Opaque DB pool hooks — typed as TObject so Badger core stays DB-agnostic.
+      Filled by TBadgerDBBridge; use AcquireConn/ReleaseConn from BadgerDBPool. }
+    DbPool: TObject;
+    DbConn: TObject;
   end;
 
   THTTPResponse = record
@@ -60,6 +64,9 @@ type
   TOnResponse = procedure(const ResponseInfo: TResponseInfo) of object;
 
   TMiddlewareProc = function(var Request: THTTPRequest; var Response: THTTPResponse): Boolean of object;
+  { Runs after the route (and after before-middlewares), even when a before-middleware
+    short-circuited with Handled=True. Intended for cleanup (e.g. DB pool Release). }
+  TAfterMiddlewareProc = procedure(var Request: THTTPRequest; var Response: THTTPResponse) of object;
   TRoutingCallback = procedure(Request: THTTPRequest; var Response: THTTPResponse) of object;
 
   TWebSocketMessageEvent = procedure(ClientInfo: TClientSocketInfo; const URI, AMessage: string) of object;
@@ -68,6 +75,12 @@ type
   public
     Middleware: TMiddlewareProc;
     constructor Create(AMiddleware: TMiddlewareProc);
+  end;
+
+  TAfterMiddlewareWrapper = class
+  public
+    Middleware: TAfterMiddlewareProc;
+    constructor Create(AMiddleware: TAfterMiddlewareProc);
   end;
 
 implementation
@@ -89,6 +102,14 @@ end;
 { TMiddlewareWrapper }
 
 constructor TMiddlewareWrapper.Create(AMiddleware: TMiddlewareProc);
+begin
+  inherited Create;
+  Middleware := AMiddleware;
+end;
+
+{ TAfterMiddlewareWrapper }
+
+constructor TAfterMiddlewareWrapper.Create(AMiddleware: TAfterMiddlewareProc);
 begin
   inherited Create;
   Middleware := AMiddleware;
