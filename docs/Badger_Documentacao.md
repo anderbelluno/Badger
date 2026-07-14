@@ -172,6 +172,7 @@ Destrua o bridge **depois** de `Server.Stop`.
   - Como configurar `OnRequest`/`OnResponse` e `EnableEventInfo` via checkbox
   - Registro de rotas e autenticação básica/JWT.
 - Lazarus ConnPool (`sample/Lazarus/ConnPool/`): pool DB + stress multi-thread + endpoints `/db/*` (PostgreSQL / Zeos).
+- Lazarus Midd_before_after (`sample/Lazarus/Midd_before_after/`): demo visual de `AddMiddleware` / `AddAfterMiddleware` (timing + API key em `/secure`).
 
 ## Boas Práticas
 

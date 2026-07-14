@@ -274,6 +274,7 @@ See `sample/Lazarus/unit1.pas` and `sample/D7/Unit1.pas` for complete working ex
 - `src/DBPool/` — DB connection pool (`TBadgerDBPool`) and HTTP bridge (`TBadgerDBBridge`)
 - `sample/` — Example projects for both Delphi (D7) and Lazarus
 - `sample/Lazarus/ConnPool/` — Concurrent DB pool demo (PostgreSQL / Zeos)
+- `sample/Lazarus/Midd_before_after/` — Before/after middleware demo (timing + API key)
 - `img/` — Project images and logos
 - `docs/` — Technical documentation (PT)
 ---
