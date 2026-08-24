@@ -35,9 +35,40 @@
 - **Route Management**: Register and protect routes for your APIs.
 - **Authentication**: Built-in support for Basic Auth and JWT (JSON Web Token) authentication.
 - **CORS (Cross-Origin Resource Sharing)**: Configurable CORS support with options for allowed origins, methods, headers, credentials and automatic preflight (OPTIONS) handling.
+- **After Middleware**: Post-route hooks (`AddAfterMiddleware`) for cleanup, running in LIFO order.
+- **DB Connection Pool**: Generic `TBadgerDBPool` + `TBadgerDBBridge` for Zeos/FireDAC/UniDAC templates, with `AcquireConn` / `ReleaseConn` on the request.
 - **MIME Type Handling**: Utility functions for recognizing MIME types of files.
 - **Cross-Platform**: Designed to work with both Delphi and Lazarus (FPC).
 - **Logger**: Flexible and thread-safe logging via `BadgerLogger`.
+
+---
+
+## 🗄️ DB Connection Pool
+
+Badger can pool database connectors without tying the core to a specific library. Pass a `TComponent` template from your DataModule and the pool size — cloning is handled internally.
+
+```pascal
+uses
+  Badger, BadgerDBPool, BadgerDBBridge;
+
+DbBridge := TBadgerDBBridge.Create(DataModule1.ZConnection1, 15);
+DbBridge.Register(Server);
+Server.Start;
+
+// In a route:
+Conn := TZConnection(AcquireConn(Request));
+try
+  // use Conn...
+finally
+  ReleaseConn(Request); // returns to pool — do not Free
+end;
+```
+
+- Template must be a `TComponent` (Zeos, FireDAC, UniDAC, `TSQLConnection`, …).
+- Before-middleware injects `Request.DbPool`; after-middleware releases any connection still borrowed.
+- Background threads (non-HTTP): use `DbBridge.Pool.Acquire` / `Release` directly.
+- Destroy the bridge **after** `Server.Stop`.
+- Demo: `sample/Lazarus/ConnPool` (PostgreSQL + concurrent stress + `/db/*` routes).
 
 ---
 
@@ -240,9 +271,12 @@ See `sample/Lazarus/unit1.pas` and `sample/D7/Unit1.pas` for complete working ex
 ## 🛠️ Project Structure
 
 - `src/` — Main library source code
+- `src/DBPool/` — DB connection pool (`TBadgerDBPool`) and HTTP bridge (`TBadgerDBBridge`)
 - `sample/` — Example projects for both Delphi (D7) and Lazarus
+- `sample/Lazarus/ConnPool/` — Concurrent DB pool demo (PostgreSQL / Zeos)
+- `sample/Lazarus/Midd_before_after/` — Before/after middleware demo (timing + API key)
 - `img/` — Project images and logos
-
+- `docs/` — Technical documentation (PT)
 ---
 
 ## 👥 Code Contributors

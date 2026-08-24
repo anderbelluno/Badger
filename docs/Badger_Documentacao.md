@@ -2,7 +2,7 @@
 
 ## Visão Geral
 
-Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, com suporte a rotas estáticas e dinâmicas, middlewares, eventos de aplicação (`OnRequest`/`OnResponse`) e autenticação via exemplos. A arquitetura privilegia simplicidade no hot path, com otimizações localizadas (índice estático e agrupamento por contexto) e controles explícitos de concorrência.
+Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, com suporte a rotas estáticas e dinâmicas, middlewares (before/after), eventos de aplicação (`OnRequest`/`OnResponse`), autenticação via exemplos e pool genérico de conexões de banco (`TBadgerDBPool` / `TBadgerDBBridge`). A arquitetura privilegia simplicidade no hot path, com otimizações localizadas (índice estático e agrupamento por contexto) e controles explícitos de concorrência.
 
 ## Arquitetura
 
@@ -37,10 +37,11 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
 
 1. Accept loop em `TBadger.Execute` aceita conexão e cria `THTTPRequestHandler`: `src/Badger.pas:591–612`
 2. `ParseRequestHeader` lê cabeçalhos linha a linha e preenche `TStringList` com `key=value`: `src/BadgerRequestHandler.pas:117–143`
-3. Montagem de `THTTPRequest` e roteamento via `TRouteManager.MatchRoute`: `src/BadgerRouteManager.pas:179–227`
-4. Execução do callback da rota (método) e construção da `THTTPResponse`: `src/BadgerRequestHandler.pas:145–176`
-5. Envio de headers, corpo (texto/JSON) ou stream com chunking simples: `src/BadgerRequestHandler.pas:380–408`
-6. Eventos de aplicação, conforme `EnableEventInfo`: `src/BadgerRequestHandler.pas:410–445`
+3. Middlewares **before** (`AddMiddleware`): podem interromper com `Handled=True`
+4. Roteamento via `TRouteManager.MatchRoute` e execução do callback: `src/BadgerRouteManager.pas:179–227`
+5. Envio de headers, corpo (texto/JSON) ou stream: `src/BadgerRequestHandler.pas:380–408`
+6. Eventos de aplicação, conforme `EnableEventInfo`
+7. Middlewares **after** (`AddAfterMiddleware`), em ordem LIFO — rodam **antes** de gravar a resposta no socket (podem alterar body/headers) e mesmo se um before short-circuitou
 
 ## Roteamento
 
@@ -52,9 +53,63 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
 
 ## Middlewares
 
-- `TBadger.AddMiddleware` adiciona procedimentos de middleware (declaração em `BadgerTypes.pas`).
-- Cada `THTTPRequestHandler` clona wrappers dos middlewares para isolamento: `src/BadgerRequestHandler.pas:57–66`, `src/BadgerRequestHandler.pas:68–89`
-- Liberação no destrutor: `src/BadgerRequestHandler.pas:110–115`
+Badger tem dois ganchos no ciclo da requisição:
+
+| Tipo | API | Quando | Contrato |
+|------|-----|--------|----------|
+| Before | `AddMiddleware` | Antes da rota | `True` = interrompe (handled); `False` = continua |
+| After | `AddAfterMiddleware` | Depois da rota, antes do send | procedure (mutate Resp e/ou cleanup) |
+
+- Declarações: `TMiddlewareProc` / `TAfterMiddlewareProc` em `src/BadgerTypes.pas`.
+- Registro: `TBadger.AddMiddleware` / `TBadger.AddAfterMiddleware` em `src/Badger.pas`.
+- After roda em ordem **LIFO** (modelo cebola), inclusive quando um before short-circuita com `Handled=True`.
+- Cada `THTTPRequestHandler` copia wrappers no accept para isolamento entre threads.
+- Uso típico do after: liberar recursos (ex.: conexão emprestada do DB pool).
+
+Fluxo resumido:
+
+```
+before₁ → before₂ → rota → after₂ → after₁ → BuildHTTPResponse / send
+```
+
+## Pool de conexões (DB)
+
+Units: `src/DBPool/BadgerDBPool.pas`, `src/DBPool/BadgerDBBridge.pas`.
+
+### Peças
+
+- **`TBadgerDBPool`**: pool genérico. Recebe um conector `TComponent` do DataModule (Zeos, FireDAC, UniDAC, `TSQLConnection`, …) e `APoolN` (**hard cap** de conexões idle+borrowed). Clona o template internamente (`WriteComponent`/`ReadComponent` + propriedade `Connected` via RTTI). O template **não** entra no pool. `Acquire` lança se o pool estiver esgotado; `Release` é idempotente (double-release é no-op); `Destroy` fecha idle e borrowed.
+- **`TBadgerDBBridge`**: registra before (injeta `Request.DbPool`) e after (safety-net `ReleaseConn`).
+- **`AcquireConn` / `ReleaseConn`**: helpers na request. `Release` **devolve** ao pool — não use `FreeAndNil` na conexão emprestada.
+
+Campos opacos em `THTTPRequest`: `DbPool`, `DbConn` (`TObject`).
+
+### Uso
+
+```pascal
+uses
+  Badger, BadgerDBPool, BadgerDBBridge;
+
+DbBridge := TBadgerDBBridge.Create(dm.ZConnection1, 15);
+DbBridge.Register(Server);
+Server.Start;
+
+// na rota:
+Conn := TZConnection(AcquireConn(Request));
+try
+  // queries...
+finally
+  ReleaseConn(Request);
+end;
+```
+
+Threads de background (sem HTTP): `DbBridge.Pool.Acquire` / `Release` direto.
+
+Destrua o bridge **depois** de `Server.Stop`.
+
+### Sample
+
+- `sample/Lazarus/ConnPool` — GUI + stress concorrente + rotas `/db/ping`, `/db/work`, `/db/stats` (PostgreSQL).
 
 ## Eventos de Aplicação
 
@@ -112,10 +167,12 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
 
 ## Samples
 
-- FMX D12 (`sample/D12/FMX Windows/Unit1.pas`) e VCL D7 (`sample/D7/Unit1.pas`) e Lazarus (`sample/Lazarus/unit1.pas`) mostram:
+- FMX D12 (`sample/D12/FMX Windows/Unit1.pas`), VCL D7 (`sample/D7/Unit1.pas`) e Lazarus GUI (`sample/Lazarus/GUI/unit1.pas`) mostram:
   - Como iniciar/parar o servidor
   - Como configurar `OnRequest`/`OnResponse` e `EnableEventInfo` via checkbox
   - Registro de rotas e autenticação básica/JWT.
+- Lazarus ConnPool (`sample/Lazarus/ConnPool/`): pool DB + stress multi-thread + endpoints `/db/*` (PostgreSQL / Zeos).
+- Lazarus Midd_before_after (`sample/Lazarus/Midd_before_after/`): demo visual de `AddMiddleware` / `AddAfterMiddleware` (timing + API key em `/secure`).
 
 ## Boas Práticas
 
@@ -123,6 +180,7 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
 - Ajustar `MaxConcurrentConnections` gradualmente conforme hardware.
 - Agrupar endpoints por contexto para máxima efetividade do bucket.
 - Evitar primeiro segmento dinâmico quando possível, para usar buckets específicos.
+- No DB pool: sempre `ReleaseConn` (ou after do bridge); nunca `Free` da conexão emprestada; destruir o bridge após `Server.Stop`.
 
 ## Troubleshooting
 
@@ -136,3 +194,5 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
 - `TBadger` execução e aceitação: `src/Badger.pas:564–647`
 - `THTTPRequestHandler` parsing e resposta: `src/BadgerRequestHandler.pas:117–176`, `src/BadgerRequestHandler.pas:380–445`
 - `TRouteManager` registro e matching com contexto: `src/BadgerRouteManager.pas:107–124`, `src/BadgerRouteManager.pas:179–227`
+- After-middleware: `AddAfterMiddleware` / `RunAfterMiddlewares` em `src/Badger.pas` e `src/BadgerRequestHandler.pas`
+- DB pool: `src/DBPool/BadgerDBPool.pas`, bridge HTTP: `src/DBPool/BadgerDBBridge.pas`

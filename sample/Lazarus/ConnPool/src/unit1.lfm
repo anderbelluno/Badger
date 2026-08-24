@@ -1,0 +1,257 @@
+object Form1: TForm1
+  Left = 320
+  Height = 640
+  Top = 120
+  Width = 920
+  Caption = 'Badger ConnPool'
+  ClientHeight = 640
+  ClientWidth = 920
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  LCLVersion = '4.99.0.0'
+  object pnlTop: TPanel
+    Left = 0
+    Height = 220
+    Top = 0
+    Width = 920
+    Align = alTop
+    BevelOuter = bvNone
+    ClientHeight = 220
+    ClientWidth = 920
+    TabOrder = 0
+    object lblHost: TLabel
+      Left = 16
+      Height = 17
+      Top = 16
+      Width = 28
+      Caption = 'Host'
+    end
+    object edtHost: TEdit
+      Left = 88
+      Height = 28
+      Top = 12
+      Width = 160
+      TabOrder = 0
+      Text = '127.0.0.1'
+    end
+    object lblPortDb: TLabel
+      Left = 264
+      Height = 17
+      Top = 16
+      Width = 46
+      Caption = 'DB Port'
+    end
+    object edtPortDb: TEdit
+      Left = 320
+      Height = 28
+      Top = 12
+      Width = 72
+      TabOrder = 1
+      Text = '5432'
+    end
+    object lblDatabase: TLabel
+      Left = 416
+      Height = 17
+      Top = 16
+      Width = 54
+      Caption = 'Database'
+    end
+    object edtDatabase: TEdit
+      Left = 480
+      Height = 28
+      Top = 12
+      Width = 140
+      TabOrder = 2
+      Text = 'badger_pool'
+    end
+    object lblUser: TLabel
+      Left = 16
+      Height = 17
+      Top = 56
+      Width = 26
+      Caption = 'User'
+    end
+    object edtUser: TEdit
+      Left = 88
+      Height = 28
+      Top = 52
+      Width = 160
+      TabOrder = 3
+      Text = 'postgres'
+    end
+    object lblPassword: TLabel
+      Left = 264
+      Height = 17
+      Top = 56
+      Width = 55
+      Caption = 'Password'
+    end
+    object edtPassword: TEdit
+      Left = 336
+      Height = 28
+      Top = 52
+      Width = 140
+      EchoMode = emPassword
+      TabOrder = 4
+      Text = 'postgres'
+    end
+    object lblProtocol: TLabel
+      Left = 496
+      Height = 17
+      Top = 56
+      Width = 48
+      Caption = 'Protocol'
+    end
+    object edtProtocol: TEdit
+      Left = 560
+      Height = 28
+      Top = 52
+      Width = 120
+      TabOrder = 5
+      Text = 'postgresql'
+    end
+    object lblHttpPort: TLabel
+      Left = 16
+      Height = 17
+      Top = 96
+      Width = 55
+      Caption = 'HTTP Port'
+    end
+    object edtHttpPort: TEdit
+      Left = 88
+      Height = 28
+      Top = 92
+      Width = 72
+      TabOrder = 6
+      Text = '8088'
+    end
+    object lblPoolN: TLabel
+      Left = 176
+      Height = 17
+      Top = 96
+      Width = 40
+      Caption = 'Pool N'
+    end
+    object sePoolN: TSpinEdit
+      Left = 232
+      Height = 28
+      Top = 92
+      Width = 72
+      MaxValue = 100
+      MinValue = 1
+      TabOrder = 7
+      Value = 8
+    end
+    object chkParallel: TCheckBox
+      Left = 320
+      Height = 21
+      Top = 96
+      Width = 160
+      Caption = 'Parallel processing'
+      Checked = True
+      State = cbChecked
+      TabOrder = 8
+    end
+    object btnTestDb: TButton
+      Left = 16
+      Height = 32
+      Top = 140
+      Width = 100
+      Caption = 'Test DB'
+      OnClick = btnTestDbClick
+      TabOrder = 9
+    end
+    object btnStart: TButton
+      Left = 128
+      Height = 32
+      Top = 140
+      Width = 100
+      Caption = 'Start server'
+      OnClick = btnStartClick
+      TabOrder = 10
+    end
+    object btnStop: TButton
+      Left = 240
+      Height = 32
+      Top = 140
+      Width = 100
+      Caption = 'Stop'
+      Enabled = False
+      OnClick = btnStopClick
+      TabOrder = 11
+    end
+    object lblThreads: TLabel
+      Left = 384
+      Height = 17
+      Top = 148
+      Width = 48
+      Caption = 'Threads'
+    end
+    object seThreads: TSpinEdit
+      Left = 440
+      Height = 28
+      Top = 140
+      Width = 64
+      MaxValue = 200
+      MinValue = 1
+      TabOrder = 12
+      Value = 20
+    end
+    object lblLoops: TLabel
+      Left = 520
+      Height = 17
+      Top = 148
+      Width = 34
+      Caption = 'Loops'
+    end
+    object seLoops: TSpinEdit
+      Left = 568
+      Height = 28
+      Top = 140
+      Width = 56
+      MaxValue = 1000
+      MinValue = 1
+      TabOrder = 13
+      Value = 10
+    end
+    object lblHoldMs: TLabel
+      Left = 640
+      Height = 17
+      Top = 148
+      Width = 48
+      Caption = 'Hold ms'
+    end
+    object seHoldMs: TSpinEdit
+      Left = 704
+      Height = 28
+      Top = 140
+      Width = 64
+      MaxValue = 5000
+      MinValue = 0
+      TabOrder = 14
+      Value = 30
+    end
+    object btnStress: TButton
+      Left = 784
+      Height = 32
+      Top = 140
+      Width = 120
+      Caption = 'Stress pool'
+      Enabled = False
+      OnClick = btnStressClick
+      TabOrder = 15
+    end
+  end
+  object memoLog: TMemo
+    Left = 0
+    Height = 420
+    Top = 220
+    Width = 920
+    Align = alClient
+    Font.Name = 'DejaVu Sans Mono'
+    ParentFont = False
+    ReadOnly = True
+    ScrollBars = ssAutoBoth
+    TabOrder = 1
+  end
+end

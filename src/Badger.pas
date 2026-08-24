@@ -36,6 +36,7 @@ type
     FRouteManager: TRouteManager;
     FMethods: TBadgerMethods;
     FMiddlewares: TList;
+    FAfterMiddlewares: TList;
     FMiddlewareLock: TCriticalSection;
     FPort: Integer;
     FNonBlockMode: Boolean;
@@ -76,6 +77,7 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure AddMiddleware(Middleware: TMiddlewareProc);
+    procedure AddAfterMiddleware(Middleware: TAfterMiddlewareProc);
     procedure Start;
     procedure Stop;
     procedure DecActiveConnections;
@@ -139,6 +141,7 @@ begin
   FRouteManager := TRouteManager.Create;
   FMethods := TBadgerMethods.Create;
   FMiddlewares := TList.Create;
+  FAfterMiddlewares := TList.Create;
   FMiddlewareLock := TCriticalSection.Create;
   FClientSockets := TList.Create;
   FSocketLock := TCriticalSection.Create;
@@ -252,6 +255,19 @@ begin
   except
     on E: Exception do
       Logger.Error(Format('Error freeing FMiddlewares: %s', [E.Message]));
+  end;
+
+  try
+    if Assigned(FAfterMiddlewares) then
+    begin
+      for I := 0 to FAfterMiddlewares.Count - 1 do
+        if Assigned(FAfterMiddlewares[I]) then
+          TObject(FAfterMiddlewares[I]).Free;
+      FreeAndNil(FAfterMiddlewares);
+    end;
+  except
+    on E: Exception do
+      Logger.Error(Format('Error freeing FAfterMiddlewares: %s', [E.Message]));
   end;
 
   try
@@ -642,6 +658,20 @@ begin
   end;
 end;
 
+procedure TBadger.AddAfterMiddleware(Middleware: TAfterMiddlewareProc);
+begin
+  if not Assigned(FMiddlewareLock) then
+    Exit;
+
+  FMiddlewareLock.Acquire;
+  try
+    if not FIsShuttingDown and Assigned(FAfterMiddlewares) then
+      FAfterMiddlewares.Add(TAfterMiddlewareWrapper.Create(Middleware));
+  finally
+    FMiddlewareLock.Release;
+  end;
+end;
+
 procedure TBadger.Start;
 begin
   if FIsShuttingDown then
@@ -842,14 +872,14 @@ begin
             if FParallelProcessing then
             begin
               IncActiveConnections;
-              THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares, FMiddlewareLock,
-                                                FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
+              THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares, FAfterMiddlewares,
+                                                FMiddlewareLock, FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
               ClientSocket := nil;
             end
             else
             begin
-              THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares, FMiddlewareLock,
-                                         FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
+              THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares, FAfterMiddlewares,
+                                         FMiddlewareLock, FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
               RemoveClientSocket(ClientSocket);
               ClientSocket := nil;
             end;
