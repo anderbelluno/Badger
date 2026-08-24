@@ -76,8 +76,7 @@ end;
 
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
-  Logger.isActive := true;
-  Logger.LogFileName := 'logger.log';
+  Logger.isActive := False;
   Logger.LogToConsole := False;
 
   if btnSyna.Tag = 0 then
@@ -91,9 +90,9 @@ begin
     ServerThread.OnResponse := HandleResponse;
 
     case RadioGroup1.ItemIndex of
-      1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping', '/download']);
+      1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/teste/ping', '/download']);
       3: begin
-            JWTAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping']);
+            JWTAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/teste/ping']);
             SampleRouteManager.FJWT := JWTAuth;
          end;
     end;
@@ -109,9 +108,8 @@ begin
       .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
       .AddGet('/produtos', TSampleRouteManager.produtos);
 
-    ServerThread.ParallelProcessing:= rdParallel.Checked;
-    ServerThread.MaxConcurrentConnections:= 50000;
-
+    ServerThread.ParallelProcessing := rdParallel.Checked;
+    ServerThread.MaxConcurrentConnections := 500;
     ServerThread.CorsEnabled := False;
 
     ServerThread.Start;

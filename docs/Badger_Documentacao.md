@@ -119,7 +119,7 @@ Destrua o bridge **depois** de `Server.Stop`.
   - Ajuste via checkbox nos samples:
     - FMX D12: `sample/D12/FMX Windows/Unit1.pas:73`
     - VCL D7: `sample/D7/Unit1.pas:58`
-    - Lazarus: `sample/Lazarus/unit1.pas:74`
+    - Lazarus: `sample/Lazarus/GUI/unit1.pas:86`
 
 ## Logging
 
@@ -167,12 +167,24 @@ Destrua o bridge **depois** de `Server.Stop`.
 
 ## Samples
 
-- FMX D12 (`sample/D12/FMX Windows/Unit1.pas`), VCL D7 (`sample/D7/Unit1.pas`) e Lazarus GUI (`sample/Lazarus/GUI/unit1.pas`) mostram:
-  - Como iniciar/parar o servidor
-  - Como configurar `OnRequest`/`OnResponse` e `EnableEventInfo` via checkbox
-  - Registro de rotas e autenticação básica/JWT.
-- Lazarus ConnPool (`sample/Lazarus/ConnPool/`): pool DB + stress multi-thread + endpoints `/db/*` (PostgreSQL / Zeos).
-- Lazarus Midd_before_after (`sample/Lazarus/Midd_before_after/`): demo visual de `AddMiddleware` / `AddAfterMiddleware` (timing + API key em `/secure`).
+Referência canônica de setup do servidor: **`sample/Lazarus/GUI/unit1.pas`** (D7 e FMX D12 seguem o mesmo padrão de rotas, auth e lifecycle).
+
+| Sample | Caminho | Propósito |
+|--------|---------|-----------|
+| Lazarus GUI | `sample/Lazarus/GUI/` | Demo completa: rotas, auth Basic/JWT, eventos, paralelo |
+| VCL D7 | `sample/D7/` | Mesmo conjunto de rotas/auth que Lazarus GUI |
+| FMX D12 | `sample/D12/FMX Windows/` | Mesmo conjunto de rotas/auth que Lazarus GUI |
+| WinService D12 | `sample/D12/WinService/` | Badger como serviço Windows (rotas essenciais) |
+| Console Linux | `sample/Lazarus/Console_Linux/` | Demo headless (`/teste/ping`) |
+| ConnPool | `sample/Lazarus/ConnPool/` | Pool DB + stress multi-thread + `/db/*` (PostgreSQL / Zeos) |
+| Midd_before_after | `sample/Lazarus/Midd_before_after/` | `AddMiddleware` / `AddAfterMiddleware` (timing + API key) |
+| StressTeste | `sample/StressTeste/` | Utilitários de carga |
+
+Padrão comum nos demos GUI:
+- `Logger.isActive := False` (eventos via checkbox `EnableEventInfo`)
+- `MaxConcurrentConnections := 500` quando `ParallelProcessing = True`
+- `FreeAndNil(ServerThread)` ao parar e no `FormDestroy`
+- Rotas protegidas usam `/teste/ping` (mesmo path registrado no `RouteManager`)
 
 ## Boas Práticas
 

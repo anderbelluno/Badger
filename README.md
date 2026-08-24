@@ -264,7 +264,7 @@ ServerThread.OnResponse := HandleResponse;
 ServerThread.Start;
 ```
 
-See `sample/Lazarus/unit1.pas` and `sample/D7/Unit1.pas` for complete working examples.
+See `sample/Lazarus/GUI/unit1.pas`, `sample/D7/Unit1.pas` and `sample/D12/FMX Windows/Unit1.pas` for complete working examples.
 
 ---
 
@@ -272,9 +272,15 @@ See `sample/Lazarus/unit1.pas` and `sample/D7/Unit1.pas` for complete working ex
 
 - `src/` — Main library source code
 - `src/DBPool/` — DB connection pool (`TBadgerDBPool`) and HTTP bridge (`TBadgerDBBridge`)
-- `sample/` — Example projects for both Delphi (D7) and Lazarus
+- `sample/` — Example projects for Delphi (D7, D12) and Lazarus
+- `sample/D7/` — VCL GUI demo (routes, auth, events)
+- `sample/D12/FMX Windows/` — FMX GUI demo (same routes as D7/Lazarus GUI)
+- `sample/D12/WinService/` — Windows service hosting Badger
+- `sample/Lazarus/GUI/` — Lazarus GUI demo (canonical reference for server setup)
+- `sample/Lazarus/Console_Linux/` — Headless console demo (Linux/Windows)
 - `sample/Lazarus/ConnPool/` — Concurrent DB pool demo (PostgreSQL / Zeos)
 - `sample/Lazarus/Midd_before_after/` — Before/after middleware demo (timing + API key)
+- `sample/StressTeste/` — Load/stress testing utilities
 - `img/` — Project images and logos
 - `docs/` — Technical documentation (PT)
 ---

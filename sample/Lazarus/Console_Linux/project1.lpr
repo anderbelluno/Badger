@@ -50,7 +50,7 @@ begin
 
 
   ServerThread.ParallelProcessing := True;
-  {ServerThread.MaxConcurrentConnections := 30000;}
+  ServerThread.MaxConcurrentConnections := 500;
 
   ServerThread.Start;
 
@@ -70,8 +70,11 @@ end;
 
 destructor TMyApplication.Destroy;
 begin
-  ServerThread.Stop;
-  ServerThread := nil;
+  if Assigned(ServerThread) then
+  begin
+    ServerThread.Stop;
+    FreeAndNil(ServerThread);
+  end;
   inherited Destroy;
 end;
 

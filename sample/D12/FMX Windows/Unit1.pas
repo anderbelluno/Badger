@@ -16,6 +16,7 @@ uses
   BadgerLogger,
 
   System.SysUtils, System.Types, System.UITypes, System.Classes, System.Variants,
+  System.SyncObjs,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   FMX.Memo.Types, FMX.ScrollBox, FMX.Memo, FMX.StdCtrls, FMX.Layouts,
   FMX.Controls.Presentation, FMX.Edit, FMX.ListBox;
@@ -39,13 +40,13 @@ type
     procedure FormDestroy(Sender: TObject);
     procedure btnClearLogClick(Sender: TObject);
   private
-    { Private declarations }
     ServerThread: TBadger;
     BasicAuth: TBasicAuth;
     JWTAuth: TBadgerJWTAuth;
+    FLogLock: TCriticalSection;
+    FLogQueue: TStringList;
+    procedure SyncFlushLog;
   public
-    { Public declarations }
-
     procedure HandleRequest(const RequestInfo: TRequestInfo);
     procedure HandleResponse(const ResponseInfo: TResponseInfo);
   end;
@@ -60,9 +61,33 @@ uses
 
 {$R *.fmx}
 
+procedure TForm1.SyncFlushLog;
+var
+  I: Integer;
+  Lines: TStringList;
+begin
+  Lines := TStringList.Create;
+  try
+    FLogLock.Acquire;
+    try
+      Lines.Assign(FLogQueue);
+      FLogQueue.Clear;
+    finally
+      FLogLock.Release;
+    end;
+    for I := 0 to Lines.Count - 1 do
+      Memo1.Lines.Add(Lines[I]);
+    if Lines.Count > 0 then
+      Memo1.GoToTextEnd;
+  finally
+    Lines.Free;
+  end;
+end;
+
 procedure TForm1.btnClearLogClick(Sender: TObject);
 begin
-   TThread.Synchronize(nil, procedure
+  TThread.Queue(nil,
+    procedure
     begin
       Memo1.Lines.Clear;
     end);
@@ -77,20 +102,15 @@ begin
   begin
     ServerThread := TBadger.Create;
     ServerThread.EnableEventInfo := rdLog.IsChecked;
-
-    ServerThread.CorsEnabled := False;
-    ServerThread.CorsAllowedOrigins.Clear;
-    ServerThread.CorsAllowedOrigins.Add('*');
-
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
     ServerThread.OnRequest := HandleRequest;
     ServerThread.OnResponse := HandleResponse;
 
-   case ComboAuth.ItemIndex of
-     1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping', '/download']);
-     3: begin
-           JWTAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping']);
+    case ComboAuth.ItemIndex of
+      1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/teste/ping', '/download']);
+      3: begin
+           JWTAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/teste/ping']);
            SampleRouteManager.FJWT := JWTAuth;
         end;
     end;
@@ -101,14 +121,14 @@ begin
       .AddGet('/rota1', TSampleRouteManager.rota1)
       .AddGet('/teste/ping', TSampleRouteManager.ping)
       .AddPost('/AtuImage', TSampleRouteManager.AtuImage)
-      .AddPost('/Login',TSampleRouteManager.Login)
-      .AddGet('/RefreshToken',TSampleRouteManager.RefreshToken)
+      .AddPost('/Login', TSampleRouteManager.Login)
+      .AddGet('/RefreshToken', TSampleRouteManager.RefreshToken)
       .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
       .AddGet('/produtos', TSampleRouteManager.produtos);
 
-
     ServerThread.ParallelProcessing := rdParallel.IsChecked;
     ServerThread.MaxConcurrentConnections := 500;
+    ServerThread.CorsEnabled := False;
 
     ServerThread.Start;
     edtPorta.Enabled   := False;
@@ -122,7 +142,7 @@ begin
   else
   begin
     ServerThread.Stop;
-    ServerThread       := nil;
+    FreeAndNil(ServerThread);
     btnSyna.Tag        := 0;
     btnSyna.Text       := 'Iniciar Servidor';
     edtPorta.Enabled   := True;
@@ -136,38 +156,50 @@ end;
 procedure TForm1.FormCreate(Sender: TObject);
 begin
   ServerThread := nil;
+  FLogLock := TCriticalSection.Create;
+  FLogQueue := TStringList.Create;
   BasicAuth := TBasicAuth.Create('username', 'password');
-  JWTAuth := TBadgerJWTAuth.Create('secretekey', 'c:\tokenss');  //save token to file
+  JWTAuth := TBadgerJWTAuth.Create('secretekey', 'c:\tokenss');
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);
 begin
-if Assigned(ServerThread) then
+  if Assigned(ServerThread) then
+  begin
     ServerThread.Stop;
+    FreeAndNil(ServerThread);
+  end;
   FreeAndNil(BasicAuth);
   FreeAndNil(JWTAuth);
+  FreeAndNil(FLogQueue);
+  FreeAndNil(FLogLock);
 end;
 
 procedure TForm1.HandleRequest(const RequestInfo: TRequestInfo);
 begin
-  if rdLog.IsChecked then
-    TThread.Synchronize(nil, procedure
-    begin
-      Memo1.Lines.Add('Client Request: ' + #13#10 + RequestInfo.RequestLine + #13#10);
-      Memo1.Lines.Add('Remote Request IP: ' + #13#10 + RequestInfo.RemoteIP + #13#10);
-      Memo1.GoToTextEnd;
-    end);
+  if not rdLog.IsChecked then Exit;
+  FLogLock.Acquire;
+  try
+    FLogQueue.Add('>> ' + RequestInfo.Method + ' ' + RequestInfo.URI
+                + ' | IP: ' + RequestInfo.RemoteIP);
+  finally
+    FLogLock.Release;
+  end;
+  TThread.Queue(nil, SyncFlushLog);
 end;
 
 procedure TForm1.HandleResponse(const ResponseInfo: TResponseInfo);
 begin
-  if rdLog.IsChecked then
-    TThread.Synchronize(nil, procedure
-    begin
-      Memo1.Lines.Add('Server Response: ' + #13#10 + ResponseInfo.StatusCode.ToString + ' ' + ResponseInfo.Body + #13#10
-      + DateTimeToStr(ResponseInfo.Timestamp) + #13#10);
-      Memo1.GoToTextEnd;
-    end);
+  if not rdLog.IsChecked then Exit;
+  FLogLock.Acquire;
+  try
+    FLogQueue.Add('<< ' + ResponseInfo.StatusCode.ToString
+                + ' ' + ResponseInfo.StatusText
+                + ' | ' + DateTimeToStr(ResponseInfo.Timestamp));
+  finally
+    FLogLock.Release;
+  end;
+  TThread.Queue(nil, SyncFlushLog);
 end;
 
 end.

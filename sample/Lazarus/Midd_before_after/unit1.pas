@@ -76,8 +76,7 @@ end;
 
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
-  Logger.isActive := True;
-  Logger.LogFileName := 'logger.log';
+  Logger.isActive := False;
   Logger.LogToConsole := False;
 
   if btnSyna.Tag = 0 then
@@ -100,7 +99,7 @@ begin
     ServerThread.RouteManager.AddGet('/ping', TDemoRoutes.Ping);
 
     ServerThread.ParallelProcessing := rdParallel.Checked;
-    ServerThread.MaxConcurrentConnections := 50000;
+    ServerThread.MaxConcurrentConnections := 500;
     ServerThread.CorsEnabled := False;
 
     ServerThread.Start;

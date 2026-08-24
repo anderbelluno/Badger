@@ -1,29 +1,71 @@
 program BadgerWinService;
 
 uses
+  Winapi.Windows,
+  System.SysUtils,
   Vcl.SvcMgr,
   UBadgerService in 'UBadgerService.pas' {FBadgerService: TService},
   SampleRouteManager in '..\..\SampleRouteManager.pas';
 
 {$R *.RES}
 
+{ When started from the IDE (or double-click), the process is not launched by
+  the Service Control Manager — Application.Run returns immediately.
+  RunInteractive keeps Badger alive until Enter is pressed. }
+
+function RunningAsService: Boolean;
+var
+  SessionId: DWORD;
 begin
-  // Windows 2003 Server requires StartServiceCtrlDispatcher to be
-  // called before CoRegisterClassObject, which can be called indirectly
-  // by Application.Initialize. TServiceApplication.DelayInitialize allows
-  // Application.Initialize to be called from TService.Main (after
-  // StartServiceCtrlDispatcher has been called).
-  //
-  // Delayed initialization of the Application object may affect
-  // events which then occur prior to initialization, such as
-  // TService.OnCreate. It is only recommended if the ServiceApplication
-  // registers a class object with OLE and is intended for use with
-  // Windows 2003 Server.
-  //
-  // Application.DelayInitialize := True;
-  //
+  Result := ProcessIdToSessionId(GetCurrentProcessId, SessionId) and (SessionId = 0);
+end;
+
+procedure BindStdHandles;
+var
+  H: THandle;
+begin
+  H := GetStdHandle(STD_OUTPUT_HANDLE);
+  if (H = 0) or (H = INVALID_HANDLE_VALUE) then
+  begin
+    H := CreateFile('CONOUT$', GENERIC_READ or GENERIC_WRITE,
+      FILE_SHARE_WRITE, nil, OPEN_EXISTING, 0, 0);
+    SetStdHandle(STD_OUTPUT_HANDLE, H);
+  end;
+  H := GetStdHandle(STD_INPUT_HANDLE);
+  if (H = 0) or (H = INVALID_HANDLE_VALUE) then
+  begin
+    H := CreateFile('CONIN$', GENERIC_READ or GENERIC_WRITE,
+      FILE_SHARE_READ, nil, OPEN_EXISTING, 0, 0);
+    SetStdHandle(STD_INPUT_HANDLE, H);
+  end;
+end;
+
+procedure RunInteractive;
+var
+  Started, Stopped: Boolean;
+begin
+  AllocConsole;
+  BindStdHandles;
+  try
+    FBadgerService.LogToConsole := True;
+    Started := True;
+    FBadgerService.ServiceStart(FBadgerService, Started);
+    WriteLn('Press Enter to stop...');
+    ReadLn;
+    Stopped := True;
+    FBadgerService.ServiceStop(FBadgerService, Stopped);
+  finally
+    FreeConsole;
+  end;
+end;
+
+begin
   if not Application.DelayInitialize or Application.Installing then
     Application.Initialize;
   Application.CreateForm(TFBadgerService, FBadgerService);
-  Application.Run;
+
+  if Application.Installing or RunningAsService then
+    Application.Run
+  else
+    RunInteractive;
 end.
