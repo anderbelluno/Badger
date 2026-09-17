@@ -26,6 +26,7 @@ type
         RadioGroup1: TRadioGroup;
         rdLog: TCheckBox;
         rdParallel: TCheckBox;
+        rdIOCP: TCheckBox;
         procedure btnClearLogClick(Sender: TObject);
         procedure btnSynaClick(Sender: TObject);
         procedure FormCreate(Sender: TObject);
@@ -82,12 +83,17 @@ begin
   if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
-    ServerThread.EnableEventInfo := rdLog.Checked;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
-
-    ServerThread.OnRequest  := HandleRequest;
-    ServerThread.OnResponse := HandleResponse;
+    ServerThread.ParallelProcessing := rdParallel.Checked;
+    ServerThread.MaxConcurrentConnections := 500;
+    ServerThread.EnableEventInfo := rdLog.Checked;
+    ServerThread.UseIOCP := rdIOCP.Checked;
+    if ServerThread.EnableEventInfo then
+    begin
+      ServerThread.OnRequest := HandleRequest;
+      ServerThread.OnResponse := HandleResponse;
+    end;
 
     case RadioGroup1.ItemIndex of
       1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/teste/ping', '/download']);
@@ -108,14 +114,12 @@ begin
       .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
       .AddGet('/produtos', TSampleRouteManager.produtos);
 
-    ServerThread.ParallelProcessing := rdParallel.Checked;
-    ServerThread.MaxConcurrentConnections := 500;
     ServerThread.CorsEnabled := False;
-
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
     rdParallel.Enabled := False;
+    rdIOCP.Enabled := False;
     btnSyna.Tag := 1;
     btnSyna.Caption := 'Parar Servidor';
     RadioGroup1.Enabled := False;
@@ -130,6 +134,7 @@ begin
     edtPorta.Enabled := True;
     rdLog.Enabled := True;
     rdParallel.Enabled := True;
+    rdIOCP.Enabled := True;
     RadioGroup1.Enabled := True;
     edtTimeOut.Enabled := True;
   end;

@@ -7,7 +7,8 @@ uses
 
 type
   TClientSocketInfo = class
-    Socket: TTCPBlockSocket;
+    Socket: TTCPBlockSocket; { nil on IOCP }
+    Ctx: Pointer;            { PIocpCtx on IOCP; nil on classic }
     InUse: Boolean;
     URI: string;
     IOLock: TCriticalSection;
@@ -16,6 +17,8 @@ type
   end;
 
   THTTPRequest = record
+    { Classic Synapse client. Nil when the request was parsed off-socket (IOCP).
+      Routes must not send/recv on Socket — use FRemoteIP / body / headers. }
     Socket: TTCPBlockSocket;
     URI, Method, RequestLine: string;
     Headers: TStringList;
@@ -71,6 +74,7 @@ type
   TRoutingCallback = procedure(Request: THTTPRequest; var Response: THTTPResponse) of object;
 
   TWebSocketMessageEvent = procedure(ClientInfo: TClientSocketInfo; const URI, AMessage: string) of object;
+  TWsClientProc = procedure(Info: TClientSocketInfo) of object;
 
   TMiddlewareWrapper = class
   public
@@ -91,6 +95,8 @@ implementation
 constructor TClientSocketInfo.Create;
 begin
   inherited Create;
+  Socket := nil;
+  Ctx := nil;
   IOLock := TCriticalSection.Create;
 end;
 

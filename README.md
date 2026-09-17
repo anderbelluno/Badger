@@ -32,13 +32,14 @@
 ## ✨ Features
 
 - **HTTP Server**: Quickly spin up HTTP servers in Delphi/Lazarus projects.
+- **Windows IOCP**: Default I/O engine on Windows (`UseIOCP`; set `False` to force Synapse). Linux/macOS stay on Synapse until epoll.
 - **Route Management**: Register and protect routes for your APIs.
 - **Authentication**: Built-in support for Basic Auth and JWT (JSON Web Token) authentication.
 - **CORS (Cross-Origin Resource Sharing)**: Configurable CORS support with options for allowed origins, methods, headers, credentials and automatic preflight (OPTIONS) handling.
 - **After Middleware**: Post-route hooks (`AddAfterMiddleware`) for cleanup, running in LIFO order.
 - **DB Connection Pool**: Generic `TBadgerDBPool` + `TBadgerDBBridge` for Zeos/FireDAC/UniDAC templates, with `AcquireConn` / `ReleaseConn` on the request.
 - **MIME Type Handling**: Utility functions for recognizing MIME types of files.
-- **Cross-Platform**: Designed to work with both Delphi and Lazarus (FPC).
+- **Cross-Platform**: Designed to work with both Delphi and Lazarus (FPC). I/O: IOCP on Windows, Synapse elsewhere (`UseIOCP` is ignored off Windows).
 - **Logger**: Flexible and thread-safe logging via `BadgerLogger`.
 
 ---
@@ -95,7 +96,8 @@ The WebSocket implementation was developed progressively across three key stages
 - ✅ Extended payload support for frames larger than 125 bytes
 - ✅ Graceful connection closure handling
 - ✅ Thread-safe message broadcasting for concurrent clients
-- ✅ Cross-platform reliability with timeout-based read loops
+- ✅ Windows IOCP frames (`WSARecv`/`WSASend`); classic path uses timeout-based read loops
+- ✅ Cross-platform handshake and framing (`BadgerWebSocket`)
 
 ### Usage Example - Server
 
@@ -114,7 +116,6 @@ begin
   ServerThread := TBadger.Create;
   ServerThread.Port := 8080;
   ServerThread.Timeout := 5000;
-  ServerThread.NonBlockMode := True;
   
   ServerThread.OnRequest := HandleRequest;
   ServerThread.OnResponse := HandleResponse;
@@ -235,7 +236,7 @@ git submodule update --init --recursive
 
 All dependencies are managed as git submodules and are listed in the **.gitmodules** file. The main third-party dependency is:
 
-- [Synapse](https://github.com/geby/synapse) – for networking functionality.
+- [Synapse](https://github.com/geby/synapse) – classic networking path (Linux/macOS; Windows fallback when `UseIOCP := False`).
 
 If you want to download dependencies manually, place them in the `ThirdParty` folder.
 
@@ -243,44 +244,44 @@ If you want to download dependencies manually, place them in the `ThirdParty` fo
 
 ## 🧩 Usage Example
 
-Here's a simplified example of spinning up a Badger HTTP server in a Lazarus project:
+Windows uses **IOCP** by default. `UseIOCP := False` forces Synapse. Linux/macOS stay on Synapse.
 
 ```pascal
-ServerThread := TBadger.Create;
-ServerThread.Port := 8080;
-ServerThread.Timeout := 5000;
-ServerThread.NonBlockMode := True;
+Server := TBadger.Create;
+try
+  Server.Port := 8080;
+  Server.Timeout := 5000;
+  Server.ParallelProcessing := True;
+  Server.MaxConcurrentConnections := 500;
+  Server.EnableEventInfo := False;
+  { Server.UseIOCP := False; } { Windows: force Synapse }
 
-BasicAuth := TBasicAuth.Create('username', 'password');
-JWTAuth := TBadgerJWTAuth.Create('secretkey', 'c:\tokens'); // Token storage
+  Server.RouteManager
+    .AddGet('/teste/ping', TSampleRouteManager.ping);
 
-// Register protected routes
-BasicAuth.RegisterProtectedRoutes(ServerThread, ['/route1', '/ping', '/download']);
-JWTAuth.RegisterProtectedRoutes(ServerThread, ['/route1', '/ping']);
-
-ServerThread.OnRequest  := HandleRequest;
-ServerThread.OnResponse := HandleResponse;
-
-ServerThread.Start;
+  Server.Start;
+  ReadLn;
+  Server.Stop;
+finally
+  Server.Free;
+end;
 ```
 
-See `sample/Lazarus/GUI/unit1.pas`, `sample/D7/Unit1.pas` and `sample/D12/FMX Windows/Unit1.pas` for complete working examples.
+Complete demos (auth, events, CORS, WebSocket, DB pool): see `sample/README.md`.
+Canonical GUI: `sample/Lazarus/GUI/unit1.pas` (same API in `sample/D7/` and `sample/D12/FMX Windows/`).
 
 ---
 
 ## 🛠️ Project Structure
 
 - `src/` — Main library source code
+- `src/IOCP/` — Windows IOCP engine (`BadgerIOCP`, `BadgerWinSock2`)
 - `src/DBPool/` — DB connection pool (`TBadgerDBPool`) and HTTP bridge (`TBadgerDBBridge`)
-- `sample/` — Example projects for Delphi (D7, D12) and Lazarus
-- `sample/D7/` — VCL GUI demo (routes, auth, events)
-- `sample/D12/FMX Windows/` — FMX GUI demo (same routes as D7/Lazarus GUI)
-- `sample/D12/WinService/` — Windows service hosting Badger
-- `sample/Lazarus/GUI/` — Lazarus GUI demo (canonical reference for server setup)
-- `sample/Lazarus/Console_Linux/` — Headless console demo (Linux/Windows)
-- `sample/Lazarus/ConnPool/` — Concurrent DB pool demo (PostgreSQL / Zeos)
-- `sample/Lazarus/Midd_before_after/` — Before/after middleware demo (timing + API key)
-- `sample/StressTeste/` — Load/stress testing utilities
+- `sample/` — Examples, grouped by context (see `sample/README.md`)
+  - `sample/Common/` — Shared official routes (`SampleRouteManager`)
+  - `sample/D7/`, `sample/D12/`, `sample/Lazarus/` — Official demos (port 8080)
+  - `sample/IOCP/` — IOCP engine demos (port 8081; D7 / D12 / Lazarus)
+  - `sample/StressTeste/` — Load/stress testing utilities
 - `img/` — Project images and logos
 - `docs/` — Technical documentation (PT)
 ---

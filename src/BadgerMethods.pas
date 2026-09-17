@@ -1,5 +1,10 @@
 unit BadgerMethods;
 
+{$IFDEF FPC}
+  {$mode delphi}{$H+}
+  {$codepage utf8}
+{$ENDIF}
+
 interface
 
 uses
@@ -106,12 +111,30 @@ begin
     Result := 0;
 end;
 
+function CodepointToString(Code: Word): string;
+begin
+  {$IFDEF UNICODE}
+  Result := WideChar(Code);
+  {$ELSE}
+    {$IFDEF FPC}
+    if Code <= $7F then
+      Result := Char(Code)
+    else
+      Result := Char($C0 or Byte(Code shr 6)) + Char($80 or Byte(Code and $3F));
+    {$ELSE}
+    Result := Chr(Byte(Code));
+    {$ENDIF}
+  {$ENDIF}
+end;
+
 function TBadgerMethods.fParserJsonStream( Request: THTTPRequest; Response : THTTPResponse ): string;
 begin
   if UpperCase(Request.Method) = 'POST' then
-    Result := '{"status":true, "message":"Recebimento concluído com sucesso", "Vc me mandou":"' + JSONEscape(Request.Body) + '"}'
+    Result := '{"status":true, "message":"Recebimento conclu' + CodepointToString($00ED) +
+      'do com sucesso", "Vc me mandou":"' + JSONEscape(Request.Body) + '"}'
   else
-    Result := '{"status":false, "message":"Método não aceito, usar POST"}';
+    Result := '{"status":false, "message":"M' + CodepointToString($00E9) +
+      'todo n' + CodepointToString($00E3) + 'o aceito, usar POST"}';
 end;
 
 function TBadgerMethods.fDownloadStream(const FilePath: string; out MimeType: string): TStream;

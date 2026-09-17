@@ -6,16 +6,16 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
 
 ## Arquitetura
 
-- Thread do servidor (`TBadger`): implementa accept loop, gerenciamento de conexões e criação de handlers por requisição.
-  - Declaração e propriedades: `src/Badger.pas:24–71`
-  - Construtor inicializa socket, gerenciador de rotas e listas: `src/Badger.pas:80–100`
-  - Loop principal (`Execute`): aceita conexões, decide entre processamento paralelo ou sequencial: `src/Badger.pas:564–647`
+- Thread do servidor (`TBadger`): escolhe o motor de I/O no `Start` e expõe a API pública (rotas, middlewares, CORS, WS).
+  - Windows: **IOCP** por padrão (`UseIOCP = True`). `UseIOCP := False` volta ao Synapse (`select` + thread por conexão).
+  - Linux / macOS: Synapse (epoll no Linux é o próximo motor; mesma API).
+  - IOCP: `src/IOCP/BadgerIOCP.pas` + parser `src/BadgerHttpParser.pas`. `THTTPRequest.Socket` é `nil`; rotas usam body/headers/`FRemoteIP`.
+  - Clássico: accept loop em `TBadger.Execute` e `THTTPRequestHandler` por conexão.
   - Controles de concorrência:
-    - `ParallelProcessing`: habilita processamento paralelo por thread: `src/Badger.pas:66`
-    - `MaxConcurrentConnections`: limite de conexões ativas: `src/Badger.pas:67`
-    - Gate de accept quando atingir o limite: `src/Badger.pas:584–589`
+    - `ParallelProcessing`: no IOCP serializa o dispatch da rota quando `False`; no clássico cria um handler por conexão quando `True`.
+    - `MaxConcurrentConnections`: limite de conexões ativas (gate no accept).
 
-- Handler de requisição (`THTTPRequestHandler`): realiza parsing do request, roteamento, execução de método/rotas, construção e envio de resposta.
+- Handler de requisição (`THTTPRequestHandler`): realiza parsing do request, roteamento, execução de método/rotas, construção e envio de resposta. Usado no motor Synapse; o IOCP dispara o mesmo pipeline (rotas/MW/CORS) a partir do parser compartilhado.
   - Declaração e campos: `src/BadgerRequestHandler.pas:12–38`
   - Construtores (sequencial e paralelo): `src/BadgerRequestHandler.pas:45–66`, `src/BadgerRequestHandler.pas:68–89`
   - Destrutor com liberação de middlewares e decremento de conexão ativa: `src/BadgerRequestHandler.pas:84–115`
@@ -35,11 +35,11 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
 
 ## Fluxo da Requisição
 
-1. Accept loop em `TBadger.Execute` aceita conexão e cria `THTTPRequestHandler`: `src/Badger.pas:591–612`
-2. `ParseRequestHeader` lê cabeçalhos linha a linha e preenche `TStringList` com `key=value`: `src/BadgerRequestHandler.pas:117–143`
+1. `TBadger.Start` escolhe o motor (Windows/IOCP ou Synapse). No IOCP, `WSARecv` alimenta `TBadgerHttpParser`; no clássico, `Execute` aceita e cria `THTTPRequestHandler`.
+2. Parse do HTTP (parser compartilhado no IOCP; `ParseRequestHeader` no handler clássico).
 3. Middlewares **before** (`AddMiddleware`): podem interromper com `Handled=True`
 4. Roteamento via `TRouteManager.MatchRoute` e execução do callback: `src/BadgerRouteManager.pas:179–227`
-5. Envio de headers, corpo (texto/JSON) ou stream: `src/BadgerRequestHandler.pas:380–408`
+5. Envio de headers, corpo (texto/JSON) ou stream
 6. Eventos de aplicação, conforme `EnableEventInfo`
 7. Middlewares **after** (`AddAfterMiddleware`), em ordem LIFO — rodam **antes** de gravar a resposta no socket (podem alterar body/headers) e mesmo se um before short-circuitou
 
@@ -148,9 +148,9 @@ Destrua o bridge **depois** de `Server.Stop`.
 ## Concorrência e Desempenho
 
 - Sequencial vs Paralelo:
-  - Sequencial (`ParallelProcessing = False`): uma thread cuida da conexão; simples e previsível.
-  - Paralelo (`ParallelProcessing = True`): cria um `THTTPRequestHandler` por conexão; ajustar `MaxConcurrentConnections` gradualmente.
-- Accept loop e latência: `Sleep(10)` no loop para reduzir busy‑wait e estabilizar accept: `src/Badger.pas:646–647`.
+  - Sequencial (`ParallelProcessing = False`): no clássico, uma thread cuida da conexão; no IOCP, o dispatch da rota é serializado (`FSerialLock`).
+  - Paralelo (`ParallelProcessing = True`): clássico cria um handler por conexão; IOCP despacha a rota no worker. Ajustar `MaxConcurrentConnections` gradualmente.
+- Keep-Alive HTTP/1.1: o IOCP reutiliza o socket; no Linux (Synapse) testes de carga costumam ir melhor sem Keep-Alive no cliente.
 - Sugestões de otimização de baixo risco:
   - Cachear `PatternParts` no `TRouteEntry` ao registrar a rota.
   - No bucket de contexto, separar por `Verb` para reduzir candidatos.
@@ -167,20 +167,45 @@ Destrua o bridge **depois** de `Server.Stop`.
 
 ## Samples
 
-Referência canônica de setup do servidor: **`sample/Lazarus/GUI/unit1.pas`** (D7 e FMX D12 seguem o mesmo padrão de rotas, auth e lifecycle).
+Rotas compartilhadas dos demos oficiais: `sample/Common/SampleRouteManager.pas`.  
+Referência canônica de setup: **`sample/Lazarus/GUI/unit1.pas`** (D7 e FMX D12 seguem o mesmo padrão).
+
+### Oficial (porta 8080, API pública)
+
+No Windows usam IOCP pelo default de `TBadger`. Linux/macOS: Synapse.
 
 | Sample | Caminho | Propósito |
 |--------|---------|-----------|
-| Lazarus GUI | `sample/Lazarus/GUI/` | Demo completa: rotas, auth Basic/JWT, eventos, paralelo |
+| Lazarus GUI | `sample/Lazarus/GUI/` | Demo completa: rotas, auth, eventos, paralelo, checkbox IOCP |
 | VCL D7 | `sample/D7/` | Mesmo conjunto de rotas/auth que Lazarus GUI |
 | FMX D12 | `sample/D12/FMX Windows/` | Mesmo conjunto de rotas/auth que Lazarus GUI |
-| WinService D12 | `sample/D12/WinService/` | Badger como serviço Windows (rotas essenciais) |
-| Console Linux | `sample/Lazarus/Console_Linux/` | Demo headless (`/teste/ping`) |
-| ConnPool | `sample/Lazarus/ConnPool/` | Pool DB + stress multi-thread + `/db/*` (PostgreSQL / Zeos) |
-| Midd_before_after | `sample/Lazarus/Midd_before_after/` | `AddMiddleware` / `AddAfterMiddleware` (timing + API key) |
+| WinService D12 | `sample/D12/WinService/` | Badger como serviço Windows |
+| Console Linux | `sample/Lazarus/Console_Linux/` | Headless (`/teste/ping`) |
+
+### IOCP (porta 8081)
+
+Mesma API de `TBadger` (IOCP já é o default no Windows). Recorte extra: CORS, after-middleware, WebSocket `/chat`. Units: `sample/IOCP/IocpDemoRoutes.pas`, `IocpWsChatClient.pas`.
+
+| Sample | Caminho |
+|--------|---------|
+| Console / GUI D12 | `sample/IOCP/D12/` |
+| Console / GUI D7 | `sample/IOCP/D7/` |
+| Console / GUI Lazarus | `sample/IOCP/Lazarus/` |
+
+### Feature
+
+| Sample | Caminho | Propósito |
+|--------|---------|-----------|
+| ConnPool | `sample/Lazarus/ConnPool/` | Pool DB + stress + `/db/*` (PostgreSQL / Zeos) |
+| Midd_before_after | `sample/Lazarus/Midd_before_after/` | `AddMiddleware` / `AddAfterMiddleware` |
+
+### Carga
+
+| Sample | Caminho | Propósito |
+|--------|---------|-----------|
 | StressTeste | `sample/StressTeste/` | Utilitários de carga |
 
-Padrão comum nos demos GUI:
+Padrão comum nos demos GUI oficiais:
 - `Logger.isActive := False` (eventos via checkbox `EnableEventInfo`)
 - `MaxConcurrentConnections := 500` quando `ParallelProcessing = True`
 - `FreeAndNil(ServerThread)` ao parar e no `FormDestroy`
@@ -188,6 +213,7 @@ Padrão comum nos demos GUI:
 
 ## Boas Práticas
 
+- No Windows o motor padrão é IOCP; `UseIOCP := False` força Synapse se precisar comparar ou depurar o caminho clássico.
 - Desabilitar `Logger` e eventos (`EnableEventInfo`/checkbox) ao medir throughput.
 - Ajustar `MaxConcurrentConnections` gradualmente conforme hardware.
 - Agrupar endpoints por contexto para máxima efetividade do bucket.
@@ -203,8 +229,9 @@ Padrão comum nos demos GUI:
 
 ## Referências de Código
 
-- `TBadger` execução e aceitação: `src/Badger.pas:564–647`
-- `THTTPRequestHandler` parsing e resposta: `src/BadgerRequestHandler.pas:117–176`, `src/BadgerRequestHandler.pas:380–445`
-- `TRouteManager` registro e matching com contexto: `src/BadgerRouteManager.pas:107–124`, `src/BadgerRouteManager.pas:179–227`
+- `TBadger` `Start`/`Stop` e escolha do motor: `src/Badger.pas`
+- Motor IOCP: `src/IOCP/BadgerIOCP.pas`, parser: `src/BadgerHttpParser.pas`, WS: `src/BadgerWebSocket.pas`
+- `THTTPRequestHandler` parsing e resposta (Synapse): `src/BadgerRequestHandler.pas`
+- `TRouteManager` registro e matching com contexto: `src/BadgerRouteManager.pas`
 - After-middleware: `AddAfterMiddleware` / `RunAfterMiddlewares` em `src/Badger.pas` e `src/BadgerRequestHandler.pas`
 - DB pool: `src/DBPool/BadgerDBPool.pas`, bridge HTTP: `src/DBPool/BadgerDBBridge.pas`

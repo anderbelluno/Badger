@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <ProjectOptions>
+    <Version Value="13"/>
+    <PathDelim Value="\"/>
+    <General>
+      <SessionStorage Value="InProjectDir"/>
+      <Title Value="IocpPingGUI"/>
+      <Scaled Value="True"/>
+      <ResourceType Value="res"/>
+      <UseXPManifest Value="True"/>
+    </General>
+    <BuildModes>
+      <Item Name="Default" Default="True"/>
+    </BuildModes>
+    <PublishOptions>
+      <Version Value="2"/>
+    </PublishOptions>
+    <RunParams>
+      <FormatVersion Value="2"/>
+    </RunParams>
+    <RequiredPackages>
+      <Item>
+        <PackageName Value="LCL"/>
+      </Item>
+    </RequiredPackages>
+    <Units>
+      <Unit>
+        <Filename Value="IocpPingGUI.lpr"/>
+      </Unit>
+      <Unit>
+        <Filename Value="MainForm.pas"/>
+        <ComponentName Value="FormMain"/>
+        <HasResources Value="True"/>
+        <ResourceBaseClass Value="Form"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\IOCP\BadgerIOCP.pas"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\IOCP\BadgerWinSock2.pas"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\BadgerHttpParser.pas"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\BadgerWebSocket.pas"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\BadgerHttpStatus.pas"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\IocpDemoRoutes.pas"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\IocpWsChatClient.pas"/>
+      </Unit>
+    </Units>
+  </ProjectOptions>
+  <CompilerOptions>
+    <Version Value="11"/>
+    <PathDelim Value="\"/>
+    <Target>
+      <Filename Value="IocpPingGUI"/>
+    </Target>
+    <SearchPaths>
+      <IncludeFiles Value="$(ProjOutDir);..\..\..\src"/>
+      <OtherUnitFiles Value="..\..\..\src\IOCP;..\..\..\src;..\..\..\src\Auth\Basic;..\..\..\src\Auth\JWT;..;..\..\..\ThirdParty\Synapse;..\..\..\ThirdParty\SuperObject\D_Plus_Laz_Linux"/>
+      <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
+    </SearchPaths>
+    <Linking>
+      <Debugging>
+        <DebugInfoType Value="dsDwarf3"/>
+      </Debugging>
+      <Options>
+        <Win32>
+          <GraphicApplication Value="True"/>
+        </Win32>
+      </Options>
+    </Linking>
+  </CompilerOptions>
+</CONFIG>

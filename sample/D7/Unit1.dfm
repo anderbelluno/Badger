@@ -121,5 +121,18 @@ object Form1: TForm1
       State = cbChecked
       TabOrder = 3
     end
+    object rdIOCP: TCheckBox
+      Left = 16
+      Top = 52
+      Width = 129
+      Height = 17
+      Caption = 'IOCP (Windows)'
+      Checked = True
+      State = cbChecked
+      Hint = 'Uncheck to force Synapse on Windows'
+      ParentShowHint = False
+      ShowHint = True
+      TabOrder = 4
+    end
   end
 end

@@ -82,12 +82,16 @@ begin
   if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
-    ServerThread.EnableEventInfo := rdLog.Checked;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
-
-    ServerThread.OnRequest := HandleRequest;
-    ServerThread.OnResponse := HandleResponse;
+    ServerThread.ParallelProcessing := rdParallel.Checked;
+    ServerThread.MaxConcurrentConnections := 500;
+    ServerThread.EnableEventInfo := rdLog.Checked;
+    if ServerThread.EnableEventInfo then
+    begin
+      ServerThread.OnRequest := HandleRequest;
+      ServerThread.OnResponse := HandleResponse;
+    end;
 
     { Before + After: same RegisterProtectedRoutes pattern. }
     if RadioGroup1.ItemIndex = 1 then
@@ -97,11 +101,7 @@ begin
     end;
 
     ServerThread.RouteManager.AddGet('/ping', TDemoRoutes.Ping);
-
-    ServerThread.ParallelProcessing := rdParallel.Checked;
-    ServerThread.MaxConcurrentConnections := 500;
     ServerThread.CorsEnabled := False;
-
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;

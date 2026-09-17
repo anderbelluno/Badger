@@ -61,6 +61,11 @@ type
     FCorsExposeHeaders: TStringList;
     FCorsAllowCredentials: Boolean;
     FCorsMaxAge: Integer;
+    FUseIOCP: Boolean;
+    {$IFDEF BADGER_WINDOWS}
+    FIocp: TObject;
+    procedure StartIocpEngine;
+    {$ENDIF}
   protected
     procedure Execute; override;
     function CanAcceptNewConnection: Boolean;
@@ -70,6 +75,12 @@ type
     procedure AddClientSocket(Socket: TTCPBlockSocket);
     procedure RemoveClientSocket(Socket: TTCPBlockSocket);
     procedure CleanupClientSockets;
+    procedure DeliverWebSocketText(Info: TClientSocketInfo; const AMessage: string);
+    {$IFDEF BADGER_WINDOWS}
+    procedure IocpWsAttach(Info: TClientSocketInfo);
+    procedure IocpWsDetach(Info: TClientSocketInfo);
+    procedure IocpWsMessage(ClientInfo: TClientSocketInfo; const URI, AMessage: string);
+    {$ENDIF}
     {$IF DEFINED(UNIX) OR DEFINED(LINUX) OR DEFINED(POSIX)}
     function WaitForThreadTermination(TimeoutMs: Integer): Boolean;
     {$IFEND}
@@ -82,7 +93,8 @@ type
     procedure Stop;
     procedure DecActiveConnections;
     procedure NotifyClientSocketClosed(Socket: TTCPBlockSocket);
-    procedure SendWebSocketTextFrame(Socket: TTCPBlockSocket; const AMessage: string);
+    procedure SendWebSocketTextFrame(Socket: TTCPBlockSocket; const AMessage: string); overload;
+    procedure SendWebSocketTextFrame(ClientInfo: TClientSocketInfo; const AMessage: string); overload;
     procedure BroadcastWebSocketText(const AMessage: string);
     procedure SendToWebSocketRoute(const AURI, AMessage: string);
     procedure SetClientSocketURI(Socket: TTCPBlockSocket; const AURI: string);
@@ -91,7 +103,9 @@ type
     property Port: Integer read FPort write FPort;
     property RouteManager: TRouteManager read FRouteManager;
     property Timeout: Integer read FTimeout write FTimeout default 5000;
-    property ParallelProcessing: Boolean read FParallelProcessing write FParallelProcessing default False;
+    { Windows/IOCP default True (dispatch on workers). False serializes routes.
+      Classic: True = one handler thread per connection. }
+    property ParallelProcessing: Boolean read FParallelProcessing write FParallelProcessing;
     property MaxConcurrentConnections: Integer read FMaxConcurrentConnections write FMaxConcurrentConnections default 100;
     property OnRequest: TOnRequest read FOnRequest write FOnRequest;
     property OnResponse: TOnResponse read FOnResponse write FOnResponse;
@@ -105,12 +119,15 @@ type
     property CorsExposeHeaders: TStringList read FCorsExposeHeaders;
     property CorsAllowCredentials: Boolean read FCorsAllowCredentials write FCorsAllowCredentials;
     property CorsMaxAge: Integer read FCorsMaxAge write FCorsMaxAge;
+    { Windows: default True (IOCP). False forces Synapse+select.
+      Ignored on other OS (Synapse until epoll). }
+    property UseIOCP: Boolean read FUseIOCP write FUseIOCP;
   end;
 
 implementation
 
 uses
-  BadgerRequestHandler;
+  BadgerRequestHandler, BadgerWebSocket{$IFDEF BADGER_WINDOWS}, BadgerIOCP{$ENDIF};
 
 {$IF (DEFINED(LINUX) OR DEFINED(POSIX)) AND NOT DEFINED(FPC)}
 { TBadgerClientSocket }
@@ -150,7 +167,6 @@ begin
   FPort := 8080;
   FNonBlockMode := True;
   FTimeout := 5000;
-  FParallelProcessing := False;
   FMaxConcurrentConnections := 100;
   FActiveConnections := 0;
   FIsShuttingDown := False;
@@ -176,6 +192,14 @@ begin
   FCorsExposeHeaders.Clear;
   FCorsAllowCredentials := False;
   FCorsMaxAge := 600;
+  {$IFDEF BADGER_WINDOWS}
+  FUseIOCP := True;
+  FParallelProcessing := True;
+  FIocp := nil;
+  {$ELSE}
+  FUseIOCP := False;
+  FParallelProcessing := False;
+  {$ENDIF}
 
   Logger.Info('TBadger created');
 end;
@@ -229,6 +253,16 @@ begin
     on E: Exception do
       Logger.Error(Format('Error freeing FServerSocket: %s', [E.Message]));
   end;
+
+  {$IFDEF BADGER_WINDOWS}
+  try
+    if Assigned(FIocp) then
+      FreeAndNil(FIocp);
+  except
+    on E: Exception do
+      Logger.Error(Format('Error freeing IOCP engine: %s', [E.Message]));
+  end;
+  {$ENDIF}
 
   try
     if Assigned(FRouteManager) then FreeAndNil(FRouteManager);
@@ -395,21 +429,20 @@ begin
     for I := FClientSockets.Count - 1 downto 0 do
     begin
       SocketInfo := TClientSocketInfo(FClientSockets[I]);
-      if Assigned(SocketInfo) and Assigned(SocketInfo.Socket) then
+      if Assigned(SocketInfo) then
       begin
-        try
-          if not SocketInfo.InUse and (SocketInfo.Socket.Socket <> INVALID_SOCKET) then
-          begin
-            SocketInfo.Socket.CloseSocket;
-  //          Logger.info(Format('Closed client socket %d', [I]));
+        if Assigned(SocketInfo.Socket) then
+        begin
+          try
+            if not SocketInfo.InUse and (SocketInfo.Socket.Socket <> INVALID_SOCKET) then
+              SocketInfo.Socket.CloseSocket;
+          except
+            on E: Exception do
+              Logger.Error(Format('Error closing client socket %d: %s', [I, E.Message]));
           end;
-        except
-          on E: Exception do
-            Logger.Error(Format('Error closing client socket %d: %s', [I, E.Message]));
         end;
         try
           SocketInfo.Free;
- //         Logger.info(Format('Freed client socket info %d', [I]));
         except
           on E: Exception do
             Logger.Error(Format('Error freeing client socket info %d: %s', [I, E.Message]));
@@ -504,41 +537,36 @@ end;
 
 procedure TBadger.SendWebSocketTextFrame(Socket: TTCPBlockSocket; const AMessage: string);
 var
-  Len: Int64;
-  Header: array[0..3] of Byte;
-  HeaderSize: Integer;
-  UTF8Msg: AnsiString;
+  Frame: AnsiString;
 begin
   if not Assigned(Socket) or (Socket.Socket = INVALID_SOCKET) then Exit;
+  Frame := BadgerWsTextFrame(AMessage);
+  if Frame = '' then Exit;
+  Socket.SendBuffer(Pointer(Frame), Length(Frame));
+end;
 
-  UTF8Msg := UTF8Encode(AMessage); 
-  Len := Length(UTF8Msg);
-  
-  Header[0] := $81; // FIN = 1, Opcode = 1 (Texto)
+procedure TBadger.SendWebSocketTextFrame(ClientInfo: TClientSocketInfo; const AMessage: string);
+begin
+  DeliverWebSocketText(ClientInfo, AMessage);
+end;
 
-  if Len <= 125 then
+procedure TBadger.DeliverWebSocketText(Info: TClientSocketInfo; const AMessage: string);
+begin
+  if not Assigned(Info) then Exit;
+  if Assigned(Info.Socket) then
   begin
-    Header[1] := Byte(Len);
-    HeaderSize := 2;
+    if Info.Socket.Socket = INVALID_SOCKET then Exit;
+    Info.IOLock.Acquire;
+    try
+      SendWebSocketTextFrame(Info.Socket, AMessage);
+    finally
+      Info.IOLock.Release;
+    end;
   end
-  else if Len <= 65535 then
-  begin
-    Header[1] := 126;
-    Header[2] := Byte((Len shr 8) and $FF); // Big Endian High
-    Header[3] := Byte(Len and $FF);         // Big Endian Low
-    HeaderSize := 4;
-  end
-  else
-  begin
-    Exit; // Proteção, ignora strings maiores que 65kb pra websocket SCADA.
-  end;
-
-  // Envia Header Binário
-  Socket.SendBuffer(@Header[0], HeaderSize);
-  
-  // Envia o Corpo
-  if Len > 0 then
-    Socket.SendBuffer(Pointer(UTF8Msg), Len);
+{$IFDEF BADGER_WINDOWS}
+  else if Assigned(FIocp) then
+    TBadgerIOCP(FIocp).SendWsText(Info, AMessage);
+{$ENDIF}
 end;
 
 procedure TBadger.BroadcastWebSocketText(const AMessage: string);
@@ -553,13 +581,9 @@ begin
     for I := 0 to FClientSockets.Count - 1 do
     begin
       SocketInfo := TClientSocketInfo(FClientSockets[I]);
-      if Assigned(SocketInfo) and Assigned(SocketInfo.Socket) then
-      begin
-        try
-          if SocketInfo.Socket.Socket <> INVALID_SOCKET then
-            SendWebSocketTextFrame(SocketInfo.Socket, AMessage);
-        except
-        end;
+      try
+        DeliverWebSocketText(SocketInfo, AMessage);
+      except
       end;
     end;
   finally
@@ -622,19 +646,11 @@ begin
     for I := 0 to FClientSockets.Count - 1 do
     begin
       SocketInfo := TClientSocketInfo(FClientSockets[I]);
-      if Assigned(SocketInfo) and Assigned(SocketInfo.Socket) and
+      if Assigned(SocketInfo) and
          (SameText(SocketInfo.URI, AURI) or (AURI = '*')) then
       begin
         try
-          if SocketInfo.Socket.Socket <> INVALID_SOCKET then
-          begin
-            SocketInfo.IOLock.Acquire;
-            try
-              SendWebSocketTextFrame(SocketInfo.Socket, AMessage);
-            finally
-              SocketInfo.IOLock.Release;
-            end;
-          end;
+          DeliverWebSocketText(SocketInfo, AMessage);
         except
         end;
       end;
@@ -672,6 +688,71 @@ begin
   end;
 end;
 
+{$IFDEF BADGER_WINDOWS}
+procedure TBadger.IocpWsAttach(Info: TClientSocketInfo);
+begin
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) or not Assigned(Info) then
+    Exit;
+  FClientSocketsLock.Acquire;
+  try
+    FClientSockets.Add(Info);
+  finally
+    FClientSocketsLock.Release;
+  end;
+end;
+
+procedure TBadger.IocpWsDetach(Info: TClientSocketInfo);
+var
+  I: Integer;
+begin
+  if not Assigned(Info) then
+    Exit;
+  if Assigned(FClientSockets) and Assigned(FClientSocketsLock) then
+  begin
+    FClientSocketsLock.Acquire;
+    try
+      I := FClientSockets.IndexOf(Info);
+      if I >= 0 then
+        FClientSockets.Delete(I);
+    finally
+      FClientSocketsLock.Release;
+    end;
+  end;
+  Info.Free;
+end;
+
+procedure TBadger.IocpWsMessage(ClientInfo: TClientSocketInfo; const URI, AMessage: string);
+begin
+  if Assigned(FOnWebSocketMessage) then
+    FOnWebSocketMessage(ClientInfo, URI, AMessage);
+end;
+
+procedure TBadger.StartIocpEngine;
+var
+  Eng: TBadgerIOCP;
+begin
+  if not Assigned(FIocp) then
+    FIocp := TBadgerIOCP.Create;
+  Eng := TBadgerIOCP(FIocp);
+  Eng.AdoptPipeline(FRouteManager, FMiddlewares, FAfterMiddlewares, FMiddlewareLock,
+    FCorsAllowedOrigins, FCorsAllowedMethods, FCorsAllowedHeaders, FCorsExposeHeaders);
+  Eng.Port := FPort;
+  Eng.Timeout := FTimeout;
+  Eng.MaxConcurrentConnections := FMaxConcurrentConnections;
+  Eng.ParallelProcessing := FParallelProcessing;
+  Eng.OnRequest := FOnRequest;
+  Eng.OnResponse := FOnResponse;
+  Eng.OnWebSocketMessage := IocpWsMessage;
+  Eng.OnWsAttach := IocpWsAttach;
+  Eng.OnWsDetach := IocpWsDetach;
+  Eng.EnableEventInfo := FEnableEventInfo;
+  Eng.CorsEnabled := FCorsEnabled;
+  Eng.CorsAllowCredentials := FCorsAllowCredentials;
+  Eng.CorsMaxAge := FCorsMaxAge;
+  Eng.Start;
+end;
+{$ENDIF}
+
 procedure TBadger.Start;
 begin
   if FIsShuttingDown then
@@ -688,11 +769,24 @@ begin
 
   if not Assigned(FSocketLock) or not Assigned(FServerSocket) then
   begin
- //   Logger.Info('Cannot start: resources not available');
     Exit;
   end;
 
-//  Logger.Info('TBadger.Start: Acquiring socket lock');
+  { Windows: IOCP when UseIOCP. Other OS: Synapse (epoll next on Linux). }
+  {$IFDEF BADGER_WINDOWS}
+  if FUseIOCP then
+  begin
+    StartIocpEngine;
+    FShutdownEvent.ResetEvent;
+    {$IF DEFINED(FPC) OR DEFINED(DelphiXEPlus)}
+    inherited Start;
+    {$ELSE}
+    Resume;
+    {$IFEND}
+    Exit;
+  end;
+  {$ENDIF}
+
   FSocketLock.Acquire;
   try
 
@@ -757,6 +851,14 @@ begin
   Logger.Debug('DBG: Stop called. Terminated= ' + BoolToStr(Terminated, True) + ' Suspended= ' + BoolToStr(Suspended, True));
   
   FIsShuttingDown := True;
+
+  {$IFDEF BADGER_WINDOWS}
+  if Assigned(FIocp) then
+  begin
+    TBadgerIOCP(FIocp).Stop;
+    FIsRunning := False;
+  end;
+  {$ENDIF}
 
   if Terminated or Suspended then
   begin
@@ -827,9 +929,22 @@ var
   ResponseInfo: TResponseInfo;
   Accepted: Boolean;
 begin
-  // OutputDebugString(PChar('TBadger.Execute: Server thread started'));
   FIsRunning := True;
   try
+    {$IFDEF BADGER_WINDOWS}
+    if FUseIOCP then
+    begin
+      while not Terminated and not FIsShuttingDown do
+      begin
+        if Assigned(FShutdownEvent) then
+          FShutdownEvent.WaitFor(200)
+        else
+          Sleep(200);
+      end;
+      Exit;
+    end;
+    {$ENDIF}
+
     while not Terminated and not FIsShuttingDown do
     begin
       try

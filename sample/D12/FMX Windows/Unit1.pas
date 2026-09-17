@@ -35,6 +35,7 @@ type
     edtTimeOut: TEdit;
     btnClearLog: TButton;
     rdParallel: TCheckBox;
+    rdIOCP: TCheckBox;
     procedure btnSynaClick(Sender: TObject);
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -101,11 +102,17 @@ begin
   if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
-    ServerThread.EnableEventInfo := rdLog.IsChecked;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
-    ServerThread.OnRequest := HandleRequest;
-    ServerThread.OnResponse := HandleResponse;
+    ServerThread.ParallelProcessing := rdParallel.IsChecked;
+    ServerThread.MaxConcurrentConnections := 500;
+    ServerThread.EnableEventInfo := rdLog.IsChecked;
+    ServerThread.UseIOCP := rdIOCP.IsChecked;
+    if ServerThread.EnableEventInfo then
+    begin
+      ServerThread.OnRequest := HandleRequest;
+      ServerThread.OnResponse := HandleResponse;
+    end;
 
     case ComboAuth.ItemIndex of
       1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/teste/ping', '/download']);
@@ -126,14 +133,12 @@ begin
       .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
       .AddGet('/produtos', TSampleRouteManager.produtos);
 
-    ServerThread.ParallelProcessing := rdParallel.IsChecked;
-    ServerThread.MaxConcurrentConnections := 500;
     ServerThread.CorsEnabled := False;
-
     ServerThread.Start;
     edtPorta.Enabled   := False;
     rdLog.Enabled      := False;
     rdParallel.Enabled := False;
+    rdIOCP.Enabled     := False;
     btnSyna.Tag        := 1;
     btnSyna.Text       := 'Parar Servidor';
     ComboAuth.Enabled  := False;
@@ -148,6 +153,7 @@ begin
     edtPorta.Enabled   := True;
     rdLog.Enabled      := True;
     rdParallel.Enabled := True;
+    rdIOCP.Enabled     := True;
     ComboAuth.Enabled  := True;
     edtTimeOut.Enabled := True;
   end;

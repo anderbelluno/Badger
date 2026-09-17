@@ -1,4 +1,4 @@
-unit SampleRouteManager;
+﻿unit SampleRouteManager;
 
 {$IFDEF FPC}
   {$mode delphi}{$H+}
@@ -117,7 +117,7 @@ class procedure TSampleRouteManager.ping(Request: THTTPRequest;
   var Response: THTTPResponse);
 begin
   Response.StatusCode := HTTP_OK;
-  Response.Body := UTF8Encode('Pong');
+  Response.Body := 'Pong';
   Response.ContentType := TEXT_PLAIN;
 end;
 

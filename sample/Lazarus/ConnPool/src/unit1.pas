@@ -171,7 +171,6 @@ begin
     FServer := TBadger.Create;
     FServer.Port := StrToIntDef(edtHttpPort.Text, 8088);
     FServer.Timeout := 5000;
-    FServer.NonBlockMode := True;
     FServer.ParallelProcessing := chkParallel.Checked;
     FServer.MaxConcurrentConnections := 200;
     FServer.EnableEventInfo := False;

@@ -98,7 +98,7 @@
         <Icon_MainIcon>$(BDS)\bin\delphi_PROJECTICON.ico</Icon_MainIcon>
         <Icns_MainIcns>$(BDS)\bin\delphi_PROJECTICNS.icns</Icns_MainIcns>
         <SanitizedProjectName>FMXWindows</SanitizedProjectName>
-        <DCC_UnitSearchPath>..\..\..\src;..\..\..\src\Auth\Basic;..\..\..\src\Auth\JWT;..\..\..\ThirdParty\Synapse;..\..\..\ThirdParty\SuperObject\D_Plus_Laz_Linux;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>..\..\..\src;..\..\..\src\IOCP;..\..\..\src\Auth\Basic;..\..\..\src\Auth\JWT;..\..\..\ThirdParty\Synapse;..\..\..\ThirdParty\SuperObject\D_Plus_Laz_Linux;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <DCC_MapFile>3</DCC_MapFile>
         <DCC_GenerateStackFrames>true</DCC_GenerateStackFrames>
     </PropertyGroup>
@@ -288,7 +288,7 @@
         <DCCReference Include="Unit1.pas">
             <Form>Form1</Form>
         </DCCReference>
-        <DCCReference Include="..\..\SampleRouteManager.pas"/>
+        <DCCReference Include="..\..\Common\SampleRouteManager.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

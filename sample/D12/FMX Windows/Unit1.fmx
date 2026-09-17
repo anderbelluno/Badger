@@ -92,7 +92,7 @@ object Form1: TForm1
         'JWT')
       ItemIndex = 0
       Position.X = 8.000000000000000000
-      Position.Y = 72.000000000000000000
+      Position.Y = 88.000000000000000000
       TabOrder = 9
     end
     object rdLog: TCheckBox
@@ -116,6 +116,13 @@ object Form1: TForm1
       Position.Y = 35.000000000000000000
       TabOrder = 5
       Text = 'Parallel Processing'
+    end
+    object rdIOCP: TCheckBox
+      IsChecked = True
+      Position.X = 9.000000000000000000
+      Position.Y = 62.000000000000000000
+      TabOrder = 11
+      Text = 'IOCP (Windows)'
     end
   end
 end

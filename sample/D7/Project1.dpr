@@ -16,7 +16,7 @@ uses
   {$ENDIF EurekaLog}
   Forms,
   Unit1 in 'Unit1.pas' {Form1},
-  SampleRouteManager in '..\SampleRouteManager.pas';
+  SampleRouteManager in '..\Common\SampleRouteManager.pas';
 
 {$R *.res}
 

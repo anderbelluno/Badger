@@ -79,6 +79,8 @@ begin
   FServerThread := TBadger.Create;
   FServerThread.Port := 8080;
   FServerThread.Timeout := 10000;
+  FServerThread.ParallelProcessing := True;
+  FServerThread.MaxConcurrentConnections := 500;
   FServerThread.EnableEventInfo := FLogToConsole;
   FServerThread.CorsEnabled := False;
 

@@ -5,8 +5,8 @@ unit BadgerRequestHandler;
 interface
 
 uses
-  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, synacode, Math, Classes, SysUtils, StrUtils,
-  BadgerRouteManager, BadgerMethods, BadgerHttpStatus, BadgerTypes, Badger, BadgerLogger;
+  blcksock, httpsend, synsock, SyncObjs, synachar, synautil, Math, Classes, SysUtils, StrUtils,
+  BadgerRouteManager, BadgerMethods, BadgerHttpStatus, BadgerHttpParser, BadgerWebSocket, BadgerTypes, Badger, BadgerLogger;
 
 type
   THTTPRequestHandler = class(TThread)
@@ -258,12 +258,7 @@ begin
 end;
 
 procedure THTTPRequestHandler.ProcessWebSocketHandshakeAndLoop(ClientSocket: TTCPBlockSocket; const URI, WSKey: string);
-const
-  WS_MAGIC_STRING = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
-  WS_MAX_PAYLOAD  = 65535; // 64KB — rejeita frames maiores (proteção DoS)
 var
-  AcceptKey, ResponseHeader: string;
-  WSInput: AnsiString;
   B1, B2: Byte;
   FrameOpcode: Byte;
   IsMasked: Boolean;
@@ -272,28 +267,15 @@ var
   I: Integer;
   DecodedStr: AnsiString;
 begin
-  // AnsiString() cast: no-op em D7/FPC; conversão explícita em D2009+ (seguro: WSKey é Base64 ASCII)
-  WSInput := AnsiString(WSKey) + AnsiString(WS_MAGIC_STRING);
-  AcceptKey := Trim(string(EncodeBase64(SHA1(WSInput))));
-
-  ResponseHeader :=
-    'HTTP/1.1 101 Switching Protocols' + #13#10 +
-    'Upgrade: websocket' + #13#10 +
-    'Connection: Upgrade' + #13#10 +
-    'Sec-WebSocket-Accept: ' + AcceptKey + #13#10 + #13#10;
-
-  ClientSocket.SendString(ResponseHeader);
+  ClientSocket.SendString(string(BadgerWsHandshakeMessage(WSKey)));
 
   Logger.Info('WebSocket handshake established for ' + URI);
 
-  // CanRead é cross-platform (select interno do Synapse).
-  // Retorna True quando há dado OU conexão fechada; False em timeout normal.
-  // Não depende de códigos de erro específicos do SO (10060/ETIMEDOUT).
   repeat
     if not ClientSocket.CanRead(200) then
     begin
-      if ClientSocket.LastError <> 0 then Break; // erro real no select
-      Continue;                                   // timeout normal — verifica Terminated
+      if ClientSocket.LastError <> 0 then Break;
+      Continue;
     end;
 
     B1 := ClientSocket.RecvByte(1000);
@@ -301,8 +283,7 @@ begin
 
     FrameOpcode := B1 and $0F;
 
-    // Opcode 8 = close frame (RFC 6455 §5.5.1)
-    if FrameOpcode = 8 then Break;
+    if FrameOpcode = WS_OP_CLOSE then Break;
 
     B2 := ClientSocket.RecvByte(1000);
     if ClientSocket.LastError <> 0 then Break;
@@ -311,18 +292,16 @@ begin
 
     if PayloadLen = 126 then
     begin
-      // 16-bit extended payload length (big-endian)
       PayloadLen := (Int64(ClientSocket.RecvByte(1000)) shl 8) or ClientSocket.RecvByte(1000);
       if ClientSocket.LastError <> 0 then Break;
     end
     else if PayloadLen = 127 then
     begin
-      // 64-bit extended payload length — lê TODOS os 8 bytes; sem isso o stream dessincroniza.
       PayloadLen := 0;
       for I := 1 to 8 do
         PayloadLen := (PayloadLen shl 8) or Int64(ClientSocket.RecvByte(1000));
       if ClientSocket.LastError <> 0 then Break;
-      if PayloadLen > WS_MAX_PAYLOAD then Break; // frame gigante: fecha (DoS protection)
+      if PayloadLen > WS_MAX_PAYLOAD then Break;
     end;
 
     if IsMasked then
@@ -342,11 +321,11 @@ begin
         for I := 0 to Integer(PayloadLen) - 1 do
           DecodedStr[I + 1] := AnsiChar(Ord(DecodedStr[I + 1]) xor MaskKey[I mod 4]);
 
-      // Opcode 1 = text frame
-      if (FrameOpcode = 1) and
+      if (FrameOpcode = WS_OP_TEXT) and
          Assigned(FParentServer) and Assigned(FParentServer.OnWebSocketMessage) then
         FParentServer.OnWebSocketMessage(
-          FParentServer.GetClientSocketInfo(ClientSocket), URI, DecodedStr);
+          FParentServer.GetClientSocketInfo(ClientSocket), URI,
+          BadgerWsUtf8ToString(Pointer(DecodedStr), Length(DecodedStr)));
     end;
 
   until Terminated;
@@ -357,78 +336,9 @@ end;
 function THTTPRequestHandler.BuildHTTPResponse(StatusCode: Integer;
   Body: string; Stream: TStream; ContentType: string;
   CloseConnection: Boolean; HeaderCustom: TStringList): string;
-  function StripCRLF(const S: string): string;
-  begin
-    Result := StringReplace(S, #13, '', [rfReplaceAll]);
-    Result := StringReplace(Result, #10, '', [rfReplaceAll]);
-  end;
-
-  function SanitizeHeaderName(const S: string): string;
-  var
-    J: Integer;
-    Ch: Char;
-  begin
-    Result := '';
-    for J := 1 to Length(S) do
-    begin
-      Ch := S[J];
-      if (Ord(Ch) > 31) and (Ch <> ':') then
-        Result := Result + Ch
-      else
-        Result := Result + '_';
-    end;
-    Result := Trim(Result);
-  end;
-var
-  EffectiveContentType: string;
-  i: Integer;
-  HeaderName, HeaderValue: string;
-{$IFDEF Delphi2009Plus}
-  UTF8Body: RawByteString;
-{$ELSE}
-  UTF8Body: string;
-{$ENDIF}
 begin
-  Result := '';
-  if ContentType = '' then
-    EffectiveContentType := TEXT_PLAIN
-  else
-    EffectiveContentType := ContentType;
-
-  if (AnsiContainsText(LowerCase(EffectiveContentType), TEXT_PLAIN)) or (AnsiContainsText(LowerCase(EffectiveContentType), APPLICATION_JSON)) then
-  begin
-    UTF8Body := UTF8Encode(Body);
-    Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
-              'Content-Type: ' + EffectiveContentType + '; charset=utf-8' + CRLF +
-              'Content-Length: ' + IntToStr(Length(UTF8Body)) + CRLF;
-  end
-  else
-  if Assigned(Stream) and (Stream.Size > 0) then
-  begin
-    Result := Format('HTTP/1.1 %d %s', [StatusCode, THTTPStatus.GetStatusText(StatusCode)]) + CRLF +
-              'Content-Type: ' + EffectiveContentType  + CRLF +
-              'Content-Length: ' + IntToStr(Stream.Size) + CRLF;
-  end;
-
-  Result := Result + 'Date: ' + Rfc822DateTime(Now) + CRLF +
-                    'Server: Badger HTTP Server' + CRLF;
-  if CloseConnection then
-    Result := Result + 'Connection: close' + CRLF
-  else
-    Result := Result + 'Connection: keep-alive' + CRLF;
-
-  if (Assigned(HeaderCustom)) and (HeaderCustom.Count > 0) then
-  begin
-    for i := 0 to Pred(HeaderCustom.Count) do
-    begin
-      HeaderName := SanitizeHeaderName(HeaderCustom.Names[i]);
-      HeaderValue := StripCRLF(HeaderCustom.ValueFromIndex[i]);
-      if HeaderName <> '' then
-        Result := Result + HeaderName + ':' + HeaderValue + CRLF;
-    end;
-  end;
-
-  Result := Result + CRLF;
+  Result := BadgerBuildHTTPResponse(StatusCode, Body, Stream, ContentType,
+    CloseConnection, HeaderCustom, Rfc822DateTime(Now));
 end;
 
 procedure THTTPRequestHandler.Execute;
@@ -722,9 +632,7 @@ begin
 
           // WebSocket upgrade — fora do try..except de headers: exceções no handshake
           // não podem ser confundidas com erros de parse. 'Connection' é case-insensitive (RFC 7230).
-          if (not SkipRequestProcessing) and
-             SameText(Headers.Values['Upgrade'], 'websocket') and
-             (Pos('upgrade', LowerCase(Headers.Values['Connection'])) > 0) then
+          if (not SkipRequestProcessing) and BadgerWsIsUpgrade(Headers) then
           begin
             if Headers.Values['Sec-WebSocket-Key'] = '' then
             begin

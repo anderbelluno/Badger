@@ -1,0 +1,42 @@
+---
+description: Detect and remove dead, unused, or redundant code while editing
+alwaysApply: true
+---
+
+# Sem código morto, inútil ou redundante
+
+Ao escrever, refatorar ou revisar, analise o trecho tocado (e helpers que ele passou a não usar). Remova o que não serve. Não deixe “por precaução”.
+
+## Morto
+- Função, procedimento, constante, tipo ou variável sem referências
+- Declaração na `interface` sem uso fora da unit
+- Parâmetro que não entra em nenhum cálculo nem no resultado
+- Ramo `if`/`else`/`case` com o mesmo corpo (ou corpo que ignora a condição)
+
+## Inútil
+- Wrapper que só encaminha a mesma chamada, sem transformar dados
+- Código que duplica o que outra unit já faz (ex.: reason phrase — usar `THTTPStatus.GetStatusText`)
+- Log, flag ou contador no hot path que não alimenta decisão nem API pública
+
+## Redundante
+- Dois caminhos que produzem o mesmo resultado
+- Conversão/`string(...)`/`Copy` que não muda o valor
+- Comentário que só repete o código
+
+## Exemplo (IOCP)
+
+```pascal
+// RUIM — morto + redundante: Reason não é usado; ramos idênticos; ninguém chama
+function HttpTextResponse(Status: Integer; const Reason, Body: AnsiString): AnsiString;
+begin
+  if Reason <> '' then
+    Result := BadgerAssembleHTTPMessage(Status, string(Body), nil, TEXT_PLAIN, True, nil)
+  else
+    Result := BadgerAssembleHTTPMessage(Status, string(Body), nil, TEXT_PLAIN, True, nil);
+end;
+
+// BOM — quem precisa monta direto; status text já vem do assembler
+Wire := BadgerAssembleHTTPMessage(Status, Body, nil, TEXT_PLAIN, True, nil);
+```
+
+Se achar código morto no arquivo que está editando, apague na mesma alteração. Não abra refatoração em arquivos alheios só para “limpar o mundo”.

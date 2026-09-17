@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <ProjectOptions>
+    <Version Value="13"/>
+    <PathDelim Value="\"/>
+    <General>
+      <Flags>
+        <MainUnitHasCreateFormStatements Value="False"/>
+        <MainUnitHasTitleStatement Value="False"/>
+        <MainUnitHasScaledStatement Value="False"/>
+      </Flags>
+      <SessionStorage Value="InProjectDir"/>
+      <Title Value="IocpPing"/>
+      <UseAppBundle Value="False"/>
+      <ResourceType Value="res"/>
+    </General>
+    <BuildModes>
+      <Item Name="Default" Default="True"/>
+    </BuildModes>
+    <PublishOptions>
+      <Version Value="2"/>
+    </PublishOptions>
+    <RunParams>
+      <FormatVersion Value="2"/>
+    </RunParams>
+    <Units>
+      <Unit>
+        <Filename Value="IocpPing.lpr"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\IOCP\BadgerIOCP.pas"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\IOCP\BadgerWinSock2.pas"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\BadgerHttpParser.pas"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\BadgerWebSocket.pas"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\..\src\BadgerHttpStatus.pas"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\IocpDemoRoutes.pas"/>
+      </Unit>
+    </Units>
+  </ProjectOptions>
+  <CompilerOptions>
+    <Version Value="11"/>
+    <PathDelim Value="\"/>
+    <Target>
+      <Filename Value="IocpPing"/>
+    </Target>
+    <SearchPaths>
+      <IncludeFiles Value="$(ProjOutDir);..\..\..\src"/>
+      <OtherUnitFiles Value="..\..\..\src\IOCP;..\..\..\src;..\..\..\src\Auth\Basic;..\..\..\src\Auth\JWT;..;..\..\..\ThirdParty\Synapse;..\..\..\ThirdParty\SuperObject\D_Plus_Laz_Linux"/>
+      <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
+    </SearchPaths>
+    <Linking>
+      <Debugging>
+        <DebugInfoType Value="dsDwarf4"/>
+      </Debugging>
+    </Linking>
+  </CompilerOptions>
+</CONFIG>

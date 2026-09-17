@@ -5,7 +5,7 @@ uses
   System.SysUtils,
   Vcl.SvcMgr,
   UBadgerService in 'UBadgerService.pas' {FBadgerService: TService},
-  SampleRouteManager in '..\..\SampleRouteManager.pas';
+  SampleRouteManager in '..\..\Common\SampleRouteManager.pas';
 
 {$R *.RES}
 

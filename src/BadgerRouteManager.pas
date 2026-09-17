@@ -7,7 +7,6 @@ interface
 uses
   Classes,
   SysUtils,
-  BadgerMethods,
   BadgerTypes,
   BadgerHttpStatus,
   Contnrs;
@@ -18,6 +17,7 @@ type
     Pattern: string;
     Callback: TRoutingCallback;
     ParamNames: TStringList;
+    HasParams: Boolean;
     constructor Create;
     destructor Destroy; override;
   end;
@@ -141,6 +141,7 @@ begin
   Entry := TRouteEntry.Create;
   Entry.Verb := UpperCase(AVerb);
   Entry.Pattern := LowerCase(CleanRoute);
+  Entry.HasParams := Pos(':', Entry.Pattern) > 0;
   Entry.Callback := ACallback;
   FRoutes.Add(Entry);
 
@@ -230,6 +231,22 @@ begin
   end;
 end;
 
+function RouteContextKey(const Path: string): string;
+var
+  P, Q: Integer;
+begin
+  Result := '';
+  if (Length(Path) < 2) or (Path[1] <> '/') then
+    Exit;
+  P := 2;
+  Q := P;
+  while (Q <= Length(Path)) and (Path[Q] <> '/') do
+    Inc(Q);
+  Result := Copy(Path, P, Q - P);
+  if (Result <> '') and (Result[1] = ':') then
+    Result := '';
+end;
+
 function TRouteManager.MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; var Params: TStringList): Boolean;
 var
   I, J, CtxIdx: Integer;
@@ -241,61 +258,66 @@ begin
   Params.Clear;
   Entry := nil;
 
-  PathParts := SplitString(APath, '/');
-  try
-    if (PathParts.Count > 1) then
-      ContextKey := PathParts[1]
-    else
-      ContextKey := '';
+  ContextKey := RouteContextKey(APath);
+  CtxIdx := FContextIndex.IndexOf(ContextKey);
+  if CtxIdx >= 0 then
+    Bucket := TObjectList(FContextIndex.Objects[CtxIdx])
+  else
+    Bucket := FRoutes;
 
-    CtxIdx := FContextIndex.IndexOf(ContextKey);
-    if CtxIdx >= 0 then
-      Bucket := TObjectList(FContextIndex.Objects[CtxIdx])
-    else
-      Bucket := FRoutes;
+  for I := 0 to Bucket.Count - 1 do
+  begin
+    Entry := TRouteEntry(Bucket[I]);
+    if not Assigned(Entry) then Continue;
+    if Entry.Verb <> AVerb then Continue;
 
-    for I := 0 to Bucket.Count - 1 do
+    Params.Clear;
+    if not Entry.HasParams then
     begin
-      Entry := TRouteEntry(Bucket[I]);
-      if not Assigned(Entry) then Continue;
-      if Entry.Verb <> AVerb then Continue;
+      if Entry.Pattern = APath then
+      begin
+        Result := True;
+        Exit;
+      end;
+      Continue;
+    end;
 
-      PatternParts := SplitString(Entry.Pattern, '/');
-      try
-        if PatternParts.Count <> PathParts.Count then
+    PathParts := SplitString(APath, '/');
+    PatternParts := SplitString(Entry.Pattern, '/');
+    try
+      if PatternParts.Count <> PathParts.Count then
+        Continue;
+
+      Params.Clear;
+      Result := True;
+      for J := 0 to PatternParts.Count - 1 do
+      begin
+        Part := PatternParts[J];
+        if (Part = '') and (J = 0) then
           Continue;
 
-        Params.Clear;
-        Result := True;
-        for J := 0 to PatternParts.Count - 1 do
+        if Copy(Part, 1, 1) = ':' then
         begin
-          Part := PatternParts[J];
-          if (Part = '') and (J = 0) then
-            Continue;
-
-          if Copy(Part, 1, 1) = ':' then
-          begin
-            ParamName := Copy(Part, 2, MaxInt);
-            Params.Add(ParamName + '=' + PathParts[J]);
-          end
-          else if Part <> PathParts[J] then
-          begin
-            Result := False;
-            Break;
-          end;
+          ParamName := Copy(Part, 2, MaxInt);
+          Params.Add(ParamName + '=' + PathParts[J]);
+        end
+        else if Part <> PathParts[J] then
+        begin
+          Result := False;
+          Break;
         end;
-
-        if Result then
-          Exit;
-
-        Entry := nil;
-      finally
-        PatternParts.Free;
       end;
+
+      if Result then
+        Exit;
+
+      Entry := nil;
+    finally
+      PatternParts.Free;
+      PathParts.Free;
     end;
-  finally
-    PathParts.Free;
   end;
+  Entry := nil;
 end;
 
 end.
