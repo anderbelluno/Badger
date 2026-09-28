@@ -7,7 +7,8 @@ unit BadgerBasicAuth;
 interface
 
 uses
-  SysUtils, Classes, Badger, BadgerTypes, BadgerHttpStatus, BadgerUtils, BadgerJWTUtils;
+  SysUtils, Classes, Badger, BadgerTypes, BadgerHttpStatus, BadgerUtils, BadgerJWTUtils,
+  BadgerRouteManager;
 
 type
   TBasicAuth = class
@@ -15,19 +16,23 @@ type
     FUsername: string;
     FPasswordHash: string;
     FPasswordSalt: string;
+    FRealm: string;
     FProtectedRoutes: TStringList;
     function ConstantTimeEquals(const A, B: string): Boolean;
     function HashPassword(const APassword: string): string;
     function BuildPasswordSalt: string;
     function GetPassword: string;
     procedure SetPassword(const AValue: string);
-    function Check(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
+    procedure Challenge(var Response: THTTPResponse; const ABody: string);
   public
     constructor Create(const AUsername, APassword: string);
     destructor Destroy; override;
+    function Check(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
+    procedure SetProtectedRoutes(const ProtectedRoutes: array of string);
     procedure RegisterProtectedRoutes(Badger: TBadger; const ProtectedRoutes: array of string);
     property Username: string read FUsername write FUsername;
     property Password: string read GetPassword write SetPassword;
+    property Realm: string read FRealm write FRealm;
   end;
 
 implementation
@@ -69,10 +74,8 @@ begin
     Exit;
   end;
 
-  Result :=
-    (Length(RequestURI) > Length(ProtectedRoute)) and
-    (CompareText(Copy(RequestURI, 1, Length(ProtectedRoute)), ProtectedRoute) = 0) and
-    (RequestURI[Length(ProtectedRoute) + 1] = '/');
+  { Mesmo prefixo por segmento de antes, agora com ':param' casando o segmento. }
+  Result := BadgerPathUnderPattern(RequestURI, ProtectedRoute);
 end;
 
 constructor TBasicAuth.Create(const AUsername, APassword: string);
@@ -82,6 +85,7 @@ begin
   FUsername := AUsername;
   FPasswordSalt := BuildPasswordSalt;
   SetPassword(APassword);
+  FRealm := 'Badger';
   FProtectedRoutes := TStringList.Create;
 end;
 
@@ -92,8 +96,20 @@ begin
 end;
 
 function TBasicAuth.BuildPasswordSalt: string;
+var
+  G: TGUID;
+  I: Integer;
 begin
-  Result := IntToHex(DateTimeToUnix(Now), 8) + IntToHex(Random(MaxInt), 8);
+  { GUID v4 vem do CSPRNG do SO (CoCreateGuid / getrandom), ao contrario de Random,
+    que e LCG semeado pela hora e portanto adivinhavel. }
+  Result := '';
+  for I := 1 to 2 do
+    if CreateGUID(G) = 0 then
+      Result := Result + StringReplace(StringReplace(StringReplace(
+        GUIDToString(G), '{', '', [rfReplaceAll]), '}', '', [rfReplaceAll]),
+        '-', '', [rfReplaceAll]);
+  if Result = '' then
+    Result := IntToHex(DateTimeToUnix(Now), 8) + IntToHex(Random(MaxInt), 8);
 end;
 
 function TBasicAuth.HashPassword(const APassword: string): string;
@@ -143,11 +159,28 @@ begin
   FPasswordHash := HashPassword(AValue);
 end;
 
+procedure TBasicAuth.Challenge(var Response: THTTPResponse; const ABody: string);
+var
+  RealmValue: string;
+begin
+  RealmValue := Trim(FRealm);
+  if RealmValue = '' then
+    RealmValue := 'Badger';
+  RealmValue := StringReplace(RealmValue, '"', '', [rfReplaceAll]);
+  Response.StatusCode := HTTP_UNAUTHORIZED;
+  Response.Body := ABody;
+  Response.ContentType := APPLICATION_JSON;
+  if Assigned(Response.HeadersCustom) then
+    Response.HeadersCustom.Values['WWW-Authenticate'] :=
+      'Basic realm="' + RealmValue + '"';
+end;
+
 function TBasicAuth.Check(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 var
   AuthHeader, DecodedAuth, vUsername, vPassword: string;
   I, ColonPos: Integer;
   LRouteMatch: Boolean;
+  UserOk, PassOk: Boolean;
 begin
   LRouteMatch := False;
   for I := 0 to FProtectedRoutes.Count - 1 do
@@ -165,7 +198,7 @@ begin
 
   AuthHeader := Trim(Request.Headers.Values['Authorization']);
 
-  if Pos('Basic ', AuthHeader) = 1 then
+  if SameText(Copy(AuthHeader, 1, 6), 'Basic ') then
   begin
     AuthHeader := Copy(AuthHeader, 7, Length(AuthHeader));
     try
@@ -176,53 +209,55 @@ begin
         vUsername := Copy(DecodedAuth, 1, ColonPos - 1);
         vPassword := Copy(DecodedAuth, ColonPos + 1, Length(DecodedAuth));
 
-        if ConstantTimeEquals(vUsername, FUsername) and
-           ConstantTimeEquals(HashPassword(vPassword), FPasswordHash) then
+        { Sem curto-circuito: com 'and' o hash so rodava para usuario certo, e a
+          diferenca de tempo revelava quais usuarios existem. }
+        UserOk := ConstantTimeEquals(vUsername, FUsername);
+        PassOk := ConstantTimeEquals(HashPassword(vPassword), FPasswordHash);
+        if UserOk and PassOk then
         begin
           Request.UserID := vUsername;
           Result := False;
         end
         else
         begin
-          Response.StatusCode := HTTP_UNAUTHORIZED;
-          Response.Body := '{"error":"Invalid username or password"}';
-          Response.ContentType := APPLICATION_JSON;
+          Challenge(Response, '{"error":"Invalid username or password"}');
           Result := True;
         end;
       end
       else
       begin
-        Response.StatusCode := HTTP_UNAUTHORIZED;
-        Response.Body := '{"error":"Invalid Basic Auth format"}';
-        Response.ContentType := APPLICATION_JSON;
+        Challenge(Response, '{"error":"Invalid Basic Auth format"}');
         Result := True;
       end;
     except
+      { Credencial malformada e erro do cliente (401), nao 500; e E.Message ia cru
+        para o corpo: vazava detalhe interno e, com aspas, gerava JSON invalido. }
       on E: Exception do
       begin
-        Response.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-        Response.Body := '{"error":"Error decoding Basic Auth: ' + E.Message + '"}';
-        Response.ContentType := APPLICATION_JSON;
+        Challenge(Response, '{"error":"Invalid Basic Auth format"}');
         Result := True;
       end;
     end;
   end
   else
   begin
-    Response.StatusCode := HTTP_UNAUTHORIZED;
-    Response.Body := '{"error":"Basic Authorization header missing or invalid"}';
-    Response.ContentType := APPLICATION_JSON;
+    Challenge(Response, '{"error":"Basic Authorization header missing or invalid"}');
     Result := True;
   end;
 end;
 
-procedure TBasicAuth.RegisterProtectedRoutes(Badger: TBadger; const ProtectedRoutes: array of string);
+procedure TBasicAuth.SetProtectedRoutes(const ProtectedRoutes: array of string);
 var
   I: Integer;
 begin
   FProtectedRoutes.Clear;
   for I := Low(ProtectedRoutes) to High(ProtectedRoutes) do
     FProtectedRoutes.Add(ProtectedRoutes[I]);
+end;
+
+procedure TBasicAuth.RegisterProtectedRoutes(Badger: TBadger; const ProtectedRoutes: array of string);
+begin
+  SetProtectedRoutes(ProtectedRoutes);
   Badger.AddMiddleware(Check);
 end;
 

@@ -16,6 +16,7 @@ uses
   BadgerUploadUtils in '..\..\..\src\BadgerUploadUtils.pas',
   BadgerMultipartDataReader in '..\..\..\src\BadgerMultipartDataReader.pas',
   BadgerMethods in '..\..\..\src\BadgerMethods.pas',
+  BadgerHttpDispatch in '..\..\..\src\BadgerHttpDispatch.pas',
   BadgerIOCP in '..\..\..\src\IOCP\BadgerIOCP.pas',
   BadgerRequestHandler in '..\..\..\src\BadgerRequestHandler.pas',
   Badger in '..\..\..\src\Badger.pas',
@@ -24,7 +25,8 @@ uses
   BadgerAuthJWT in '..\..\..\src\Auth\JWT\BadgerAuthJWT.pas',
   BadgerBasicAuth in '..\..\..\src\Auth\Basic\BadgerBasicAuth.pas',
   IocpDemoRoutes in '..\IocpDemoRoutes.pas',
-  IocpWsChatClient in '..\IocpWsChatClient.pas';
+  IocpWsChatClient in '..\IocpWsChatClient.pas',
+  IocpDemoHttpRoutes in '..\IocpDemoHttpRoutes.pas';
 
 {$R *.RES}
 

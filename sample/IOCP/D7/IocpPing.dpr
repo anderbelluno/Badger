@@ -17,6 +17,7 @@ uses
   BadgerUploadUtils in '..\..\..\src\BadgerUploadUtils.pas',
   BadgerMultipartDataReader in '..\..\..\src\BadgerMultipartDataReader.pas',
   BadgerMethods in '..\..\..\src\BadgerMethods.pas',
+  BadgerHttpDispatch in '..\..\..\src\BadgerHttpDispatch.pas',
   BadgerIOCP in '..\..\..\src\IOCP\BadgerIOCP.pas',
   BadgerRequestHandler in '..\..\..\src\BadgerRequestHandler.pas',
   Badger in '..\..\..\src\Badger.pas',

@@ -1,4 +1,4 @@
-﻿unit SampleRouteManager;
+unit SampleRouteManager;
 
 {$IFDEF FPC}
   {$mode delphi}{$H+}

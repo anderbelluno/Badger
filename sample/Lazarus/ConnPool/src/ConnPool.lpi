@@ -52,10 +52,10 @@
         <UnitName Value="Unit2"/>
       </Unit>
       <Unit>
-        <Filename Value="ConnPoolRoutes.pas"/>
+        <Filename Value="../../../Common/ConnPoolRoutes.pas"/>
       </Unit>
       <Unit>
-        <Filename Value="ConnPoolWorkers.pas"/>
+        <Filename Value="../../../Common/ConnPoolWorkers.pas"/>
       </Unit>
     </Units>
   </ProjectOptions>
@@ -66,7 +66,7 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir);../../../../src"/>
-      <OtherUnitFiles Value="../../../../src;../../../../src/IOCP;../../../../src/DBPool;../../../../src/Auth/Basic;../../../../src/Auth/JWT;../../../../ThirdParty/Synapse;../../../../ThirdParty/SuperObject/D_Plus_Laz_Linux"/>
+      <OtherUnitFiles Value="../../../../src;../../../../src/IOCP;../../../../src/Epoll;../../../../src/DBPool;../../../../src/Auth/Basic;../../../../src/Auth/JWT;../../../Common;../../../../ThirdParty/Synapse;../../../../ThirdParty/SuperObject/D_Plus_Laz_Linux"/>
       <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Parsing>

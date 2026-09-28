@@ -1,4 +1,4 @@
-﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
         <ProjectGuid>{A7C3E91F-4B2D-4E18-9F06-8D1C5A6B3E42}</ProjectGuid>
         <ProjectVersion>20.1</ProjectVersion>
@@ -163,6 +163,7 @@
         <DCCReference Include="..\..\..\src\BadgerUploadUtils.pas"/>
         <DCCReference Include="..\..\..\src\BadgerMultipartDataReader.pas"/>
         <DCCReference Include="..\..\..\src\BadgerMethods.pas"/>
+        <DCCReference Include="..\..\..\src\BadgerHttpDispatch.pas"/>
         <DCCReference Include="..\..\..\src\IOCP\BadgerIOCP.pas"/>
         <DCCReference Include="..\..\..\src\BadgerRequestHandler.pas"/>
         <DCCReference Include="..\..\..\src\Badger.pas"/>

@@ -35,6 +35,9 @@
         <ResourceBaseClass Value="Form"/>
       </Unit>
       <Unit>
+        <Filename Value="..\..\..\src\BadgerHttpDispatch.pas"/>
+      </Unit>
+      <Unit>
         <Filename Value="..\..\..\src\IOCP\BadgerIOCP.pas"/>
       </Unit>
       <Unit>

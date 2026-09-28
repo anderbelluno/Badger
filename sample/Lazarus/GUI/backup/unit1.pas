@@ -26,6 +26,7 @@ type
         RadioGroup1: TRadioGroup;
         rdLog: TCheckBox;
         rdParallel: TCheckBox;
+        rdIOCP: TCheckBox;
         procedure btnClearLogClick(Sender: TObject);
         procedure btnSynaClick(Sender: TObject);
         procedure FormCreate(Sender: TObject);
@@ -76,24 +77,32 @@ end;
 
 procedure TForm1.btnSynaClick(Sender: TObject);
 begin
-  Logger.isActive := true;
-  Logger.LogFileName := 'logger.log';
+  Logger.isActive := False;
   Logger.LogToConsole := False;
 
   if btnSyna.Tag = 0 then
   begin
     ServerThread := TBadger.Create;
-    ServerThread.EnableEventInfo := rdLog.Checked;
     ServerThread.Port := StrToInt(edtPorta.Text);
     ServerThread.Timeout := StrToInt(edtTimeOut.Text);
-
-    ServerThread.OnRequest  := HandleRequest;
-    ServerThread.OnResponse := HandleResponse;
+    ServerThread.ParallelProcessing := rdParallel.Checked;
+    ServerThread.MaxConcurrentConnections := 5000;
+    ServerThread.EnableEventInfo := rdLog.Checked;
+    {$IFDEF LINUX}
+    ServerThread.UseEpoll := rdIOCP.Checked;
+    {$ELSE}
+    ServerThread.UseIOCP := rdIOCP.Checked;
+    {$ENDIF}
+    if ServerThread.EnableEventInfo then
+    begin
+      ServerThread.OnRequest := HandleRequest;
+      ServerThread.OnResponse := HandleResponse;
+    end;
 
     case RadioGroup1.ItemIndex of
-      1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping', '/download']);
+      1: BasicAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/teste/ping', '/download']);
       3: begin
-            JWTAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/ping']);
+            JWTAuth.RegisterProtectedRoutes(ServerThread, ['/rota1', '/teste/ping']);
             SampleRouteManager.FJWT := JWTAuth;
          end;
     end;
@@ -109,15 +118,12 @@ begin
       .AddGet('/produtos/:id/:codigo', TSampleRouteManager.produtos)
       .AddGet('/produtos', TSampleRouteManager.produtos);
 
-    ServerThread.ParallelProcessing:= rdParallel.Checked;
-   { ServerThread.MaxConcurrentConnections:= 30000; }
-
     ServerThread.CorsEnabled := False;
-
     ServerThread.Start;
     edtPorta.Enabled := False;
     rdLog.Enabled := False;
     rdParallel.Enabled := False;
+    rdIOCP.Enabled := False;
     btnSyna.Tag := 1;
     btnSyna.Caption := 'Parar Servidor';
     RadioGroup1.Enabled := False;
@@ -132,6 +138,7 @@ begin
     edtPorta.Enabled := True;
     rdLog.Enabled := True;
     rdParallel.Enabled := True;
+    rdIOCP.Enabled := True;
     RadioGroup1.Enabled := True;
     edtTimeOut.Enabled := True;
   end;
@@ -148,7 +155,12 @@ begin
   FLogLock := TCriticalSection.Create;
   FLogQueue := TStringList.Create;
   BasicAuth := TBasicAuth.Create('username', 'password');
-  JWTAuth := TBadgerJWTAuth.Create('secretekey', 'c:\tokenss');
+  JWTAuth := TBadgerJWTAuth.Create('secretekey',
+    IncludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0))) + 'jwt');
+  {$IFDEF LINUX}
+  rdIOCP.Caption := 'epoll (Linux)';
+  rdIOCP.Hint := 'Uncheck to force Synapse on Linux';
+  {$ENDIF}
 end;
 
 procedure TForm1.FormDestroy(Sender: TObject);

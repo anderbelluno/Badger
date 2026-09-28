@@ -17,6 +17,7 @@ uses
   BadgerUploadUtils in '..\..\..\src\BadgerUploadUtils.pas',
   BadgerMultipartDataReader in '..\..\..\src\BadgerMultipartDataReader.pas',
   BadgerMethods in '..\..\..\src\BadgerMethods.pas',
+  BadgerHttpDispatch in '..\..\..\src\BadgerHttpDispatch.pas',
   BadgerIOCP in '..\..\..\src\IOCP\BadgerIOCP.pas',
   BadgerRequestHandler in '..\..\..\src\BadgerRequestHandler.pas',
   Badger in '..\..\..\src\Badger.pas',
@@ -30,6 +31,12 @@ uses
 var
   Server: TBadger;
 begin
+  { Leak dialog without stack = stock FastMM. For CallStack on D12:
+    1) GetIt: install FastMM4 (or FastMM5)
+    2) Put FastMM4 as the FIRST unit in this uses clause
+    3) Enable FullDebugMode in FastMM4Options.inc
+    4) Copy FastMM_FullDebugMode.dll next to the .exe
+    Then the shutdown report includes allocation stacks. }
   ReportMemoryLeaksOnShutdown := True;
   Server := TBadger.Create;
   try

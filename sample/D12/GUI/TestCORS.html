@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Teste CORS Badger</title></head>
+<body>
+<button id="get">GET /teste/ping</button>
+<button id="post">POST JSON /teste/ping</button>
+<button id="auth">GET com Authorization</button>
+<pre id="out"></pre>
+<script>
+const out = document.getElementById('out');
+function log(x){ out.textContent += x + '\n'; }
+document.getElementById('get').onclick = async () => {
+  const r = await fetch('http://localhost:8080/teste/ping', { headers: { Origin: location.origin }});
+  log('GET status: ' + r.status);
+  log('Allow-Origin: ' + r.headers.get('Access-Control-Allow-Origin'));
+};
+document.getElementById('post').onclick = async () => {
+  const r = await fetch('http://localhost:8080/teste/ping', {
+    method: 'POST',
+    headers: { Origin: location.origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hello: 'world' })
+  });
+  log('POST status: ' + r.status);
+  log('Allow-Origin: ' + r.headers.get('Access-Control-Allow-Origin'));
+};
+document.getElementById('auth').onclick = async () => {
+  const r = await fetch('http://localhost:8080/teste/ping', {
+    headers: { Origin: location.origin, Authorization: 'Bearer testtoken' }
+  });
+  log('AUTH status: ' + r.status);
+  log('Allow-Origin: ' + r.headers.get('Access-Control-Allow-Origin'));
+};
+</script>
+</body>
+</html>

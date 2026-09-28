@@ -1,58 +1,43 @@
 # Samples
 
-Grouped by **context**, not only by compiler.
+Layout target (migration in progress — see `docs/Samples_Migracao.md`):
 
 ```
 sample/
-  Common/          shared official routes
-  D7/              official VCL (8080)
-  D12/             official FMX + WinService (8080)
-  Lazarus/         official GUI, Console, ConnPool, Midd_before_after
-  IOCP/            engine + WebSocket + CORS (8081)
-    IocpDemoRoutes.pas
-    IocpWsChatClient.pas
-    D7/
-    D12/
-    Lazarus/
-  StressTeste/     load tools
+  Common/           SampleRouteManager, SampleWs*, ConnPoolRoutes, SampleDbTemplate
+  D7/GUI/           VCL full demo (8080)
+  D7/Console/       minimal ping
+  D12/GUI/          FMX full demo (8080)
+  D12/Console/      minimal ping
+  D12/WinService/   Windows service host
+  Lazarus/GUI/      LCL full demo — WS + ConnPool (Zeos) + auth
+  Lazarus/Console/  minimal ping (Win/Linux)
+  Lazarus/ConnPool/     docker/db + stress UI (routes moved to Common)
+  Lazarus/Midd_before_after/ → absorb then delete
+  IOCP/  Epoll/         → delete after D7/D12 GUI have WS
+  StressTeste/      load clients
 ```
 
-Bootstrap order (every server sample):
+| App | Role |
+|-----|------|
+| **Console** | `TBadger` + `GET /teste/ping` only |
+| **GUI** | Start/Stop, log, parallel, IOCP/epoll, Basic, JWT, WS `/chat`, ConnPool `/db/*` (Zeos) |
 
-1. `TBadger.Create`
-2. `Port` / `Timeout`
-3. `ParallelProcessing` / `MaxConcurrentConnections`
-4. `EnableEventInfo` (`OnRequest` / `OnResponse` only when True)
-5. `UseIOCP` only when forcing Synapse on Windows (`False`)
-6. Routes / auth / middleware / WS
-7. `Start` — then `Stop` + `Free`
+Bootstrap: Create → Port/Timeout → Parallel/MaxConn → EnableEventInfo → (only if needed) `UseIOCP`/`UseEpoll := False` → routes → Start.
 
-Windows IOCP is already the default. Do not set `UseIOCP := True`.
+Do **not** set `UseIOCP := True` / `UseEpoll := True` (defaults on Windows/Linux).
 
-## Official
+## Open now
 
-| Path | Recorte |
-|------|---------|
-| `Lazarus/GUI/` | Canonical GUI: routes, Basic/JWT, events, parallel, **IOCP checkbox** (uncheck = Synapse) |
-| `D7/` | Same |
-| `D12/FMX Windows/` | Same |
-| `D12/WinService/` | Same bootstrap as a Windows service |
-| `Lazarus/Console_Linux/` | Headless `/teste/ping` |
-| `Lazarus/ConnPool/` | `TBadgerDBBridge` + `/db/*` |
-| `Lazarus/Midd_before_after/` | Before/after middleware |
+| Path | Notes |
+|------|--------|
+| `Lazarus/GUI/project1.lpi` | WS + ConnPool done — test next |
+| `Lazarus/Console/project1.lpi` | was Console_Linux |
+| `D7/GUI/Project1.dpr` | mirror Lazarus next |
+| `D7/Console/BadgerConsole.dpr` | minimal |
+| `D12/GUI/FMXWindows.dproj` | mirror Lazarus next |
+| `D12/Console/BadgerConsole.dproj` | minimal |
+| `D12/WinService/` | unchanged |
+| `Lazarus/ConnPool/db` | `docker compose` for Postgres |
 
-Shared routes: `Common/SampleRouteManager.pas`.
-
-## IOCP (8081)
-
-Same `TBadger` API. Extra recorte: CORS on, after-middleware, WebSocket `/chat`.
-
-| Path | Apps |
-|------|------|
-| `IOCP/D12/` | `IocpPing`, `IocpPingGUI` |
-| `IOCP/D7/` | `IocpPing`, `IocpPingGUI` |
-| `IOCP/Lazarus/` | `IocpPing`, `IocpPingGUI` |
-
-## Stress
-
-`StressTeste/` — client load tools, not a Badger server demo.
+Legacy `IOCP/`, `Epoll/` still compile for reference until faxina final.

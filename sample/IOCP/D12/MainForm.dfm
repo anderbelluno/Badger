@@ -50,7 +50,7 @@ object FormMain: TFormMain
       Width = 57
       Height = 23
       TabOrder = 1
-      Text = '8081'
+      Text = '8080'
     end
     object btnPing: TButton
       Left = 248
@@ -88,7 +88,7 @@ object FormMain: TFormMain
       Width = 121
       Height = 23
       TabOrder = 5
-      Text = '500'
+      Text = '5000'
     end
   end
   object MemoLog: TMemo

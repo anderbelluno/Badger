@@ -46,7 +46,7 @@ object FormMain: TFormMain
       Width = 57
       Height = 21
       TabOrder = 1
-      Text = '8081'
+      Text = '8080'
     end
     object btnPing: TButton
       Left = 248

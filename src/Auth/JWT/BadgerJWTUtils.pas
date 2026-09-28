@@ -25,6 +25,19 @@ uses
     procedure SaveRefreshToken(const AUserID, AToken, AStoragePath: string);
     function LoadRefreshToken(const AUserID, AStoragePath: string): string;
     function DateTimeToUnix(ADateTime: TDateTime): Int64;
+    { Epoch Unix em UTC. DateTimeToUnix(Now) usa hora local e produz exp/iat
+      deslocados pelo fuso (3h no Brasil) para qualquer outra biblioteca JWT. }
+    function UnixNowUtc: Int64;
+    { Normaliza AUserID para nome de arquivo: só [A-Za-z0-9._-], demais viram '_'.
+      Sem isso, um AUserID vindo do login escreve fora de AStoragePath. }
+    function SanitizeTokenOwner(const AUserID: string): string;
+    { Nome de arquivo INJETIVO para AUserID (usado na gravacao dos tokens). IDs so
+      com [A-Za-z0-9._-] mantem o mesmo nome de SanitizeTokenOwner; o resto vira %XX
+      dos bytes UTF-8. SanitizeTokenOwner trocava tudo por '_': 'joao' acentuado e
+      'jo_o', ou 'a@b.com' e 'a_b.com', dividiam o arquivo e o login de um invalidava
+      a sessao do outro. Tambem escapa ponto inicial e nomes de dispositivo do
+      Windows (CON, NUL, COM1...), que quebravam o armazenamento desses usuarios. }
+    function TokenOwnerFileName(const AUserID: string): string;
 
 implementation
 
@@ -72,11 +85,119 @@ begin
   Result := Round((ADateTime - UnixStartDate) * 86400);
 end;
 
+function UnixNowUtc: Int64;
+{$IFDEF BADGER_WINDOWS}
+var
+  ST: TSystemTime;
+begin
+  { GetSystemTime já devolve UTC. }
+  GetSystemTime(ST);
+  Result := DateTimeToUnix(EncodeDate(ST.wYear, ST.wMonth, ST.wDay) +
+                           EncodeTime(ST.wHour, ST.wMinute, ST.wSecond, 0));
+end;
+{$ELSE}
+{$IFDEF FPC}
+begin
+  { GetLocalTimeOffset: minutos a somar ao local para chegar a UTC. }
+  Result := DateTimeToUnix(Now) + Int64(GetLocalTimeOffset) * 60;
+end;
+{$ELSE}
+begin
+  Result := DateTimeToUnix(TTimeZone.Local.ToUniversalTime(Now));
+end;
+{$ENDIF}
+{$ENDIF}
+
+function SanitizeTokenOwner(const AUserID: string): string;
+var
+  I: Integer;
+  Ch: Char;
+begin
+  Result := '';
+  for I := 1 to Length(AUserID) do
+  begin
+    Ch := AUserID[I];
+    if ((Ch >= 'A') and (Ch <= 'Z')) or ((Ch >= 'a') and (Ch <= 'z')) or
+       ((Ch >= '0') and (Ch <= '9')) or (Ch = '.') or (Ch = '-') or (Ch = '_') then
+      Result := Result + Ch
+    else
+      Result := Result + '_';
+  end;
+  { '.' e '..' resolveriam para diretório; qualquer nome só de pontos é inseguro. }
+  while (Result <> '') and (Result[1] = '.') do
+    Result[1] := '_';
+  if Result = '' then
+    Result := '_';
+end;
+
+function TokenOwnerFileName(const AUserID: string): string;
+const
+  HexDigits: array[0..15] of Char = '0123456789ABCDEF';
+  Devices: array[0..21] of string = ('CON', 'PRN', 'AUX', 'NUL',
+    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9');
+var
+  U: AnsiString;
+  I, P: Integer;
+  B: Byte;
+  Base: string;
+begin
+  U := Utf8Bytes(AUserID);
+  Result := '';
+  for I := 1 to Length(U) do
+  begin
+    B := Ord(U[I]);
+    if ((B >= Ord('A')) and (B <= Ord('Z'))) or ((B >= Ord('a')) and (B <= Ord('z'))) or
+       ((B >= Ord('0')) and (B <= Ord('9'))) or (B = Ord('-')) or (B = Ord('_')) or
+       ((B = Ord('.')) and (I > 1)) then
+      Result := Result + Char(B)
+    else
+      Result := Result + '%' + HexDigits[B shr 4] + HexDigits[B and 15];
+  end;
+  { '%' sozinho nunca sai do laco (todo '%' gerado leva dois hex): ID vazio nao
+    colide com ninguem. }
+  if Result = '' then
+  begin
+    Result := '%';
+    Exit;
+  end;
+  P := Pos('.', Result);
+  if P > 0 then
+    Base := Copy(Result, 1, P - 1)
+  else
+    Base := Result;
+  for I := Low(Devices) to High(Devices) do
+    if SameText(Base, Devices[I]) then
+    begin
+      B := Ord(Result[1]);
+      Result := '%' + HexDigits[B shr 4] + HexDigits[B and 15] + Copy(Result, 2, MaxInt);
+      Break;
+    end;
+end;
+
+{ Gravacao usa sempre o nome novo. Leitura aceita o nome antigo quando o novo nao
+  existe: sessoes emitidas antes da troca seguem validas ate o proximo login do
+  usuario (que grava no nome novo). A assinatura do JWT carrega o user_id, entao
+  ler o arquivo legado de outro usuario so resulta em 'Token not found'. }
+function TokenFilePath(const AStoragePath, AUserID, AExt: string; AForRead: Boolean): string;
+var
+  Legacy: string;
+begin
+  Result := IncludeTrailingPathDelimiter(AStoragePath) + TokenOwnerFileName(AUserID) + AExt;
+  if AForRead and not FileExists(Result) then
+  begin
+    Legacy := IncludeTrailingPathDelimiter(AStoragePath) + SanitizeTokenOwner(AUserID) + AExt;
+    if FileExists(Legacy) then
+      Result := Legacy;
+  end;
+end;
+
 procedure ApplyTokenFilePermissions(const AFileName: string);
 {$IFDEF BADGER_WINDOWS}
 const
-  // Owner/SYSTEM/Admins and execution contexts (interactive/service) full control, inheritance blocked.
-  TokenFileSDDL = 'D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;IU)(A;;FA;;;SU)';
+  // Owner/SYSTEM/Admins full control, inheritance blocked. IU (Interactive Users)
+  // e SU (Service) ficaram fora: dariam o token a qualquer sessão logada na máquina.
+  TokenFileSDDL = 'D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)';
 var
   SD: PSECURITY_DESCRIPTOR;
   AFileNameAnsi: AnsiString;
@@ -124,7 +245,7 @@ begin
   if AStoragePath = '' then
     Exit;
   ForceDirectories(AStoragePath);
-  LFileName := IncludeTrailingPathDelimiter(AStoragePath) + AUserID + '.token';
+  LFileName := TokenFilePath(AStoragePath, AUserID, '.token', False);
   if FileExists(LFileName) then
     DeleteFile(LFileName);
   FS := TFileStream.Create(LFileName, fmCreate);
@@ -146,7 +267,7 @@ var
 begin
   Result := '';
   if AStoragePath = '' then Exit;
-  LFileName := IncludeTrailingPathDelimiter(AStoragePath) + AUserID + '.token';
+  LFileName := TokenFilePath(AStoragePath, AUserID, '.token', True);
   if not FileExists(LFileName) then Exit;
 
   FS := TFileStream.Create(LFileName, fmOpenRead or fmShareDenyNone);
@@ -179,7 +300,7 @@ begin
   if AStoragePath = '' then
     Exit;
   ForceDirectories(AStoragePath);
-  LFileName := IncludeTrailingPathDelimiter(AStoragePath) + AUserID + '.refreshtoken';
+  LFileName := TokenFilePath(AStoragePath, AUserID, '.refreshtoken', False);
   if FileExists(LFileName) then
     DeleteFile(LFileName);
   FS := TFileStream.Create(LFileName, fmCreate);
@@ -201,7 +322,7 @@ var
 begin
   Result := '';
   if AStoragePath = '' then Exit;
-  LFileName := IncludeTrailingPathDelimiter(AStoragePath) + AUserID + '.refreshtoken';
+  LFileName := TokenFilePath(AStoragePath, AUserID, '.refreshtoken', True);
   if not FileExists(LFileName) then Exit;
 
   FS := TFileStream.Create(LFileName, fmOpenRead or fmShareDenyNone);
@@ -369,6 +490,29 @@ begin
     Result[i - 1] := Byte(AnsiChar(S[i]));
 end;
 
+{ Chave e mensagem em bytes UTF-8. RawStrToBytes truncava o byte alto de cada
+  caractere: segredo ou claim com acento gerava assinatura que nenhuma outra
+  biblioteca JWT reproduz. }
+function Utf8StrToJwtBytes(const S: string): TJWTBytes;
+var
+  Raw: AnsiString;
+  I: Integer;
+begin
+  Raw := Utf8Bytes(S);
+  SetLength(Result, Length(Raw));
+  for I := 1 to Length(Raw) do
+    Result[I - 1] := Byte(Raw[I]);
+end;
+
+function BytesToAnsi(const ABytes: TJWTBytes): AnsiString;
+var
+  I: Integer;
+begin
+  SetLength(Result, Length(ABytes));
+  for I := 0 to Length(ABytes) - 1 do
+    Result[I + 1] := AnsiChar(ABytes[I]);
+end;
+
 function HMAC_SHA256(const Key, Message: string): TJWTBytes;
 const
   BlockSize = 64;
@@ -378,8 +522,8 @@ var
   i: Integer;
   TempHash: TJWTBytes;
 begin
-  LKey := RawStrToBytes(Key);
-  LMessage := RawStrToBytes(Message);
+  LKey := Utf8StrToJwtBytes(Key);
+  LMessage := Utf8StrToJwtBytes(Message);
 
   if Length(LKey) > BlockSize then
     LKey := SHA256(LKey);
@@ -414,7 +558,8 @@ var
 begin
   Data := AHeader + '.' + APayload;
   HashBytes := HMAC_SHA256(ASecret, Data);
-  Result := CustomEncodeBase64(BytesToRawStr(HashBytes), True);
+  { Assinatura e binaria: base64 sobre os bytes, sem passar por UTF-8. }
+  Result := Base64EncodeBytes(BytesToAnsi(HashBytes), True);
 end;
 
 end.

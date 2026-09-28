@@ -1,15 +1,15 @@
 object FormMain: TFormMain
   Left = 350
-  Height = 400
-  Top = 250
+  Height = 520
+  Top = 180
   Width = 560
   Caption = 'Badger IOCP'
-  ClientHeight = 400
+  ClientHeight = 520
   ClientWidth = 560
+  Position = poScreenCenter
+  LCLVersion = '4.99.0.0'
   OnCreate = FormCreate
   OnDestroy = FormDestroy
-  Position = poScreenCenter
-  LCLVersion = '4.0.0.0'
   object PanelTop: TPanel
     Left = 0
     Height = 49
@@ -33,8 +33,8 @@ object FormMain: TFormMain
       Top = 12
       Width = 105
       Caption = 'Iniciar'
-      OnClick = btnStartStopClick
       TabOrder = 0
+      OnClick = btnStartStopClick
     end
     object edtPort: TEdit
       Left = 168
@@ -51,8 +51,8 @@ object FormMain: TFormMain
       Width = 97
       Caption = 'GET /ping'
       Enabled = False
-      OnClick = btnPingClick
       TabOrder = 2
+      OnClick = btnPingClick
     end
     object btnOther: TButton
       Left = 351
@@ -61,19 +61,80 @@ object FormMain: TFormMain
       Width = 97
       Caption = 'GET /other'
       Enabled = False
-      OnClick = btnOtherClick
       TabOrder = 3
+      OnClick = btnOtherClick
     end
   end
   object MemoLog: TMemo
     Left = 0
-    Height = 351
+    Height = 271
     Top = 49
     Width = 560
     Align = alClient
     ReadOnly = True
     ScrollBars = ssAutoBoth
     TabOrder = 1
+  end
+  object PanelWs: TPanel
+    Left = 0
+    Height = 200
+    Top = 320
+    Width = 560
+    Align = alBottom
+    BevelOuter = bvNone
+    ClientHeight = 200
+    ClientWidth = 560
+    TabOrder = 2
+    object lblWs: TLabel
+      Left = 0
+      Height = 15
+      Top = 0
+      Width = 560
+      Align = alTop
+      Caption = '  WebSocket  /chat'
+    end
+    object MemoWs: TMemo
+      Left = 0
+      Height = 157
+      Top = 15
+      Width = 560
+      Align = alClient
+      ReadOnly = True
+      ScrollBars = ssAutoBoth
+      TabOrder = 0
+    end
+    object PanelWsSend: TPanel
+      Left = 0
+      Height = 28
+      Top = 172
+      Width = 560
+      Align = alBottom
+      BevelOuter = bvNone
+      ClientHeight = 28
+      ClientWidth = 560
+      TabOrder = 1
+      object btnWsSend: TButton
+        Left = 480
+        Height = 28
+        Top = 0
+        Width = 80
+        Align = alRight
+        Caption = 'Enviar'
+        Enabled = False
+        TabOrder = 1
+        OnClick = btnWsSendClick
+      end
+      object edtWs: TEdit
+        Left = 0
+        Height = 28
+        Top = 0
+        Width = 480
+        Align = alClient
+        Enabled = False
+        TabOrder = 0
+        OnKeyPress = edtWsKeyPress
+      end
+    end
   end
   object tmrLog: TTimer
     Enabled = False

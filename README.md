@@ -14,7 +14,73 @@
 
 🦡⚡ Challenge: this project delivers extremely high throughput for simple HTTP endpoints. Think it's fast? Test it yourself — beat these numbers and open a PR with your results. Let's see who can outperform Badger.
 
-## Performance Benchmark (summary — highlighted)
+## Performance Benchmark
+
+Keep-Alive (HTTP/1.1 persistent connections) is supported on **Windows (IOCP)** and **Linux (epoll)**. That is the load that measures the HTTP pipeline. Forcing `Connection: close` measures accept + handshake instead.
+
+### Linux — Keep-Alive (`wrk`)
+
+Same host and command, only the I/O engine changed (`sample/Epoll/` ping on 8081):
+
+```text
+wrk -t4 -c400 -d15s --latency http://127.0.0.1:8081/ping
+```
+
+wrk uses HTTP/1.1 keep-alive by default (`-c` connections stay open). There is no `-k`.
+
+#### Lazarus
+
+| | **epoll** (default) | Synapse (`UseEpoll := False`) |
+|---|---|---|
+| Requests/sec | **307,148** | 9,757 |
+| Latency avg | **677 µs** | 40.85 ms |
+| p50 | 645 µs | 40.98 ms |
+| p75 | 681 µs | 41.10 ms |
+| p90 | 720 µs | 41.71 ms |
+| p99 | 1.35 ms | 42.21 ms |
+| Transfer/sec | 53.90 MB | 1.79 MB |
+| Total (15.02 s) | 4,612,085 req · 809.31 MB | 146,526 req · 26.90 MB |
+
+#### Delphi 12 Linux64
+
+`EpollPing` (default epoll) vs `EpollPing --synapse`.
+
+| | **epoll** (default) | Synapse (`UseEpoll := False`) |
+|---|---|---|
+| Requests/sec | **299,582** | 9,753 |
+| Latency avg | **692 µs** | 40.84 ms |
+| p50 | 659 µs | 40.98 ms |
+| p75 | 698 µs | 41.10 ms |
+| p90 | 742 µs | 41.58 ms |
+| p99 | 1.40 ms | 42.18 ms |
+| Transfer/sec | 52.57 MB | 1.79 MB |
+| Total (~15 s) | 4,497,558 req · 789.21 MB | 146,559 req · 26.90 MB |
+
+### Linux — no Keep-Alive (`Connection: close`)
+
+Delphi 12 Linux64, same host/threads/connections:
+
+```text
+wrk -t4 -c400 -d15s --latency -H "Connection: close" http://127.0.0.1:8081/ping
+```
+
+(`-k` is Apache Bench *enable* keep-alive, or curl skip-TLS — not wrk.)
+
+| | **epoll** (default) | Synapse (`UseEpoll := False`) |
+|---|---|---|
+| Requests/sec | **56,241** | 25,958 |
+| Latency avg | **1.33 ms** | 14.93 ms |
+| p50 | 1.24 ms | 14.94 ms |
+| p75 | 1.67 ms | 15.48 ms |
+| p90 | 2.06 ms | 16.05 ms |
+| p99 | 4.37 ms | 18.93 ms |
+| Transfer/sec | 9.60 MB | 4.63 MB |
+| Total (~15 s) | 846,449 req · 144.50 MB | 390,488 req · 69.64 MB |
+
+Without Keep-Alive the bottleneck is a new TCP connection per request. epoll still leads (~2×), but drops from ~300k to ~56k rps. Synapse is *faster* here than with Keep-Alive (~26k vs ~9.8k): `select` + one thread per connection pays less when the socket dies after each response.
+
+### Windows — JMeter, Keep-Alive (IOCP)
+
 - Throughput: **30,483 req/s**
 - Average latency: **4 ms**
 - Median latency: **0 ms**
@@ -23,8 +89,6 @@
 - 99th percentile: **42 ms**
 - Errors: **0%**
 
-> Important: Tests were performed with **Keep-Alive = true** (persistent connections) on Windows only — on Linux, this must be set to false. Persistent connections significantly reduce connection-setup overhead and are a key factor behind the high throughput observed.
-
 ![JMeter Benchmark](https://github.com/anderbelluno/Badger/blob/main/img/JMeter_benchmark.png?raw=true)
 
 ---
@@ -32,14 +96,14 @@
 ## ✨ Features
 
 - **HTTP Server**: Quickly spin up HTTP servers in Delphi/Lazarus projects.
-- **Windows IOCP**: Default I/O engine on Windows (`UseIOCP`; set `False` to force Synapse). Linux/macOS stay on Synapse until epoll.
+- **Windows IOCP / Linux epoll**: Default I/O engines (`UseIOCP` / `UseEpoll`; set `False` to force Synapse). macOS stays on Synapse until kqueue.
 - **Route Management**: Register and protect routes for your APIs.
 - **Authentication**: Built-in support for Basic Auth and JWT (JSON Web Token) authentication.
 - **CORS (Cross-Origin Resource Sharing)**: Configurable CORS support with options for allowed origins, methods, headers, credentials and automatic preflight (OPTIONS) handling.
 - **After Middleware**: Post-route hooks (`AddAfterMiddleware`) for cleanup, running in LIFO order.
 - **DB Connection Pool**: Generic `TBadgerDBPool` + `TBadgerDBBridge` for Zeos/FireDAC/UniDAC templates, with `AcquireConn` / `ReleaseConn` on the request.
 - **MIME Type Handling**: Utility functions for recognizing MIME types of files.
-- **Cross-Platform**: Designed to work with both Delphi and Lazarus (FPC). I/O: IOCP on Windows, Synapse elsewhere (`UseIOCP` is ignored off Windows).
+- **Cross-Platform**: Designed to work with both Delphi and Lazarus (FPC). I/O: IOCP on Windows, epoll on Linux, Synapse on macOS (`UseIOCP` / `UseEpoll` are ignored off their OS).
 - **Logger**: Flexible and thread-safe logging via `BadgerLogger`.
 
 ---
@@ -236,7 +300,7 @@ git submodule update --init --recursive
 
 All dependencies are managed as git submodules and are listed in the **.gitmodules** file. The main third-party dependency is:
 
-- [Synapse](https://github.com/geby/synapse) – classic networking path (Linux/macOS; Windows fallback when `UseIOCP := False`).
+- [Synapse](https://github.com/geby/synapse) – classic networking path (macOS; Windows/Linux fallback when `UseIOCP`/`UseEpoll` is `False`).
 
 If you want to download dependencies manually, place them in the `ThirdParty` folder.
 
@@ -244,7 +308,7 @@ If you want to download dependencies manually, place them in the `ThirdParty` fo
 
 ## 🧩 Usage Example
 
-Windows uses **IOCP** by default. `UseIOCP := False` forces Synapse. Linux/macOS stay on Synapse.
+Windows uses **IOCP** by default. Linux uses **epoll** by default. `UseIOCP := False` / `UseEpoll := False` forces Synapse. macOS stays on Synapse.
 
 ```pascal
 Server := TBadger.Create;
@@ -255,6 +319,7 @@ try
   Server.MaxConcurrentConnections := 500;
   Server.EnableEventInfo := False;
   { Server.UseIOCP := False; } { Windows: force Synapse }
+  { Server.UseEpoll := False; } { Linux: force Synapse }
 
   Server.RouteManager
     .AddGet('/teste/ping', TSampleRouteManager.ping);
@@ -276,11 +341,13 @@ Canonical GUI: `sample/Lazarus/GUI/unit1.pas` (same API in `sample/D7/` and `sam
 
 - `src/` — Main library source code
 - `src/IOCP/` — Windows IOCP engine (`BadgerIOCP`, `BadgerWinSock2`)
+- `src/Epoll/` — Linux epoll engine (`BadgerEpoll`, `BadgerEpollSys`)
 - `src/DBPool/` — DB connection pool (`TBadgerDBPool`) and HTTP bridge (`TBadgerDBBridge`)
 - `sample/` — Examples, grouped by context (see `sample/README.md`)
   - `sample/Common/` — Shared official routes (`SampleRouteManager`)
   - `sample/D7/`, `sample/D12/`, `sample/Lazarus/` — Official demos (port 8080)
   - `sample/IOCP/` — IOCP engine demos (port 8081; D7 / D12 / Lazarus)
+  - `sample/Epoll/` — Linux epoll demos (port 8081; Lazarus + D12 Linux64)
   - `sample/StressTeste/` — Load/stress testing utilities
 - `img/` — Project images and logos
 - `docs/` — Technical documentation (PT)

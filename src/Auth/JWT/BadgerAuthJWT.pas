@@ -7,7 +7,7 @@ interface
 
 uses
   SysUtils, Classes, Badger, BadgerTypes, BadgerHttpStatus, BadgerJWTClaims,
-  BadgerJWTUtils, BadgerUtils, superobject;
+  BadgerJWTUtils, BadgerUtils, BadgerRouteManager, superobject;
 
 type
   TBadgerJWTAuth = class
@@ -15,7 +15,6 @@ type
     FSecret: string;
     FStoragePath: string;
     FProtectedRoutes: TStringList;
-    function MiddlewareProc(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 
   public
     constructor Create(const ASecret: string; const AStoragePath: string = '');
@@ -23,10 +22,15 @@ type
 
     function GenerateToken(const AUserID, ARole: string; AExpiresInHours: Integer = 24): string;
     function ValidateToken(const AToken: string): TBadgerJWTClaims;
-    function GenerateRefreshToken(const AUserID: string; AExpiresInDays: Integer = 7): string;
+    function GenerateRefreshToken(const AUserID: string; AExpiresInDays: Integer = 7): string; overload;
+    { Leva o Role no refresh token: sem ele RefreshToken emitia o novo access token
+      com Role vazio e o usuario perdia as permissoes no primeiro refresh. }
+    function GenerateRefreshToken(const AUserID, ARole: string; AExpiresInDays: Integer = 7): string; overload;
     function ValidateRefreshToken(const AToken: string): TBadgerJWTClaims;
     function RefreshToken(const ARefreshToken: string): string;
+    function MiddlewareProc(var Request: THTTPRequest; var Response: THTTPResponse): Boolean;
 
+    procedure SetProtectedRoutes(const ProtectedRoutes: array of string);
     procedure RegisterProtectedRoutes(Badger: TBadger; const ProtectedRoutes: array of string);
   end;
 
@@ -115,10 +119,8 @@ begin
     Exit;
   end;
 
-  Result :=
-    (Length(RequestURI) > Length(ProtectedRoute)) and
-    (CompareText(Copy(RequestURI, 1, Length(ProtectedRoute)), ProtectedRoute) = 0) and
-    (RequestURI[Length(ProtectedRoute) + 1] = '/');
+  { Mesmo prefixo por segmento de antes, agora com ':param' casando o segmento. }
+  Result := BadgerPathUnderPattern(RequestURI, ProtectedRoute);
 end;
 
 constructor TBadgerJWTAuth.Create(const ASecret: string; const AStoragePath: string);
@@ -150,8 +152,8 @@ begin
   try
     LClaims.UserID := AUserID;
     LClaims.Role := ARole;
-    LClaims.Iss := DateTimeToUnix(Now);
-    LClaims.Exp := DateTimeToUnix(Now + AExpiresInHours / 24);
+    LClaims.Iss := UnixNowUtc;
+    LClaims.Exp := UnixNowUtc + Int64(AExpiresInHours) * 3600;
     LPayload := LClaims.ToJSON.AsJSON;
     LPayload := CustomEncodeBase64(LPayload, True);
 
@@ -160,7 +162,7 @@ begin
     if FStoragePath <> '' then
       SaveToken(AUserID, Result, FStoragePath);
 
-    LRefreshToken := GenerateRefreshToken(AUserID);
+    LRefreshToken := GenerateRefreshToken(AUserID, ARole);
       {$IFNDEF FPC}
         {$IF CompilerVersion >= 20}  //Necess�rio pois foi usado vers�o diferente do SuperObject
             LJSONArray := SA();
@@ -187,6 +189,11 @@ begin
 end;
 
 function TBadgerJWTAuth.GenerateRefreshToken(const AUserID: string; AExpiresInDays: Integer): string;
+begin
+  Result := GenerateRefreshToken(AUserID, '', AExpiresInDays);
+end;
+
+function TBadgerJWTAuth.GenerateRefreshToken(const AUserID, ARole: string; AExpiresInDays: Integer): string;
 var
   LHeader, LPayload: string;
   LClaims: TBadgerJWTClaims;
@@ -197,8 +204,9 @@ begin
   LClaims := TBadgerJWTClaims.Create;
   try
     LClaims.UserID := AUserID;
-    LClaims.Iss := DateTimeToUnix(Now);
-    LClaims.Exp := DateTimeToUnix(Now + AExpiresInDays);
+    LClaims.Role := ARole;
+    LClaims.Iss := UnixNowUtc;
+    LClaims.Exp := UnixNowUtc + Int64(AExpiresInDays) * 86400;
     LPayload := LClaims.ToJSON.AsJSON;
     LPayload := CustomEncodeBase64(LPayload, True);
 
@@ -237,13 +245,13 @@ begin
 
     LJSON := SO(CustomDecodeBase64(LPayload));
     Result := TBadgerJWTClaims.FromJSON(LJSON);
-    if (Result.Exp > 0) and (DateTimeToUnix(Now) > Result.Exp) then
+    if (Result.Exp > 0) and (UnixNowUtc > Result.Exp) then
     begin
       Result.Free;
       raise Exception.Create('Expired token');
     end;
     FToken := Trim (LoadToken(Result.UserID, FStoragePath) );
-    if (FStoragePath <> '') and (FToken <> AToken) then
+    if (FStoragePath <> '') and not ConstantTimeEquals(FToken, AToken) then
     begin
       Result.Free;
       raise Exception.Create('Token not found');
@@ -279,13 +287,13 @@ begin
 
     LJSON := SO(CustomDecodeBase64(LPayload));
     Result := TBadgerJWTClaims.FromJSON(LJSON);
-    if (Result.Exp > 0) and (DateTimeToUnix(Now) > Result.Exp) then
+    if (Result.Exp > 0) and (UnixNowUtc > Result.Exp) then
     begin
       Result.Free;
       raise Exception.Create('Refresh token expired');
     end;
     FToken := Trim ( LoadRefreshToken(Result.UserID, FStoragePath) );
-    if (FStoragePath <> '') and ( FToken <> AToken) then
+    if (FStoragePath <> '') and not ConstantTimeEquals(FToken, AToken) then
     begin
       Result.Free;
       raise Exception.Create('Refresh token not found');
@@ -332,7 +340,7 @@ begin
   end;
 
   LToken := Trim(Request.Headers.Values['Authorization']);
-  if Pos('Bearer ', LToken) = 1 then
+  if SameText(Copy(LToken, 1, 7), 'Bearer ') then
     LToken := Copy(LToken, 8, Length(LToken));
 
   if LToken = '' then
@@ -365,15 +373,19 @@ begin
 end;
 
 
-procedure TBadgerJWTAuth.RegisterProtectedRoutes(Badger: TBadger; const ProtectedRoutes: array of string);
+procedure TBadgerJWTAuth.SetProtectedRoutes(const ProtectedRoutes: array of string);
 var
   I: Integer;
 begin
   FProtectedRoutes.Clear;
   for I := Low(ProtectedRoutes) to High(ProtectedRoutes) do
     FProtectedRoutes.Add(ProtectedRoutes[I]);
-     Badger.AddMiddleware(MiddlewareProc);
+end;
 
+procedure TBadgerJWTAuth.RegisterProtectedRoutes(Badger: TBadger; const ProtectedRoutes: array of string);
+begin
+  SetProtectedRoutes(ProtectedRoutes);
+  Badger.AddMiddleware(MiddlewareProc);
 end;
 
 end.

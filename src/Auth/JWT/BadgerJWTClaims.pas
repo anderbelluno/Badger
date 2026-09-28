@@ -35,6 +35,11 @@ begin
   Result := SO();
   Result.S['user_id'] := FUserID;
   Result.S['role'] := FRole;
+  { 'iat' e o nome registrado (IANA) para o instante de emissao; 'iss' e o emissor
+    e nunca foi um timestamp. 'iss' continua sendo escrito para nao quebrar tokens
+    ja emitidos que so sabem ler esse nome. }
+  Result.I['iat'] := FIss;
+  Result.I['nbf'] := FIss;
   Result.I['iss'] := FIss;
   Result.I['exp'] := FExp;
 end;

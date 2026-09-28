@@ -125,7 +125,7 @@ begin
       try
         FServer.Port := StrToInt(Trim(edtPort.Text));
         FServer.ParallelProcessing := True;
-        FServer.MaxConcurrentConnections := 500;
+        FServer.MaxConcurrentConnections := 5000;
         FServer.EnableEventInfo := False;
         RegisterIocpDemoRoutes(FServer);
         FServer.Start;

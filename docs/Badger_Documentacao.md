@@ -8,14 +8,16 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
 
 - Thread do servidor (`TBadger`): escolhe o motor de I/O no `Start` e expõe a API pública (rotas, middlewares, CORS, WS).
   - Windows: **IOCP** por padrão (`UseIOCP = True`). `UseIOCP := False` volta ao Synapse (`select` + thread por conexão).
-  - Linux / macOS: Synapse (epoll no Linux é o próximo motor; mesma API).
+  - Linux: **epoll** por padrão (`UseEpoll = True`). `UseEpoll := False` volta ao Synapse.
+  - macOS: Synapse (kqueue é o próximo motor; mesma API).
   - IOCP: `src/IOCP/BadgerIOCP.pas` + parser `src/BadgerHttpParser.pas`. `THTTPRequest.Socket` é `nil`; rotas usam body/headers/`FRemoteIP`.
+  - epoll: `src/Epoll/BadgerEpoll.pas` + o mesmo parser/dispatch. `THTTPRequest.Socket` é `nil`.
   - Clássico: accept loop em `TBadger.Execute` e `THTTPRequestHandler` por conexão.
   - Controles de concorrência:
-    - `ParallelProcessing`: no IOCP serializa o dispatch da rota quando `False`; no clássico cria um handler por conexão quando `True`.
+    - `ParallelProcessing`: no IOCP/epoll serializa o dispatch da rota quando `False`; no clássico cria um handler por conexão quando `True`.
     - `MaxConcurrentConnections`: limite de conexões ativas (gate no accept).
 
-- Handler de requisição (`THTTPRequestHandler`): realiza parsing do request, roteamento, execução de método/rotas, construção e envio de resposta. Usado no motor Synapse; o IOCP dispara o mesmo pipeline (rotas/MW/CORS) a partir do parser compartilhado.
+- Handler de requisição (`THTTPRequestHandler`): realiza parsing do request, roteamento, execução de método/rotas, construção e envio de resposta. Usado no motor Synapse; IOCP e epoll disparam o mesmo pipeline (rotas/MW/CORS) a partir do parser compartilhado.
   - Declaração e campos: `src/BadgerRequestHandler.pas:12–38`
   - Construtores (sequencial e paralelo): `src/BadgerRequestHandler.pas:45–66`, `src/BadgerRequestHandler.pas:68–89`
   - Destrutor com liberação de middlewares e decremento de conexão ativa: `src/BadgerRequestHandler.pas:84–115`
@@ -35,7 +37,7 @@ Badger é um microservidor HTTP multithread, leve e focado em alto desempenho, c
 
 ## Fluxo da Requisição
 
-1. `TBadger.Start` escolhe o motor (Windows/IOCP ou Synapse). No IOCP, `WSARecv` alimenta `TBadgerHttpParser`; no clássico, `Execute` aceita e cria `THTTPRequestHandler`.
+1. `TBadger.Start` escolhe o motor (Windows/IOCP, Linux/epoll ou Synapse). No IOCP/epoll, o parser compartilhado alimenta o dispatch; no clássico, `Execute` aceita e cria `THTTPRequestHandler`.
 2. Parse do HTTP (parser compartilhado no IOCP; `ParseRequestHeader` no handler clássico).
 3. Middlewares **before** (`AddMiddleware`): podem interromper com `Handled=True`
 4. Roteamento via `TRouteManager.MatchRoute` e execução do callback: `src/BadgerRouteManager.pas:179–227`
@@ -150,7 +152,7 @@ Destrua o bridge **depois** de `Server.Stop`.
 - Sequencial vs Paralelo:
   - Sequencial (`ParallelProcessing = False`): no clássico, uma thread cuida da conexão; no IOCP, o dispatch da rota é serializado (`FSerialLock`).
   - Paralelo (`ParallelProcessing = True`): clássico cria um handler por conexão; IOCP despacha a rota no worker. Ajustar `MaxConcurrentConnections` gradualmente.
-- Keep-Alive HTTP/1.1: o IOCP reutiliza o socket; no Linux (Synapse) testes de carga costumam ir melhor sem Keep-Alive no cliente.
+- Keep-Alive HTTP/1.1: IOCP (Windows) e epoll (Linux) reutilizam o socket — é o recorte que mede o pipeline (~300k rps no ping Linux). `UseEpoll := False` (Synapse) no mesmo `wrk` com KA fica ~10k rps. Sem KA (`Connection: close`) o teto cai (epoll ~56k, Synapse ~26k): cada request abre TCP novo; o Synapse até sobe vs KA porque `select` + thread por conexão sofre menos quando o socket morre na resposta.
 - Sugestões de otimização de baixo risco:
   - Cachear `PatternParts` no `TRouteEntry` ao registrar a rota.
   - No bucket de contexto, separar por `Verb` para reduzir candidatos.
@@ -172,11 +174,11 @@ Referência canônica de setup: **`sample/Lazarus/GUI/unit1.pas`** (D7 e FMX D12
 
 ### Oficial (porta 8080, API pública)
 
-No Windows usam IOCP pelo default de `TBadger`. Linux/macOS: Synapse.
+No Windows usam IOCP pelo default de `TBadger`. No Linux usam epoll. macOS: Synapse.
 
 | Sample | Caminho | Propósito |
 |--------|---------|-----------|
-| Lazarus GUI | `sample/Lazarus/GUI/` | Demo completa: rotas, auth, eventos, paralelo, checkbox IOCP |
+| Lazarus GUI | `sample/Lazarus/GUI/` | Demo completa: rotas, auth, eventos, paralelo, checkbox IOCP/epoll |
 | VCL D7 | `sample/D7/` | Mesmo conjunto de rotas/auth que Lazarus GUI |
 | FMX D12 | `sample/D12/FMX Windows/` | Mesmo conjunto de rotas/auth que Lazarus GUI |
 | WinService D12 | `sample/D12/WinService/` | Badger como serviço Windows |
@@ -191,6 +193,15 @@ Mesma API de `TBadger` (IOCP já é o default no Windows). Recorte extra: CORS, 
 | Console / GUI D12 | `sample/IOCP/D12/` |
 | Console / GUI D7 | `sample/IOCP/D7/` |
 | Console / GUI Lazarus | `sample/IOCP/Lazarus/` |
+
+### Epoll (porta 8081, Linux)
+
+Mesma API de `TBadger` (epoll já é o default no Linux). Recorte extra: CORS, after-middleware, WebSocket `/chat`. `UseEpoll := False` (D12: `EpollPing --synapse`) força Synapse.
+
+| Sample | Caminho |
+|--------|---------|
+| Console / GUI Lazarus | `sample/Epoll/Lazarus/` |
+| Console D12 Linux64 | `sample/Epoll/D12/` |
 
 ### Feature
 
@@ -214,6 +225,7 @@ Padrão comum nos demos GUI oficiais:
 ## Boas Práticas
 
 - No Windows o motor padrão é IOCP; `UseIOCP := False` força Synapse se precisar comparar ou depurar o caminho clássico.
+- No Linux o motor padrão é epoll; `UseEpoll := False` força Synapse.
 - Desabilitar `Logger` e eventos (`EnableEventInfo`/checkbox) ao medir throughput.
 - Ajustar `MaxConcurrentConnections` gradualmente conforme hardware.
 - Agrupar endpoints por contexto para máxima efetividade do bucket.
