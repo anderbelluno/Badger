@@ -62,9 +62,18 @@ type
     FCorsAllowCredentials: Boolean;
     FCorsMaxAge: Integer;
     FUseIOCP: Boolean;
+    FTrustProxyHeaders: Boolean;
+    FTrustedProxies: TStringList;
+    FWsIdleTimeout: Integer;
+    FHeaderTimeout: Integer;
+    FUseEpoll: Boolean;
     {$IFDEF BADGER_WINDOWS}
     FIocp: TObject;
     procedure StartIocpEngine;
+    {$ENDIF}
+    {$IFDEF LINUX}
+    FEpoll: TObject;
+    procedure StartEpollEngine;
     {$ENDIF}
   protected
     procedure Execute; override;
@@ -80,6 +89,11 @@ type
     procedure IocpWsAttach(Info: TClientSocketInfo);
     procedure IocpWsDetach(Info: TClientSocketInfo);
     procedure IocpWsMessage(ClientInfo: TClientSocketInfo; const URI, AMessage: string);
+    {$ENDIF}
+    {$IFDEF LINUX}
+    procedure EpollWsAttach(Info: TClientSocketInfo);
+    procedure EpollWsDetach(Info: TClientSocketInfo);
+    procedure EpollWsMessage(ClientInfo: TClientSocketInfo; const URI, AMessage: string);
     {$ENDIF}
     {$IF DEFINED(UNIX) OR DEFINED(LINUX) OR DEFINED(POSIX)}
     function WaitForThreadTermination(TimeoutMs: Integer): Boolean;
@@ -103,8 +117,10 @@ type
     property Port: Integer read FPort write FPort;
     property RouteManager: TRouteManager read FRouteManager;
     property Timeout: Integer read FTimeout write FTimeout default 5000;
-    { Windows/IOCP default True (dispatch on workers). False serializes routes.
-      Classic: True = one handler thread per connection. }
+    { Windows IOCP / Linux epoll: default True (dispatch nos workers). False serializa
+      o dispatch da rota num lock global.
+      Classico (Synapse): ignorado — o modelo e sempre uma thread por conexao, com
+      MaxConcurrentConnections aplicado no accept. }
     property ParallelProcessing: Boolean read FParallelProcessing write FParallelProcessing;
     property MaxConcurrentConnections: Integer read FMaxConcurrentConnections write FMaxConcurrentConnections default 100;
     property OnRequest: TOnRequest read FOnRequest write FOnRequest;
@@ -119,15 +135,30 @@ type
     property CorsExposeHeaders: TStringList read FCorsExposeHeaders;
     property CorsAllowCredentials: Boolean read FCorsAllowCredentials write FCorsAllowCredentials;
     property CorsMaxAge: Integer read FCorsMaxAge write FCorsMaxAge;
+    { Default False. X-Real-IP / X-Forwarded-For so sao honrados quando True —
+      antes valiam sempre, e qualquer cliente se declarava o IP que quisesse.
+      Atras de nginx: TrustProxyHeaders := True e, de preferencia, liste o proxy em
+      TrustedProxies (lista vazia = confia em qualquer peer). }
+    property TrustProxyHeaders: Boolean read FTrustProxyHeaders write FTrustProxyHeaders;
+    property TrustedProxies: TStringList read FTrustedProxies;
+    { IOCP: ociosidade maxima de WebSocket em ms; 0 = nao expira (default). }
+    property WsIdleTimeout: Integer read FWsIdleTimeout write FWsIdleTimeout;
+    { Prazo em ms para os headers de um pedido chegarem, contado do 1o byte (IOCP)
+      ou do inicio da leitura do pedido (classico). 0 desliga. Default 30000.
+      Protege contra slowloris: cada byte renovava o Timeout de ociosidade. }
+    property HeaderTimeout: Integer read FHeaderTimeout write FHeaderTimeout;
     { Windows: default True (IOCP). False forces Synapse+select.
-      Ignored on other OS (Synapse until epoll). }
+      Ignored off Windows. }
     property UseIOCP: Boolean read FUseIOCP write FUseIOCP;
+    { Linux: default True (epoll). False forces Synapse+select.
+      Ignored off Linux. }
+    property UseEpoll: Boolean read FUseEpoll write FUseEpoll;
   end;
 
 implementation
 
 uses
-  BadgerRequestHandler, BadgerWebSocket{$IFDEF BADGER_WINDOWS}, BadgerIOCP{$ENDIF};
+  BadgerRequestHandler, BadgerWebSocket{$IFDEF BADGER_WINDOWS}, BadgerIOCP{$ENDIF}{$IFDEF LINUX}, BadgerEpoll{$ENDIF};
 
 {$IF (DEFINED(LINUX) OR DEFINED(POSIX)) AND NOT DEFINED(FPC)}
 { TBadgerClientSocket }
@@ -167,6 +198,7 @@ begin
   FPort := 8080;
   FNonBlockMode := True;
   FTimeout := 5000;
+  FHeaderTimeout := 30000;
   FMaxConcurrentConnections := 100;
   FActiveConnections := 0;
   FIsShuttingDown := False;
@@ -192,13 +224,23 @@ begin
   FCorsExposeHeaders.Clear;
   FCorsAllowCredentials := False;
   FCorsMaxAge := 600;
+  FTrustProxyHeaders := False;
+  FTrustedProxies := TStringList.Create;
+  FTrustedProxies.CaseSensitive := False;
+  FUseEpoll := False;
   {$IFDEF BADGER_WINDOWS}
   FUseIOCP := True;
   FParallelProcessing := True;
   FIocp := nil;
   {$ELSE}
   FUseIOCP := False;
+  {$IFDEF LINUX}
+  FUseEpoll := True;
+  FParallelProcessing := True;
+  FEpoll := nil;
+  {$ELSE}
   FParallelProcessing := False;
+  {$ENDIF}
   {$ENDIF}
 
   Logger.Info('TBadger created');
@@ -222,7 +264,7 @@ begin
     end;
   end;
 
-  if FParallelProcessing then
+  { Sempre esperar: o classico agora conta toda conexao, nao so no modo paralelo. }
   begin
    // Logger.Info(Format('Waiting for active connections: %d', [FActiveConnections]));
     TimeoutCounter := 0;
@@ -232,7 +274,7 @@ begin
       Inc(TimeoutCounter, 100);
     end;
     if FActiveConnections > 0 then
-   //   Logger.Info(Format('Warning: %d active connections remaining', [FActiveConnections]));
+      Logger.Warning(Format('%d conexao(oes) ativa(s) ao destruir', [FActiveConnections]));
   end;
 
   try
@@ -261,6 +303,16 @@ begin
   except
     on E: Exception do
       Logger.Error(Format('Error freeing IOCP engine: %s', [E.Message]));
+  end;
+  {$ENDIF}
+
+  {$IFDEF LINUX}
+  try
+    if Assigned(FEpoll) then
+      FreeAndNil(FEpoll);
+  except
+    on E: Exception do
+      Logger.Error(Format('Error freeing epoll engine: %s', [E.Message]));
   end;
   {$ENDIF}
 
@@ -344,6 +396,7 @@ begin
     if Assigned(FCorsAllowedMethods) then FreeAndNil(FCorsAllowedMethods);
     if Assigned(FCorsAllowedHeaders) then FreeAndNil(FCorsAllowedHeaders);
     if Assigned(FCorsExposeHeaders) then FreeAndNil(FCorsExposeHeaders);
+    if Assigned(FTrustedProxies) then FreeAndNil(FTrustedProxies);
   except
     on E: Exception do
       Logger.Error(Format('Error freeing CORS lists: %s', [E.Message]));
@@ -405,7 +458,7 @@ begin
       if Assigned(SocketInfo) and (SocketInfo.Socket = Socket) then
       begin
         FClientSockets.Delete(I);
-        SocketInfo.Free;
+        SocketInfo.Release;
     //    Logger.info(Format('Removed client socket. Total: %d', [FClientSockets.Count]));
         Break;
       end;
@@ -442,7 +495,7 @@ begin
           end;
         end;
         try
-          SocketInfo.Free;
+          SocketInfo.Release;
         except
           on E: Exception do
             Logger.Error(Format('Error freeing client socket info %d: %s', [I, E.Message]));
@@ -565,30 +618,17 @@ begin
   end
 {$IFDEF BADGER_WINDOWS}
   else if Assigned(FIocp) then
-    TBadgerIOCP(FIocp).SendWsText(Info, AMessage);
+    TBadgerIOCP(FIocp).SendWsText(Info, AMessage)
 {$ENDIF}
+{$IFDEF LINUX}
+  else if Assigned(FEpoll) then
+    TBadgerEpoll(FEpoll).SendWsText(Info, AMessage)
+{$ENDIF};
 end;
 
 procedure TBadger.BroadcastWebSocketText(const AMessage: string);
-var
-  I: Integer;
-  SocketInfo: TClientSocketInfo;
 begin
-  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) then Exit;
-
-  FClientSocketsLock.Acquire;
-  try
-    for I := 0 to FClientSockets.Count - 1 do
-    begin
-      SocketInfo := TClientSocketInfo(FClientSockets[I]);
-      try
-        DeliverWebSocketText(SocketInfo, AMessage);
-      except
-      end;
-    end;
-  finally
-    FClientSocketsLock.Release;
-  end;
+  SendToWebSocketRoute('*', AMessage);
 end;
 
 procedure TBadger.SetClientSocketURI(Socket: TTCPBlockSocket; const AURI: string);
@@ -627,6 +667,8 @@ begin
       if TClientSocketInfo(FClientSockets[I]).Socket = Socket then
       begin
         Result := TClientSocketInfo(FClientSockets[I]);
+        { Referencia para o chamador; quem recebe chama Release. }
+        Result.AddRef;
         Break;
       end;
   finally
@@ -638,25 +680,44 @@ procedure TBadger.SendToWebSocketRoute(const AURI, AMessage: string);
 var
   I: Integer;
   SocketInfo: TClientSocketInfo;
+  Snapshot: TList;
 begin
   if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) then Exit;
 
-  FClientSocketsLock.Acquire;
+  { Antes o envio corria com FClientSocketsLock preso: um cliente lento bloqueava o
+    broadcast inteiro e ate o accept de novas conexoes. Agora o lock so protege o
+    snapshot; o I/O sai fora dele, com referencia garantida em cada item. }
+  Snapshot := TList.Create;
   try
-    for I := 0 to FClientSockets.Count - 1 do
-    begin
-      SocketInfo := TClientSocketInfo(FClientSockets[I]);
-      if Assigned(SocketInfo) and
-         (SameText(SocketInfo.URI, AURI) or (AURI = '*')) then
+    FClientSocketsLock.Acquire;
+    try
+      for I := 0 to FClientSockets.Count - 1 do
       begin
-        try
-          DeliverWebSocketText(SocketInfo, AMessage);
-        except
+        SocketInfo := TClientSocketInfo(FClientSockets[I]);
+        if Assigned(SocketInfo) and
+           (SameText(SocketInfo.URI, AURI) or (AURI = '*')) then
+        begin
+          SocketInfo.AddRef;
+          Snapshot.Add(SocketInfo);
         end;
       end;
+    finally
+      FClientSocketsLock.Release;
+    end;
+
+    for I := 0 to Snapshot.Count - 1 do
+    begin
+      SocketInfo := TClientSocketInfo(Snapshot[I]);
+      try
+        DeliverWebSocketText(SocketInfo, AMessage);
+      except
+        on E: Exception do
+          Logger.Error('BroadcastWebSocketText: ' + E.Message);
+      end;
+      SocketInfo.Release;
     end;
   finally
-    FClientSocketsLock.Release;
+    Snapshot.Free;
   end;
 end;
 
@@ -665,6 +726,9 @@ begin
   if not Assigned(FMiddlewareLock) then
     Exit;
 
+  if FIsRunning then
+    raise Exception.Create('TBadger: AddMiddleware com o servidor no ar. ' +
+      'Registre os middlewares antes de Start.');
   FMiddlewareLock.Acquire;
   try
     if not FIsShuttingDown and Assigned(FMiddlewares) then
@@ -679,6 +743,9 @@ begin
   if not Assigned(FMiddlewareLock) then
     Exit;
 
+  if FIsRunning then
+    raise Exception.Create('TBadger: AddAfterMiddleware com o servidor no ar. ' +
+      'Registre os middlewares antes de Start.');
   FMiddlewareLock.Acquire;
   try
     if not FIsShuttingDown and Assigned(FAfterMiddlewares) then
@@ -718,7 +785,7 @@ begin
       FClientSocketsLock.Release;
     end;
   end;
-  Info.Free;
+  Info.Release;
 end;
 
 procedure TBadger.IocpWsMessage(ClientInfo: TClientSocketInfo; const URI, AMessage: string);
@@ -749,6 +816,77 @@ begin
   Eng.CorsEnabled := FCorsEnabled;
   Eng.CorsAllowCredentials := FCorsAllowCredentials;
   Eng.CorsMaxAge := FCorsMaxAge;
+  Eng.TrustProxyHeaders := FTrustProxyHeaders;
+  Eng.TrustedProxies := FTrustedProxies;
+  Eng.WsIdleTimeout := FWsIdleTimeout;
+  Eng.HeaderTimeout := FHeaderTimeout;
+  Eng.Start;
+end;
+{$ENDIF}
+
+{$IFDEF LINUX}
+procedure TBadger.EpollWsAttach(Info: TClientSocketInfo);
+begin
+  if not Assigned(FClientSockets) or not Assigned(FClientSocketsLock) or not Assigned(Info) then
+    Exit;
+  FClientSocketsLock.Acquire;
+  try
+    FClientSockets.Add(Info);
+  finally
+    FClientSocketsLock.Release;
+  end;
+end;
+
+procedure TBadger.EpollWsDetach(Info: TClientSocketInfo);
+var
+  I: Integer;
+begin
+  if not Assigned(Info) then
+    Exit;
+  if Assigned(FClientSockets) and Assigned(FClientSocketsLock) then
+  begin
+    FClientSocketsLock.Acquire;
+    try
+      I := FClientSockets.IndexOf(Info);
+      if I >= 0 then
+        FClientSockets.Delete(I);
+    finally
+      FClientSocketsLock.Release;
+    end;
+  end;
+  Info.Release;
+end;
+
+procedure TBadger.EpollWsMessage(ClientInfo: TClientSocketInfo; const URI, AMessage: string);
+begin
+  if Assigned(FOnWebSocketMessage) then
+    FOnWebSocketMessage(ClientInfo, URI, AMessage);
+end;
+
+procedure TBadger.StartEpollEngine;
+var
+  Eng: TBadgerEpoll;
+begin
+  if not Assigned(FEpoll) then
+    FEpoll := TBadgerEpoll.Create;
+  Eng := TBadgerEpoll(FEpoll);
+  Eng.AdoptPipeline(FRouteManager, FMiddlewares, FAfterMiddlewares, FMiddlewareLock,
+    FCorsAllowedOrigins, FCorsAllowedMethods, FCorsAllowedHeaders, FCorsExposeHeaders);
+  Eng.Port := FPort;
+  Eng.Timeout := FTimeout;
+  Eng.MaxConcurrentConnections := FMaxConcurrentConnections;
+  Eng.ParallelProcessing := FParallelProcessing;
+  Eng.OnRequest := FOnRequest;
+  Eng.OnResponse := FOnResponse;
+  Eng.OnWebSocketMessage := EpollWsMessage;
+  Eng.OnWsAttach := EpollWsAttach;
+  Eng.OnWsDetach := EpollWsDetach;
+  Eng.EnableEventInfo := FEnableEventInfo;
+  Eng.CorsEnabled := FCorsEnabled;
+  Eng.CorsAllowCredentials := FCorsAllowCredentials;
+  Eng.CorsMaxAge := FCorsMaxAge;
+  Eng.TrustProxyHeaders := FTrustProxyHeaders;
+  Eng.TrustedProxies := FTrustedProxies;
   Eng.Start;
 end;
 {$ENDIF}
@@ -757,7 +895,10 @@ procedure TBadger.Start;
 begin
   if FIsShuttingDown then
   begin
-//    Logger.Info('Cannot start: server is shutting down');
+    { TBadger e um TThread: depois de Stop nao reinicia. Antes saia calado e o
+      chamador achava que o servidor tinha subido. }
+    Logger.Warning('TBadger.Start ignored: instance already stopped. ' +
+      'Create a new TBadger to start again.');
     Exit;
   end;
 
@@ -772,11 +913,30 @@ begin
     Exit;
   end;
 
-  { Windows: IOCP when UseIOCP. Other OS: Synapse (epoll next on Linux). }
+  { A partir daqui workers percorrem a tabela de rotas: registrar mais nada. }
+  if Assigned(FRouteManager) then
+    FRouteManager.Seal;
+
+  { Windows: IOCP when UseIOCP. Linux: epoll when UseEpoll. Else Synapse. }
   {$IFDEF BADGER_WINDOWS}
   if FUseIOCP then
   begin
     StartIocpEngine;
+    FIsRunning := True;
+    FShutdownEvent.ResetEvent;
+    {$IF DEFINED(FPC) OR DEFINED(DelphiXEPlus)}
+    inherited Start;
+    {$ELSE}
+    Resume;
+    {$IFEND}
+    Exit;
+  end;
+  {$ENDIF}
+  {$IFDEF LINUX}
+  if FUseEpoll then
+  begin
+    StartEpollEngine;
+    FIsRunning := True;
     FShutdownEvent.ResetEvent;
     {$IF DEFINED(FPC) OR DEFINED(DelphiXEPlus)}
     inherited Start;
@@ -805,22 +965,19 @@ begin
       FServerSocket.Bind('0.0.0.0', IntToStr(FPort));
       if FServerSocket.LastError = 0 then
       begin
-//        Logger.Info('TBadger.Start: Starting listen');
         FServerSocket.Listen;
-//        Logger.Info(Format('Server started on port %d', [FPort]));
       end
       else
       begin
- //       Logger.Info(Format('Failed to bind port %d: %s', [FPort, FServerSocket.LastErrorDesc]));
         FServerSocket.CloseSocket;
-        Exit;
+        raise Exception.Create('Failed to bind port ' + IntToStr(FPort) + ': ' +
+          FServerSocket.LastErrorDesc);
       end;
     except
       on E: Exception do
       begin
- //       Logger.Info(Format('Error configuring FServerSocket: %s', [E.Message]));
         FServerSocket.CloseSocket;
-        Exit;
+        raise;
       end;
     end;
   finally
@@ -828,6 +985,10 @@ begin
 //    Logger.Info('TBadger.Start: Releasing socket lock');
   end;
 
+  { Antes so era setado dentro de Execute: entre Start retornar e a thread ser
+    escalonada, IsRunning ficava False e o guard de AddMiddleware/Seal nao pegava.
+    IOCP e epoll ja setavam aqui; o classico ficava fora. }
+  FIsRunning := True;
   FShutdownEvent.ResetEvent;
 
   {$IF DEFINED(FPC) OR DEFINED(DelphiXEPlus)}
@@ -859,6 +1020,13 @@ begin
     FIsRunning := False;
   end;
   {$ENDIF}
+  {$IFDEF LINUX}
+  if Assigned(FEpoll) then
+  begin
+    TBadgerEpoll(FEpoll).Stop;
+    FIsRunning := False;
+  end;
+  {$ENDIF}
 
   if Terminated or Suspended then
   begin
@@ -877,7 +1045,6 @@ begin
   SafeCloseSocket;
   CloseClientSocketsForShutdown;
 
-  if FParallelProcessing then
   begin
  //   Logger.Info(Format('Waiting for active connections to close. Current count: %d', [FActiveConnections]));
     TimeoutCounter := 0;
@@ -887,7 +1054,7 @@ begin
       Inc(TimeoutCounter, 100);
     end;
     if FActiveConnections > 0 then
- //     Logger.Info(Format('Warning: Timeout waiting for %d active connections to close', [FActiveConnections]));
+      Logger.Warning(Format('timeout aguardando %d conexao(oes) fechar', [FActiveConnections]));
   end;
 
   Terminate;
@@ -926,6 +1093,7 @@ end;
 procedure TBadger.Execute;
 var
   ClientSocket: TTCPBlockSocket;
+  HandlerSocket: TTCPBlockSocket;
   ResponseInfo: TResponseInfo;
   Accepted: Boolean;
 begin
@@ -944,13 +1112,29 @@ begin
       Exit;
     end;
     {$ENDIF}
+    {$IFDEF LINUX}
+    if FUseEpoll then
+    begin
+      while not Terminated and not FIsShuttingDown do
+      begin
+        if Assigned(FShutdownEvent) then
+          FShutdownEvent.WaitFor(200)
+        else
+          Sleep(200);
+      end;
+      Exit;
+    end;
+    {$ENDIF}
 
     while not Terminated and not FIsShuttingDown do
     begin
       try
         if not Assigned(FSocketLock) or not Assigned(FServerSocket) then Break;
 
-        if FParallelProcessing and not CanAcceptNewConnection then
+        { O gate valia so quando FParallelProcessing: no outro modo
+          MaxConcurrentConnections nao era aplicado e a carga virava explosao de
+          threads. Os dois modos criam thread por conexao, entao o gate vale sempre. }
+        if not CanAcceptNewConnection then
         begin
           // n�o segura lock global enquanto aguarda capacidade
           Sleep(10);
@@ -984,20 +1168,20 @@ begin
           begin
             AddClientSocket(ClientSocket);
 
-            if FParallelProcessing then
-            begin
-              IncActiveConnections;
-              THTTPRequestHandler.CreateParallel(ClientSocket, FRouteManager, FMethods, FMiddlewares, FAfterMiddlewares,
-                                                FMiddlewareLock, FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
-              ClientSocket := nil;
-            end
-            else
-            begin
-              THTTPRequestHandler.Create(ClientSocket, FRouteManager, FMethods, FMiddlewares, FAfterMiddlewares,
-                                         FMiddlewareLock, FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
-              RemoveClientSocket(ClientSocket);
-              ClientSocket := nil;
-            end;
+            { Create e CreateParallel eram identicos exceto por um flag: os dois
+              iniciam thread. O ramo antigo de ParallelProcessing=False nao contava a
+              conexao nem a mantinha rastreada, entao o limite nao era aplicado e
+              BroadcastWebSocketText / CloseClientSocketsForShutdown nao a enxergavam.
+              No motor classico o modelo e sempre thread por conexao. }
+            IncActiveConnections;
+            { O handler vira dono do socket ja no construtor: se CreateParallel
+              levantar (CreateThread falha sob carga), o destrutor dele fecha,
+              libera e desconta. Zerar so depois fazia o finally abaixo liberar o
+              mesmo socket de novo (double free). }
+            HandlerSocket := ClientSocket;
+            ClientSocket := nil;
+            THTTPRequestHandler.CreateParallel(HandlerSocket, FRouteManager, FMethods, FMiddlewares, FAfterMiddlewares,
+                                              FMiddlewareLock, FTimeout, FOnRequest, FOnResponse, Self, FEnableEventInfo);
           end
           else
           begin
@@ -1009,7 +1193,12 @@ begin
                 ResponseInfo.StatusCode := 500;
                 ResponseInfo.StatusText := 'Internal Server Error';
                 ResponseInfo.Body := 'Error accepting connection: ' + ClientSocket.LastErrorDesc;
-                FOnResponse(ResponseInfo);
+                try
+                  FOnResponse(ResponseInfo);
+                except
+                  on E: Exception do
+                    Logger.Error('OnResponse exception: ' + E.Message);
+                end;
               finally
                 ResponseInfo.Headers.Free;
               end;
@@ -1034,8 +1223,15 @@ begin
       except
         on E: Exception do
         begin
-          // OutputDebugString(PChar(Format('TBadger.Execute: Unexpected exception: %s', [E.Message])));
-          Break;
+          { Antes: Break sem log. Uma falha transitoria de Accept encerrava o laco
+            para sempre e o servidor parava de aceitar sem avisar ninguem. Agora so
+            sai quando o socket de escuta morreu de fato. }
+          Logger.Error('TBadger.Execute: ' + E.Message);
+          if (not Assigned(FServerSocket)) or (FServerSocket.Socket = INVALID_SOCKET) then
+            Break;
+          if Terminated or FIsShuttingDown then
+            Break;
+          Sleep(10);
         end;
       end;
     end;

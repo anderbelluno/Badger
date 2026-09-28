@@ -6,14 +6,22 @@ uses
   Classes, SysUtils, Contnrs, blcksock, SyncObjs;
 
 type
+  { Contagem de referencias: GetClientSocketInfo devolvia o ponteiro depois de soltar
+    o lock da lista, e outra thread podia libera-lo no intervalo. Quem obtem uma
+    referencia chama Release ao terminar; o objeto sai quando a contagem zera. }
   TClientSocketInfo = class
-    Socket: TTCPBlockSocket; { nil on IOCP }
-    Ctx: Pointer;            { PIocpCtx on IOCP; nil on classic }
+  private
+    FRefs: Integer;
+  public
+    Socket: TTCPBlockSocket; { nil on IOCP/epoll }
+    Ctx: Pointer;            { PIocpCtx on IOCP; TEpollCtx on epoll; nil on classic }
     InUse: Boolean;
     URI: string;
     IOLock: TCriticalSection;
     constructor Create;
     destructor Destroy; override;
+    procedure AddRef;
+    procedure Release;
   end;
 
   THTTPRequest = record
@@ -98,6 +106,34 @@ begin
   Socket := nil;
   Ctx := nil;
   IOLock := TCriticalSection.Create;
+  FRefs := 1;
+end;
+
+{ A contagem e protegida pelo proprio IOLock em vez de intrinseco atomico: evita
+  divergencia entre D7, D12 e FPC sem custo relevante neste caminho. }
+procedure TClientSocketInfo.AddRef;
+begin
+  IOLock.Acquire;
+  try
+    Inc(FRefs);
+  finally
+    IOLock.Release;
+  end;
+end;
+
+procedure TClientSocketInfo.Release;
+var
+  Dead: Boolean;
+begin
+  IOLock.Acquire;
+  try
+    Dec(FRefs);
+    Dead := FRefs <= 0;
+  finally
+    IOLock.Release;
+  end;
+  if Dead then
+    Free;
 end;
 
 destructor TClientSocketInfo.Destroy;

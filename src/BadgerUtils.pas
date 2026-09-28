@@ -29,12 +29,23 @@ type
     function GetFileMIMEType(const AFileName: string): string;
   end;
 
+{ Texto: converte para UTF-8 antes de codificar / interpreta como UTF-8 ao decodificar. }
 function CustomEncodeBase64(const Input: string; URLSafe: Boolean): string;
 function CustomDecodeBase64(const Input: string): string;
+{ Bytes crus, sem interpretacao de codepage. Use para binario (assinatura HMAC). }
+function Base64EncodeBytes(const Raw: AnsiString; URLSafe: Boolean): string;
+function Base64DecodeToBytes(const Input: string): AnsiString;
+function Utf8Bytes(const S: string): AnsiString;
 function BytesToRawString(const ABytes: TBytes): string;
 function RawStringToBytes(const S: string): TBytes;
 
+var
+ BadgerMime : TBadgerUtils;
+
 implementation
+
+uses
+  BadgerHttpParser;
 
 const
   Base64Alphabet: array [0 .. 63] of Char = (
@@ -562,58 +573,41 @@ begin
     Result := 'application/octet-stream';
 end;
 
-function CustomEncodeBase64(const Input: string; URLSafe: Boolean): string;
+function Base64EncodeBytes(const Raw: AnsiString; URLSafe: Boolean): string;
 var
-  Bytes: TBytes;
-  i, Len, Pos: Integer;
-  OutLen: Integer;
-  Buffer: array [0 .. 3] of Char;
-  RemainingBytes: Integer;
-  TempIndex: Integer;
+  i, Len, P, OutLen, Remaining, TempIndex: Integer;
+  B: array [0 .. 2] of Byte;
 begin
-  SetLength(Bytes, Length(Input));
-  for i := 1 to Length(Input) do
-    Bytes[i - 1] := Byte(AnsiChar(Input[i]));
-
-  Len := Length(Bytes);
+  Len := Length(Raw);
   OutLen := ((Len + 2) div 3) * 4;
   SetLength(Result, OutLen);
-  Pos := 1;
-  i := 0;
-
-  while i < Len do
+  P := 1;
+  i := 1;
+  while i <= Len do
   begin
-    RemainingBytes := Len - i;
+    Remaining := Len - i + 1;
+    B[0] := Byte(Raw[i]);
+    if Remaining > 1 then B[1] := Byte(Raw[i + 1]) else B[1] := 0;
+    if Remaining > 2 then B[2] := Byte(Raw[i + 2]) else B[2] := 0;
 
-    Buffer[0] := Base64Alphabet[(Bytes[i] shr 2) and 63];
-
-    if RemainingBytes > 1 then
-      Buffer[1] := Base64Alphabet[((Bytes[i] shl 4) or ((Bytes[i + 1] shr 4) and 15)) and 63]
-    else
-      Buffer[1] := Base64Alphabet[(Bytes[i] shl 4) and 63];
-
-    if RemainingBytes > 1 then
+    Result[P] := Base64Alphabet[(B[0] shr 2) and 63];
+    Result[P + 1] := Base64Alphabet[((B[0] shl 4) or ((B[1] shr 4) and 15)) and 63];
+    if Remaining > 1 then
     begin
-      TempIndex := (Bytes[i + 1] shl 2) and 63;
-      if RemainingBytes > 2 then
-        TempIndex := TempIndex or ((Bytes[i + 2] shr 6) and 3);
-      Buffer[2] := Base64Alphabet[TempIndex and 63];
+      TempIndex := (B[1] shl 2) and 63;
+      if Remaining > 2 then
+        TempIndex := TempIndex or ((B[2] shr 6) and 3);
+      Result[P + 2] := Base64Alphabet[TempIndex and 63];
     end
     else
-      Buffer[2] := '=';
-
-    if RemainingBytes > 2 then
-      Buffer[3] := Base64Alphabet[Bytes[i + 2] and 63]
+      Result[P + 2] := '=';
+    if Remaining > 2 then
+      Result[P + 3] := Base64Alphabet[B[2] and 63]
     else
-      Buffer[3] := '=';
-
-    Result[Pos] := Buffer[0];
-    Result[Pos + 1] := Buffer[1];
-    Result[Pos + 2] := Buffer[2];
-    Result[Pos + 3] := Buffer[3];
+      Result[P + 3] := '=';
 
     Inc(i, 3);
-    Inc(Pos, 4);
+    Inc(P, 4);
   end;
 
   if URLSafe then
@@ -624,102 +618,125 @@ begin
   end;
 end;
 
-function CustomDecodeBase64(const Input: string): string;
+function Base64DecodeToBytes(const Input: string): AnsiString;
 var
-  Bytes: TBytes;
-  i, Len, Pos: Integer;
+  { 256 entradas. Era array[Char]: 64 KiB de pilha por chamada em Delphi Unicode,
+    preenchidos a cada validacao de JWT ou Basic Auth. }
+  Tab: array [0 .. 255] of Byte;
+  I, Len, P: Integer;
   InBuf: array [0 .. 3] of Byte;
-  OutBuf: array [0 .. 2] of Byte;
-  Base64Table: array [Char] of Byte;
-  CleanInput: string;
+  Clean: string;
   Pad2, Pad3: Boolean;
-begin
-  Result := '';
-  FillChar(Base64Table, SizeOf(Base64Table), 255);
-  for i := 0 to 63 do
-    Base64Table[Base64Alphabet[i]] := i;
-  Base64Table['-'] := Base64Table['+'];
-  Base64Table['_'] := Base64Table['/'];
 
-  CleanInput := StringReplace(Input, '-', '+', [rfReplaceAll]);
-  CleanInput := StringReplace(CleanInput, '_', '/', [rfReplaceAll]);
-
-  if CleanInput = '' then
-    Exit;
-
-  case Length(CleanInput) mod 4 of
-    2:
-      CleanInput := CleanInput + '==';
-    3:
-      CleanInput := CleanInput + '=';
-    1:
-      Exit;
+  function DecVal(Ch: Char): Byte;
+  begin
+    if Ord(Ch) > 255 then
+      Result := 255
+    else
+      Result := Tab[Ord(Ch)];
   end;
 
-  Len := Length(CleanInput);
+begin
+  Result := '';
+  FillChar(Tab, SizeOf(Tab), 255);
+  for I := 0 to 63 do
+    Tab[Ord(Base64Alphabet[I])] := I;
+  { base64url aceito na propria tabela, sem StringReplace. }
+  Tab[Ord('-')] := Tab[Ord('+')];
+  Tab[Ord('_')] := Tab[Ord('/')];
+
+  Clean := Input;
+  if Clean = '' then
+    Exit;
+
+  case Length(Clean) mod 4 of
+    2: Clean := Clean + '==';
+    3: Clean := Clean + '=';
+    1: Exit;
+  end;
+
+  Len := Length(Clean);
   if Len < 4 then
     Exit;
 
-  SetLength(Bytes, (Len * 3) div 4);
-  Pos := 0;
-
-  i := 1;
-  while i <= Len do
+  SetLength(Result, (Len div 4) * 3);
+  P := 0;
+  I := 1;
+  while I <= Len do
   begin
-    // '=' is only valid in positions 3/4 of the last quartet.
-    if (CleanInput[i] = '=') or (CleanInput[i + 1] = '=') then
+    // '=' e valido apenas nas posicoes 3/4 do ultimo quarteto.
+    if (Clean[I] = '=') or (Clean[I + 1] = '=') then
+    begin
+      Result := '';
       Exit;
+    end;
 
-    Pad2 := (CleanInput[i + 2] = '=');
-    Pad3 := (CleanInput[i + 3] = '=');
+    Pad2 := Clean[I + 2] = '=';
+    Pad3 := Clean[I + 3] = '=';
     if Pad2 and (not Pad3) then
+    begin
+      Result := '';
       Exit;
-    if (Pad2 or Pad3) and (i + 3 <> Len) then
+    end;
+    if (Pad2 or Pad3) and (I + 3 <> Len) then
+    begin
+      Result := '';
       Exit;
+    end;
 
-    InBuf[0] := Base64Table[CleanInput[i]];
-    InBuf[1] := Base64Table[CleanInput[i + 1]];
-    if Pad2 then
-      InBuf[2] := 0
-    else
-      InBuf[2] := Base64Table[CleanInput[i + 2]];
-    if Pad3 then
-      InBuf[3] := 0
-    else
-      InBuf[3] := Base64Table[CleanInput[i + 3]];
+    InBuf[0] := DecVal(Clean[I]);
+    InBuf[1] := DecVal(Clean[I + 1]);
+    if Pad2 then InBuf[2] := 0 else InBuf[2] := DecVal(Clean[I + 2]);
+    if Pad3 then InBuf[3] := 0 else InBuf[3] := DecVal(Clean[I + 3]);
 
     if (InBuf[0] = 255) or (InBuf[1] = 255) then
+    begin
+      Result := '';
       Exit;
+    end;
     if (not Pad2) and (InBuf[2] = 255) then
+    begin
+      Result := '';
       Exit;
+    end;
     if (not Pad3) and (InBuf[3] = 255) then
+    begin
+      Result := '';
       Exit;
+    end;
 
-    OutBuf[0] := (InBuf[0] shl 2) or ((InBuf[1] shr 4) and 3);
-    OutBuf[1] := ((InBuf[1] shl 4) and $F0) or ((InBuf[2] shr 2) and $0F);
-    OutBuf[2] := ((InBuf[2] shl 6) and $C0) or (InBuf[3] and $3F);
-
-    Bytes[Pos] := OutBuf[0];
-    Inc(Pos);
+    Inc(P);
+    Result[P] := AnsiChar((InBuf[0] shl 2) or ((InBuf[1] shr 4) and 3));
     if not Pad2 then
     begin
-      Bytes[Pos] := OutBuf[1];
-      Inc(Pos);
+      Inc(P);
+      Result[P] := AnsiChar(((InBuf[1] shl 4) and $F0) or ((InBuf[2] shr 2) and $0F));
     end;
     if not Pad3 then
     begin
-      Bytes[Pos] := OutBuf[2];
-      Inc(Pos);
+      Inc(P);
+      Result[P] := AnsiChar(((InBuf[2] shl 6) and $C0) or (InBuf[3] and $3F));
     end;
 
-    Inc(i, 4);
+    Inc(I, 4);
   end;
 
-  SetLength(Bytes, Pos);
+  SetLength(Result, P);
+end;
 
-  SetLength(Result, Pos);
-  for i := 0 to Pos - 1 do
-    Result[i + 1] := Chr(Bytes[i]);
+function Utf8Bytes(const S: string): AnsiString;
+begin
+  Result := StringToUtf8Bytes(S);
+end;
+
+function CustomEncodeBase64(const Input: string; URLSafe: Boolean): string;
+begin
+  Result := Base64EncodeBytes(StringToUtf8Bytes(Input), URLSafe);
+end;
+
+function CustomDecodeBase64(const Input: string): string;
+begin
+  Result := Utf8BytesToString(Base64DecodeToBytes(Input));
 end;
 
 function BytesToRawString(const ABytes: TBytes): string;
@@ -742,5 +759,10 @@ begin
     Move(S[1], Result[0], Len * SizeOf(Char));
 end;
 
+initialization
+  BadgerMime := TBadgerUtils.Create;
+
+finalization
+  BadgerMime.Free;
 
 end.

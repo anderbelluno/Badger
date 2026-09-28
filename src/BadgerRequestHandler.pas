@@ -28,6 +28,10 @@ type
     FIsParallel: Boolean;
     FEnableEventInfo: Boolean;
     FSocketNotified: Boolean;
+    { Prazo de headers do pedido corrente (ver RecvLineLimited). }
+    FReqStart: LongWord;
+    FHeaderTimeout: Integer;
+    function HeaderExpired: Boolean;
     procedure RunAfterMiddlewares(var Req: THTTPRequest; var Resp: THTTPResponse);
   protected
     procedure ParseRequestHeader(ClientSocket: TTCPBlockSocket; aHeaders: TStringList);
@@ -48,8 +52,76 @@ implementation
 
 type
   EHeaderTooLarge = class(Exception);
+  EHeaderTimeout = class(Exception);
+
+const
+  MaxLineSize = 16384; // request line, header e linha de chunk
+
+{ RecvString com teto. MaxLineLength do Synapse nao serve: compara o buffer
+  inteiro (linha + corpo/pipeline ja recebidos) antes de procurar o CRLF, e
+  rejeitaria POSTs legitimos. Aqui so cresce o buffer enquanto nao ha CRLF; achado
+  o CRLF, o proprio RecvString extrai a linha (mesma semantica de antes). Sem isto
+  uma linha sem CRLF crescia em memoria ate o timeout. }
+function RecvLineLimited(Sock: TTCPBlockSocket; Timeout, MaxLen: Integer;
+  out TooLong: Boolean; var ReqStart: LongWord; DeadlineMs: Integer): string; overload;
+var
+  Buf: AnsiString;
+
+  { Prazo de headers (slowloris): conta do 1o byte do pedido (ReqStart = 0 ate
+    la), entao keep-alive ocioso nao e afetado. Checado a cada pacote E ao fim da
+    linha: linhas inteiras pingadas a cada poucos segundos nunca entram no laco. }
+  function Expired: Boolean;
+  begin
+    Result := False;
+    if (DeadlineMs <= 0) or (Sock.LineBuffer = '') then
+      Exit;
+    if ReqStart = 0 then
+      ReqStart := GetTick
+    else
+      Result := TickDelta(ReqStart, GetTick) >= LongWord(DeadlineMs);
+  end;
+
+begin
+  Result := '';
+  TooLong := False;
+  while Pos(AnsiString(#13#10), Sock.LineBuffer) = 0 do
+  begin
+    if (Length(Sock.LineBuffer) > MaxLen) or Expired then
+    begin
+      TooLong := True;
+      Exit;
+    end;
+    Buf := Sock.LineBuffer;
+    Sock.LineBuffer := '';
+    Buf := Buf + Sock.RecvPacket(Timeout);
+    Sock.LineBuffer := Buf;
+    if Sock.LastError <> 0 then
+      Exit;
+  end;
+  if Expired then
+  begin
+    TooLong := True;
+    Exit;
+  end;
+  Result := Sock.RecvString(Timeout);
+end;
+
+function RecvLineLimited(Sock: TTCPBlockSocket; Timeout, MaxLen: Integer;
+  out TooLong: Boolean): string; overload;
+var
+  NoStart: LongWord;
+begin
+  NoStart := 0;
+  Result := RecvLineLimited(Sock, Timeout, MaxLen, TooLong, NoStart, 0);
+end;
 
 { THTTPRequestHandler }
+
+function THTTPRequestHandler.HeaderExpired: Boolean;
+begin
+  Result := (FHeaderTimeout > 0) and (FReqStart <> 0) and
+    (TickDelta(FReqStart, GetTick) >= LongWord(FHeaderTimeout));
+end;
 
 constructor THTTPRequestHandler.Create(AClientSocket: TTCPBlockSocket; ARouteManager: TRouteManager;
   AMethods: TBadgerMethods; AMiddlewares, AAfterMiddlewares: TList; AMiddlewareLock: TCriticalSection; ATimeout: Integer;
@@ -223,10 +295,16 @@ var
   SeparatorPos: Integer;
   Key, Value: string;
   TotalHeaderSize: Integer;
+  TooLong: Boolean;
 begin
   TotalHeaderSize := 0;
   repeat
-    HeaderLine := ClientSocket.RecvString(FTimeout);
+    HeaderLine := RecvLineLimited(ClientSocket, FTimeout, MaxHeaderLineSize, TooLong,
+      FReqStart, FHeaderTimeout);
+    if TooLong and HeaderExpired then
+      raise EHeaderTimeout.Create('Request headers timeout');
+    if TooLong then
+      raise EHeaderTooLarge.Create('Header line too large');
     if ClientSocket.LastError <> 0 then
       raise Exception.Create('Failed to read header line');
 
@@ -249,6 +327,10 @@ begin
       begin
         Key := Trim(Copy(HeaderLine, 1, SeparatorPos - 1));
         Value := Trim(Copy(HeaderLine, SeparatorPos + 1, Length(HeaderLine)));
+        { Mesma regra do parser IOCP (BadgerIsHeaderName): nome com '=' virava
+          outro header na TStringList. Cai no 400 'Invalid request headers'. }
+        if not BadgerIsHeaderName(Key) then
+          raise Exception.Create('Invalid header name');
         aHeaders.Add(Key + '=' + Value);
       end
       else
@@ -266,6 +348,7 @@ var
   MaskKey: array[0..3] of Byte;
   I: Integer;
   DecodedStr: AnsiString;
+  WsInfo: TClientSocketInfo;
 begin
   ClientSocket.SendString(string(BadgerWsHandshakeMessage(WSKey)));
 
@@ -323,9 +406,18 @@ begin
 
       if (FrameOpcode = WS_OP_TEXT) and
          Assigned(FParentServer) and Assigned(FParentServer.OnWebSocketMessage) then
-        FParentServer.OnWebSocketMessage(
-          FParentServer.GetClientSocketInfo(ClientSocket), URI,
-          BadgerWsUtf8ToString(Pointer(DecodedStr), Length(DecodedStr)));
+      begin
+        { GetClientSocketInfo devolve com referencia tomada; soltar apos o callback,
+          senao o objeto vaza (ou e liberado no meio do uso, como antes). }
+        WsInfo := FParentServer.GetClientSocketInfo(ClientSocket);
+        try
+          FParentServer.OnWebSocketMessage(WsInfo, URI,
+            BadgerWsUtf8ToString(Pointer(DecodedStr), Length(DecodedStr)));
+        finally
+          if Assigned(WsInfo) then
+            WsInfo.Release;
+        end;
+      end;
     end;
 
   until Terminated;
@@ -337,8 +429,10 @@ function THTTPRequestHandler.BuildHTTPResponse(StatusCode: Integer;
   Body: string; Stream: TStream; ContentType: string;
   CloseConnection: Boolean; HeaderCustom: TStringList): string;
 begin
+  { '' = o builder gera o Date em GMT (RFC 9110 5.6.7). Rfc822DateTime(Now) do
+    Synapse saia em hora local ('-0300'), divergindo do motor IOCP. }
   Result := BadgerBuildHTTPResponse(StatusCode, Body, Stream, ContentType,
-    CloseConnection, HeaderCustom, Rfc822DateTime(Now));
+    CloseConnection, HeaderCustom, '');
 end;
 
 procedure THTTPRequestHandler.Execute;
@@ -366,6 +460,7 @@ procedure THTTPRequestHandler.Execute;
   var
     ChunkLine, ChunkSizeHex: string;
     ChunkSize, NeedRead, Got, P: Integer;
+    LineTooLong: Boolean;
 {$IFDEF Delphi2009Plus}
     LocalBytes: TBytes;
 {$ELSE}
@@ -377,8 +472,8 @@ procedure THTTPRequestHandler.Execute;
 
     while True do
     begin
-      ChunkLine := Trim(FClientSocket.RecvString(FTimeout));
-      if FClientSocket.LastError <> 0 then
+      ChunkLine := Trim(RecvLineLimited(FClientSocket, FTimeout, MaxLineSize, LineTooLong));
+      if LineTooLong or (FClientSocket.LastError <> 0) then
         Exit;
 
       if ChunkLine = '' then
@@ -403,15 +498,17 @@ procedure THTTPRequestHandler.Execute;
       begin
         // L� trailers at� linha em branco final
         repeat
-          ChunkLine := FClientSocket.RecvString(FTimeout);
-          if FClientSocket.LastError <> 0 then
+          ChunkLine := RecvLineLimited(FClientSocket, FTimeout, MaxLineSize, LineTooLong);
+          if LineTooLong or (FClientSocket.LastError <> 0) then
             Exit;
         until ChunkLine = '';
         Result := True;
         Exit;
       end;
 
-      if (ATotalBytes + ChunkSize) > ChunkMaxRequestBodySize then
+      { Subtracao: 'ATotalBytes + ChunkSize' estourava Integer com '7FFFFFFF' e
+        passava no teto, levando a ler ate 2 GB. }
+      if ChunkSize > ChunkMaxRequestBodySize - ATotalBytes then
         Exit;
 
       NeedRead := ChunkSize;
@@ -427,10 +524,61 @@ procedure THTTPRequestHandler.Execute;
       end;
 
       // consome CRLF ao final do chunk
-      ChunkLine := FClientSocket.RecvString(FTimeout);
-      if (FClientSocket.LastError <> 0) or (ChunkLine <> '') then
+      ChunkLine := RecvLineLimited(FClientSocket, FTimeout, MaxLineSize, LineTooLong);
+      if LineTooLong or (FClientSocket.LastError <> 0) or (ChunkLine <> '') then
         Exit;
     end;
+  end;
+
+  { Content-Length estrito (RFC 7230 3.3.2): so digitos; repetido so com valores
+    iguais. StrToIntDef aceitava '+5', '$10', valor acima de MaxInt (virava 0) e o
+    primeiro de dois valores divergentes: cada leniencia desalinha o corpo com um
+    proxy na frente (request smuggling). }
+  function ReadContentLength(AHeaders: TStringList; out AHas: Boolean;
+    out ALen: Integer): Boolean;
+  var
+    K, J: Integer;
+    V: string;
+    N: Int64;
+  begin
+    Result := False;
+    AHas := False;
+    ALen := 0;
+    for K := 0 to AHeaders.Count - 1 do
+    begin
+      if not SameText(AHeaders.Names[K], 'Content-Length') then
+        Continue;
+      V := Trim(Copy(AHeaders[K], Length(AHeaders.Names[K]) + 2, MaxInt));
+      if (V = '') or (Length(V) > 10) then
+        Exit;
+      for J := 1 to Length(V) do
+        if (V[J] < '0') or (V[J] > '9') then
+          Exit;
+      N := StrToInt64(V);
+      if N > MaxInt then
+        Exit;
+      if AHas and (Integer(N) <> ALen) then
+        Exit;
+      AHas := True;
+      ALen := Integer(N);
+    end;
+    Result := True;
+  end;
+
+  { Junta todas as linhas Transfer-Encoding: Values[] so via a primeira, e
+    'TE: chunked' + 'TE: identity' escondia o token final. }
+  function JoinTransferEncoding(AHeaders: TStringList): string;
+  var
+    K: Integer;
+  begin
+    Result := '';
+    for K := 0 to AHeaders.Count - 1 do
+      if SameText(AHeaders.Names[K], 'Transfer-Encoding') then
+      begin
+        if Result <> '' then
+          Result := Result + ',';
+        Result := Result + Copy(AHeaders[K], Length(AHeaders.Names[K]) + 2, MaxInt);
+      end;
   end;
 
   procedure SplitCommaTokens(const AValue: string; ADest: TStringList);
@@ -472,8 +620,6 @@ var
   BodyStream: TMemoryStream;
   CloseConnection: Boolean;
   LRouteStr: string;
-  LRoute: {$IFDEF Delphi2009Plus}TRoutingCallback{$ELSE}TObject{$ENDIF};
-  Index: Integer;
 {$IFDEF Delphi2009Plus}
   TempBytes: TBytes;
   ResponseBodyBytes: TBytes;
@@ -493,6 +639,8 @@ var
   Handled: Boolean;
   TransferEncoding: string;
   IsChunked: Boolean;
+  HasContentLength: Boolean;
+  LineTooLong: Boolean;
   Origin, ACRM, ACRH, AllowOrigin, MethodsStr, HeadersStr, ExposeStr: string;
   LForwardedFor: string;
   HdrParts: TStringList;
@@ -500,6 +648,8 @@ var
   OriginAllowed: Boolean;
   AllowWildcardOrigin: Boolean;
   SkipRequestProcessing: Boolean;
+  DoWsUpgrade: Boolean;
+  WsUpgradeKey: string;
 begin
   FillChar(Req, SizeOf(Req), 0);
   FillChar(Resp, SizeOf(Resp), 0);
@@ -551,12 +701,32 @@ begin
         BodyStream := nil;
         Handled := False;
         SkipRequestProcessing := False;
+        DoWsUpgrade := False;
+        WsUpgradeKey := '';
         Origin := '';
         ACRM := '';
         ACRH := '';
 
         if FClientSocket.LastError <> 0 then Break;
-        FRequestLine := FClientSocket.RecvString(FTimeout);
+        FReqStart := 0;
+        if Assigned(FParentServer) then
+          FHeaderTimeout := FParentServer.HeaderTimeout
+        else
+          FHeaderTimeout := 0;
+        FRequestLine := RecvLineLimited(FClientSocket, FTimeout, MaxLineSize, LineTooLong,
+          FReqStart, FHeaderTimeout);
+        if LineTooLong and HeaderExpired then
+        begin
+          FClientSocket.SendString('HTTP/1.1 408 Request Timeout'#13#10 +
+            'Content-Length: 0'#13#10'Connection: close'#13#10#13#10);
+          Break;
+        end;
+        if LineTooLong then
+        begin
+          FClientSocket.SendString('HTTP/1.1 414 URI Too Long'#13#10 +
+            'Content-Length: 0'#13#10'Connection: close'#13#10#13#10);
+          Break;
+        end;
         while (Length(FRequestLine) > 0) and
               ((FRequestLine[Length(FRequestLine)] = #13) or (FRequestLine[Length(FRequestLine)] = #10)) do
           Delete(FRequestLine, Length(FRequestLine), 1);
@@ -568,7 +738,6 @@ begin
           Resp.Body := 'Bad Request';
           Resp.ContentType := TEXT_PLAIN;
           Handled := True;
-          CloseConnection := True;
           SkipRequestProcessing := True;
         end;
 
@@ -591,7 +760,10 @@ begin
 
             // Proxy reverso (nginx): sobrescreve o IP do socket (127.0.0.1) pelo IP real do cliente.
             // X-Real-IP tem precedência; X-Forwarded-For pode ser lista "clientIP, proxy1, proxy2".
-            if not SkipRequestProcessing then
+            if (not SkipRequestProcessing) and Assigned(FParentServer) and
+               FParentServer.TrustProxyHeaders and
+               ((FParentServer.TrustedProxies.Count = 0) or
+                (FParentServer.TrustedProxies.IndexOf(Req.FRemoteIP) >= 0)) then
             begin
               LForwardedFor := Trim(Headers.Values['X-Real-IP']);
               if LForwardedFor <> '' then
@@ -610,13 +782,20 @@ begin
               end;
             end;
           except
+            on E: EHeaderTimeout do
+            begin
+              Resp.StatusCode := HTTP_REQUEST_TIMEOUT;
+              Resp.Body := '{"error":"Request headers timeout"}';
+              Resp.ContentType := APPLICATION_JSON;
+              Handled := True;
+              SkipRequestProcessing := True;
+            end;
             on E: EHeaderTooLarge do
             begin
               Resp.StatusCode := HTTP_REQUEST_HEADER_FIELDS_TOO_LARGE;
               Resp.Body := '{"error":"Request headers too large"}';
               Resp.ContentType := APPLICATION_JSON;
               Handled := True;
-              CloseConnection := True;
               SkipRequestProcessing := True;
             end;
             on E: Exception do
@@ -625,49 +804,24 @@ begin
               Resp.Body := '{"error":"Invalid request headers"}';
               Resp.ContentType := APPLICATION_JSON;
               Handled := True;
-              CloseConnection := True;
               SkipRequestProcessing := True;
             end;
           end;
 
-          // WebSocket upgrade — fora do try..except de headers: exceções no handshake
-          // não podem ser confundidas com erros de parse. 'Connection' é case-insensitive (RFC 7230).
-          if (not SkipRequestProcessing) and BadgerWsIsUpgrade(Headers) then
+          if (not ReadContentLength(Headers, HasContentLength, ContentLength)) and
+             (not SkipRequestProcessing) then
           begin
-            if Headers.Values['Sec-WebSocket-Key'] = '' then
-            begin
-              Resp.StatusCode := HTTP_BAD_REQUEST;
-              Resp.Body := '{"error":"Missing Sec-WebSocket-Key"}';
-              Resp.ContentType := APPLICATION_JSON;
-              Handled := True;
-              CloseConnection := True;
-              SkipRequestProcessing := True;
-            end
-            else if Headers.Values['Sec-WebSocket-Version'] <> '13' then
-            begin
-              Resp.StatusCode := HTTP_BAD_REQUEST;
-              Resp.Body := '{"error":"Unsupported WebSocket version"}';
-              Resp.ContentType := APPLICATION_JSON;
-              Resp.HeadersCustom.Values['Sec-WebSocket-Version'] := '13';
-              Handled := True;
-              CloseConnection := True;
-              SkipRequestProcessing := True;
-            end
-            else
-            begin
-              SkipRequestProcessing := True;
-              Handled := True;
-              if Assigned(FParentServer) then
-                FParentServer.SetClientSocketURI(FClientSocket, FURI);
-              ProcessWebSocketHandshakeAndLoop(FClientSocket, FURI, Headers.Values['Sec-WebSocket-Key']);
-              Break;
-            end;
+            Resp.StatusCode := HTTP_BAD_REQUEST;
+            Resp.Body := '{"error":"Invalid Content-Length"}';
+            Resp.ContentType := APPLICATION_JSON;
+            Handled := True;
+            SkipRequestProcessing := True;
           end;
-
-          ContentLength := StrToIntDef(Headers.Values['Content-Length'], 0);
           ContentType := Headers.Values['Content-Type'];
-          TransferEncoding := LowerCase(Trim(Headers.Values['Transfer-Encoding']));
-          IsChunked := Pos('chunked', TransferEncoding) > 0;
+          TransferEncoding := LowerCase(Trim(JoinTransferEncoding(Headers)));
+          { Mesma regra do parser IOCP: 'chunked' tem de ser o ULTIMO token inteiro
+            (Pos aceitava 'notchunked' e 'chunked, gzip'). }
+          IsChunked := LastTokenIs(TransferEncoding, 'chunked');
 
           if (not IsChunked) and (ContentLength > MaxRequestBodySize) then
           begin
@@ -675,7 +829,6 @@ begin
             Resp.Body := '{"error":"Request body too large"}';
             Resp.ContentType := APPLICATION_JSON;
             Handled := True;
-            CloseConnection := True;
             SkipRequestProcessing := True;
           end;
 
@@ -685,9 +838,26 @@ begin
             Resp.Body := '{"error":"Invalid Content-Length"}';
             Resp.ContentType := APPLICATION_JSON;
             Handled := True;
-            CloseConnection := True;
             SkipRequestProcessing := True;
           end;
+
+          { RFC 7230 3.3.3: TE sem 'chunked' final, ou TE junto de Content-Length
+            (base do smuggling CL.TE/TE.CL), vale 400 e fecha a conexao. }
+          if (not SkipRequestProcessing) and (TransferEncoding <> '') and
+             ((not IsChunked) or HasContentLength) then
+          begin
+            Resp.StatusCode := HTTP_BAD_REQUEST;
+            Resp.Body := '{"error":"Invalid Transfer-Encoding"}';
+            Resp.ContentType := APPLICATION_JSON;
+            Handled := True;
+            SkipRequestProcessing := True;
+          end;
+
+          { 'Expect: 100-continue': sem o interim o cliente so manda o corpo apos
+            estourar o proprio timeout. }
+          if (not SkipRequestProcessing) and (IsChunked or (ContentLength > 0)) and
+             (Pos('100-continue', LowerCase(Headers.Values['Expect'])) > 0) then
+            FClientSocket.SendString('HTTP/1.1 100 Continue'#13#10#13#10);
 
           if (not SkipRequestProcessing) and (IsChunked or (ContentLength > 0)) then
           begin
@@ -703,7 +873,6 @@ begin
                   Resp.Body := '{"error":"Invalid chunked request body"}';
                   Resp.ContentType := APPLICATION_JSON;
                   Handled := True;
-                  CloseConnection := True;
                   SkipRequestProcessing := True;
                 end;
               end
@@ -712,7 +881,10 @@ begin
                 SetLength(TempBytes, Min(ContentLength, MaxBufferSize));
                 while (TotalBytes < ContentLength) and (FClientSocket.LastError = 0) do
                 begin
-                  BytesRead := FClientSocket.RecvBufferEx(@TempBytes[0], Length(TempBytes), FTimeout);
+                  { Pedir exatamente o que falta: RecvBufferEx bloqueia ate encher o
+                    buffer, entao pedir mais do que resta custa FTimeout no ultimo bloco. }
+                  BytesRead := FClientSocket.RecvBufferEx(@TempBytes[0],
+                    Min(ContentLength - TotalBytes, Length(TempBytes)), FTimeout);
                   if BytesRead <= 0 then Break;
                   BodyStream.Write(TempBytes[0], BytesRead);
                   Inc(TotalBytes, BytesRead);
@@ -726,10 +898,10 @@ begin
                 begin
                   SetLength(TempBytes, TotalBytes);
                   BodyStream.ReadBuffer(TempBytes[0], TotalBytes);
-                  SetString(Req.Body, PChar(@TempBytes[0]), TotalBytes);
                   {$IFDEF Delphi2009Plus}
                   Req.Body := TEncoding.UTF8.GetString(TempBytes);
                   {$ELSE}
+                  SetString(Req.Body, PAnsiChar(@TempBytes[0]), TotalBytes);
                   Req.Body := CharsetConversion(Req.Body, UTF_8, GetCurCP);
                   {$ENDIF}
                 end
@@ -748,7 +920,12 @@ begin
             end;
           end;
 
-          if Pos('HTTP/1.0', FRequestLine) > 0 then
+          { Nao recalcular quando um caminho de erro (400/413/431) ja decidiu fechar:
+            caso contrario o keep-alive volta e o lixo restante no socket e lido
+            como a proxima requisicao. }
+          if SkipRequestProcessing then
+            CloseConnection := True
+          else if Pos('HTTP/1.0', FRequestLine) > 0 then
           begin
             // HTTP/1.0 s� aceita Keep-Alive se o cliente pedir explicitamente
             CloseConnection := (LowerCase(Headers.Values['Connection']) <> 'keep-alive');
@@ -875,8 +1052,9 @@ begin
                 except
                   on E: Exception do
                   begin
+                    Logger.Error('Middleware exception: ' + E.Message);
                     Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-                    Resp.Body := '{"error":"Middleware exception: ' + E.Message + '"}';
+                    Resp.Body := '{"error":"Internal Server Error"}';
                     Resp.ContentType := APPLICATION_JSON;
                     Handled := True;
                     Break;
@@ -885,10 +1063,55 @@ begin
               end;
             end;
 
+            { Upgrade WebSocket depois dos middlewares: auth roda antes. Exige GET
+              (RFC 6455 §4.1) e uma rota declarada com AddWebSocket. O handshake
+              em si roda após o finally, para não segurar after-middlewares
+              (ex.: conexão de pool) durante a sessão. }
+            if (not Handled) and BadgerWsIsUpgrade(Headers) then
+            begin
+              Handled := True;
+              CloseConnection := True;
+              WsUpgradeKey := Trim(Headers.Values['Sec-WebSocket-Key']);
+              if UpperCase(FMethod) <> CGET then
+              begin
+                Resp.StatusCode := HTTP_METHOD_NOT_ALLOWED;
+                Resp.Body := '{"error":"WebSocket upgrade requires GET"}';
+                Resp.ContentType := APPLICATION_JSON;
+                Resp.HeadersCustom.Values['Allow'] := CGET;
+              end
+              else if WsUpgradeKey = '' then
+              begin
+                Resp.StatusCode := HTTP_BAD_REQUEST;
+                Resp.Body := '{"error":"Missing Sec-WebSocket-Key"}';
+                Resp.ContentType := APPLICATION_JSON;
+              end
+              else if Headers.Values['Sec-WebSocket-Version'] <> '13' then
+              begin
+                Resp.StatusCode := HTTP_BAD_REQUEST;
+                Resp.Body := '{"error":"Unsupported WebSocket version"}';
+                Resp.ContentType := APPLICATION_JSON;
+                Resp.HeadersCustom.Values['Sec-WebSocket-Version'] := '13';
+              end
+              else if not FRouteManager.MatchRoute(CWS, FURI, RouteEntry, RouteParams) then
+              begin
+                Resp.StatusCode := HTTP_NOT_FOUND;
+                Resp.Body := 'Not Found';
+                Resp.ContentType := TEXT_PLAIN;
+              end
+              else
+              begin
+                Req.RouteParams.Assign(RouteParams);
+                DoWsUpgrade := True;
+              end;
+            end;
+
             if not Handled then
             begin
               // --- MATCH ROTA COM :param ---
-              if FRouteManager.MatchRoute(UpperCase(FMethod), LowerCase(FURI), RouteEntry, RouteParams) then
+              { HEAD deve existir onde GET existe (RFC 7231 4.3.2). }
+              if FRouteManager.MatchRoute(UpperCase(FMethod), FURI, RouteEntry, RouteParams) or
+                 (SameText(FMethod, 'HEAD') and
+                  FRouteManager.MatchRoute(CGET, FURI, RouteEntry, RouteParams)) then
               begin
                 if Assigned(RouteEntry) and Assigned(TMethod(RouteEntry.Callback).Code) then
                 begin
@@ -941,16 +1164,23 @@ begin
             RunAfterMiddlewares(Req, Resp);
           end;
 
+          if DoWsUpgrade then
+          begin
+            if Assigned(FParentServer) then
+              FParentServer.SetClientSocketURI(FClientSocket, FURI);
+            ProcessWebSocketHandshakeAndLoop(FClientSocket, FURI, WsUpgradeKey);
+            Break;
+          end;
+
           // --- RESPOSTA (usa Resp já processado pelos after-middlewares) ---
           ResponseHeader := BuildHTTPResponse(Resp.StatusCode, Resp.Body, Resp.Stream, Resp.ContentType, CloseConnection, Resp.HeadersCustom);
           FClientSocket.SendString(ResponseHeader);
 
-          // --- ENVIO DO CORPO (TEXTO) ---
-          if (Resp.Body <> '') and (
-             (Resp.ContentType = '') or
-             (Pos('text/', Resp.ContentType) = 1) or
-             (Pos('application/json', Resp.ContentType) = 1)
-          ) then
+          // --- ENVIO DO CORPO ---
+          { Espelha o Content-Length de BuildHTTPResponse: com stream, o corpo em
+            string é ignorado; sem stream, vai sempre, qualquer Content-Type. }
+          if (Resp.Body <> '') and (not SameText(FMethod, 'HEAD')) and
+             not (Assigned(Resp.Stream) and (Resp.Stream.Size > 0)) then
           begin
             {$IFDEF Delphi2009Plus}
             ResponseBodyBytes := TEncoding.UTF8.GetBytes(Resp.Body);
@@ -964,7 +1194,8 @@ begin
           end;
 
           // --- ENVIO DO STREAM ---
-          if Assigned(Resp.Stream) and (Resp.Stream.Size > 0) then
+          if Assigned(Resp.Stream) and (Resp.Stream.Size > 0) and
+             (not SameText(FMethod, 'HEAD')) then
           begin
             Resp.Stream.Position := 0;
             BufferSize := Min(MaxBufferSize, Resp.Stream.Size);
@@ -991,7 +1222,14 @@ begin
               RequestInfo.Body := Req.Body;
               RequestInfo.QueryParams.Assign(Req.QueryParams);
               RequestInfo.Timestamp := Now;
-              FOnRequest(RequestInfo);
+              { A resposta ja foi enviada: excecao do callback caia no except
+                externo, que mandava um segundo 500 na mesma conexao. }
+              try
+                FOnRequest(RequestInfo);
+              except
+                on E: Exception do
+                  Logger.Error('OnRequest exception: ' + E.Message);
+              end;
             finally
               RequestInfo.Headers.Free;
               RequestInfo.QueryParams.Free;
@@ -1008,7 +1246,12 @@ begin
               ResponseInfo.ContentType := Resp.ContentType;
               ResponseInfo.Headers.Text := ResponseHeader;
               ResponseInfo.Timestamp := Now;
-              FOnResponse(ResponseInfo);
+              try
+                FOnResponse(ResponseInfo);
+              except
+                on E: Exception do
+                  Logger.Error('OnResponse exception: ' + E.Message);
+              end;
             finally
               ResponseInfo.Headers.Free;
             end;

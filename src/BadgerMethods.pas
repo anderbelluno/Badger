@@ -15,6 +15,7 @@ type
   TBadgerMethods = class(TObject)
   private
     FUtils: TBadgerUtils;
+    FUploadDir: string;
     function getMime(aFilePath: String): String;
   public
     constructor Create;
@@ -26,6 +27,9 @@ type
     procedure AtuImage(Request: THTTPRequest; var Response: THTTPResponse);
     function ExtractMethodAndURI(const RequestLine: string; out Method, URI: string; var QueryParams: TStringList): Boolean;
     function ExtractBoundary(const ContentType: string): string;
+    { Diretorio de destino do upload. Vazio = diretorio corrente do processo, que
+      costuma ser a pasta do servico ou do executavel. }
+    property UploadDir: string read FUploadDir write FUploadDir;
   end;
 
 implementation
@@ -86,7 +90,14 @@ begin
             ParamPair := QueryString;
             QueryString := '';
           end;
-          QueryParams.Add(URLDecode(ParamPair));
+          { Split antes do decode: '%3D' no valor viraria '=' e deslocaria a
+            fronteira chave/valor. }
+          SpacePos := Pos('=', ParamPair);
+          if SpacePos > 0 then
+            QueryParams.Add(URLDecode(Copy(ParamPair, 1, SpacePos - 1)) + '=' +
+                            URLDecode(Copy(ParamPair, SpacePos + 1, MaxInt)))
+          else
+            QueryParams.Add(URLDecode(ParamPair));
         end;
       end;
       Result := True;
@@ -175,6 +186,11 @@ begin
       begin
         FormDataFile := TFormDataFile(Files[i]);
         UniqueName := Reader.UniqueFileName(FormDataFile.FileName);
+        if FUploadDir <> '' then
+        begin
+          ForceDirectories(FUploadDir);
+          UniqueName := IncludeTrailingPathDelimiter(FUploadDir) + UniqueName;
+        end;
         FormDataFile.Stream.SaveToFile(UniqueName);
       end;
       Response.StatusCode := HTTP_OK; // OK

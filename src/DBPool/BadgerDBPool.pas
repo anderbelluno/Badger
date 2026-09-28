@@ -167,7 +167,33 @@ begin
 end;
 
 destructor TBadgerDBPool.Destroy;
+var
+  Waited: Integer;
+  Pending: Integer;
 begin
+  { Antes as conexoes emprestadas eram liberadas de imediato: um request ainda
+    dentro da rota passava a usar objeto morto. Agora espera o retorno, com teto. }
+  { Construtor que levanta (template nil, CloneTemplate sem banco) chega aqui com
+    FLock/FBorrowed nil: sem a guarda, um AV mascarava o erro real. }
+  Waited := 0;
+  Pending := 0;
+  if Assigned(FLock) and Assigned(FBorrowed) then
+    repeat
+      FLock.Acquire;
+      try
+        Pending := FBorrowed.Count;
+      finally
+        FLock.Release;
+      end;
+      if Pending = 0 then
+        Break;
+      Sleep(50);
+      Inc(Waited, 50);
+    until Waited >= 5000;
+  if Pending > 0 then
+    Log(Format('Destroy: %d conexao(oes) ainda emprestada(s) apos 5s; liberando assim mesmo',
+      [Pending]));
+
   if Assigned(FLock) then
   begin
     FLock.Acquire;

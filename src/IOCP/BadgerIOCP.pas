@@ -10,8 +10,8 @@ unit BadgerIOCP;
 interface
 
 uses
-  Windows, SysUtils, Classes, SyncObjs, BadgerWinSock2, BadgerHttpParser, BadgerHttpStatus,
-  BadgerTypes, BadgerRouteManager, BadgerLogger, BadgerWebSocket;
+  Windows, SysUtils, Classes, SyncObjs, BadgerWinSock2, BadgerHttpParser,
+  BadgerTypes, BadgerRouteManager, BadgerLogger, BadgerWebSocket, BadgerHttpDispatch;
 
 const
   IOCP_KEY_WORK = 2;
@@ -55,6 +55,20 @@ type
     WsQueue: TBadgerWsBytes;
     RouteParams: TStringList;
     RespHeaders: TStringList;
+    { Contagem de referencias. 1 = registro em FLiveCtx; +1 por operacao postada.
+      O contexto so e liberado quando chega a zero, entao o kernel nunca escreve em
+      OVERLAPPED de memoria ja devolvida. }
+    Refs: Integer;
+    Closing: Integer;
+    { True enquanto a rota executa. RecvOp.Kind continua ioRecv nesse intervalo, e
+      sem este flag o watchdog tomava a conexao por ociosa e a fechava no meio da
+      execucao de qualquer rota mais lenta que Timeout. }
+    InDispatch: Boolean;
+    { Prazo de headers (slowloris): 0 = aguardando o 1o byte do pedido, 1 = lendo
+      headers desde ReqStart, 2 = corpo/rota. So a fase 1 tem prazo; o watchdog le
+      estes dois campos e nunca o Parser (que BeginWs libera em outra thread). }
+    HdrPhase: Byte;
+    ReqStart: DWORD;
   end;
 
   TIocpKey = {$IFDEF FPC}PtrUInt{$ELSE}{$IFDEF WIN64}NativeUInt{$ELSE}DWORD{$ENDIF}{$ENDIF};
@@ -115,10 +129,18 @@ type
     FSerialLock: TCriticalSection;
     FWatchdog: TThread;
     FOwnsPipeline: Boolean;
+    FTrustProxyHeaders: Boolean;
+    FTrustedProxies: TStringList;
+    FWsIdleTimeout: Integer;
+    FHeaderTimeout: Integer;
     procedure Log(const Msg: string);
     function AllocCtx(Op: TIocpOp): PIocpCtx;
     procedure ReleaseCtx(Ctx: PIocpCtx);
-    function CtxIsLive(Ctx: PIocpCtx): Boolean;
+    procedure FreeCtx(Ctx: PIocpCtx);
+    procedure AddRef(Ctx: PIocpCtx);
+    procedure ReleaseRef(Ctx: PIocpCtx);
+    function TryAddRef(Ctx: PIocpCtx): Boolean;
+    procedure CloseAllCtx;
     procedure EnableSkipCompletion(Ctx: PIocpCtx);
     function PostAccept: Boolean;
     procedure EnsurePendingAccepts;
@@ -136,10 +158,6 @@ type
     procedure BeginWs(Ctx: PIocpCtx; const URI, WSKey: string);
     procedure QueueWsFrame(Ctx: PIocpCtx; const Frame: TBadgerWsBytes);
     procedure FinishRequest(Ctx: PIocpCtx);
-    procedure RunAfterMiddlewares(var Req: THTTPRequest; var Resp: THTTPResponse);
-    procedure FireHttpEvents(const Req: THTTPRequest; const Resp: THTTPResponse; const ResponseHeader: string);
-    function HandleCorsPreflight(const Req: THTTPRequest; var Resp: THTTPResponse): Boolean;
-    procedure ApplyCorsHeaders(const Req: THTTPRequest; var Resp: THTTPResponse);
     procedure InitCorsDefaults;
     procedure Touch(Ctx: PIocpCtx);
     procedure RecycleKeepAlive(Ctx: PIocpCtx);
@@ -179,7 +197,18 @@ type
     property CorsExposeHeaders: TStringList read FCorsExposeHeaders;
     property CorsAllowCredentials: Boolean read FCorsAllowCredentials write FCorsAllowCredentials;
     property CorsMaxAge: Integer read FCorsMaxAge write FCorsMaxAge;
+    property TrustProxyHeaders: Boolean read FTrustProxyHeaders write FTrustProxyHeaders;
+    property TrustedProxies: TStringList read FTrustedProxies write FTrustedProxies;
     property Timeout: Integer read FTimeout write FTimeout;
+    { Ociosidade maxima de WebSocket, em ms. 0 = nao expira (default). Separado de
+      Timeout porque navegadores nao enviam ping: com o timeout de HTTP (5 s) todo
+      chat parado era derrubado. }
+    property WsIdleTimeout: Integer read FWsIdleTimeout write FWsIdleTimeout;
+    { Prazo em ms para os headers chegarem, contado do 1o byte do pedido. 0 desliga.
+      Timeout sozinho nao basta: cada byte renova LastActivity e um cliente que
+      pinga 1 byte a cada 4 s segurava a vaga para sempre (slowloris). Conexao
+      keep-alive ociosa nao e afetada (conta so apos o 1o byte). }
+    property HeaderTimeout: Integer read FHeaderTimeout write FHeaderTimeout;
     property MaxConcurrentConnections: Integer read FMaxConcurrentConnections write FMaxConcurrentConnections;
     property ParallelProcessing: Boolean read FParallelProcessing write FParallelProcessing;
     property ActiveConnections: Integer read FActiveConnections;
@@ -189,11 +218,31 @@ type
 implementation
 
 const
+  HTTP_100_CONTINUE: AnsiString = 'HTTP/1.1 100 Continue'#13#10#13#10;
   IOCP_SEND_CHUNK = 65536;
+  { Teto da fila de envio WebSocket por conexao. }
+  WS_MAX_QUEUE = 4 * 1024 * 1024;
   FILE_SKIP_COMPLETION_PORT_ON_SUCCESS = 1;
 
 var
   GSetFileCompletionNotificationModes: function(FileHandle: THandle; Flags: Byte): BOOL; stdcall;
+  { Vista+. Cancela I/O pendente emitido por QUALQUER thread (CancelIo so a da
+    chamadora). Carregado dinamicamente: o Windows.pas do D7 nao declara. }
+  GCancelIoEx: function(hFile: THandle; lpOverlapped: POverlapped): BOOL; stdcall;
+
+const
+  IOCP_ERROR_NOT_FOUND = 1168; { CancelIoEx: nada pendente (ausente no Windows.pas do D7) }
+
+const
+  { Profundidade maxima de tratamento inline de conclusoes sincronas. Com
+    FILE_SKIP_COMPLETION_PORT_ON_SUCCESS, PostRecv -> HandleRecv -> ... -> PostRecv
+    recursava sem limite enquanto houvesse dado no buffer do socket: um cliente com
+    requisicoes em pipeline estourava a pilha do worker e derrubava o processo. }
+  IOCP_MAX_INLINE_DEPTH = 4;
+
+threadvar
+  GIocpIsWorker: Boolean;
+  GIocpDepth: Integer;
 
 procedure LoadSkipCompletionApi;
 begin
@@ -201,6 +250,7 @@ begin
     Exit;
   @GSetFileCompletionNotificationModes := GetProcAddress(GetModuleHandle('kernel32.dll'),
     'SetFileCompletionNotificationModes');
+  @GCancelIoEx := GetProcAddress(GetModuleHandle('kernel32.dll'), 'CancelIoEx');
 end;
 
 function IocpOpName(Op: TIocpOp): string;
@@ -253,6 +303,11 @@ begin
     if Terminated then
       Break;
     FOwner.ScanIdleConnections;
+    { Rearme periodico: os AcceptEx so eram repostos ao completar um accept ou
+      fechar uma conexao contada. Se todos falhassem de uma vez (WSAENOBUFS, falta
+      de handles) sem conexao ativa, o servidor parava de aceitar para sempre, em
+      silencio. Com a cota cheia isto e so um lock e sai. }
+    FOwner.EnsurePendingAccepts;
   end;
 end;
 
@@ -298,6 +353,7 @@ begin
   FMiddlewareLock := TCriticalSection.Create;
   FEnableEventInfo := True;
   FTimeout := 5000;
+  FHeaderTimeout := 30000;
   FMaxConcurrentConnections := 100;
   FParallelProcessing := True;
   FActiveConnections := 0;
@@ -474,27 +530,6 @@ begin
     ;
 end;
 
-procedure AttachParserBody(Parser: TBadgerHttpParser; var Req: THTTPRequest);
-var
-  CT: string;
-  Raw: AnsiString;
-begin
-  if not Assigned(Parser) then
-    Exit;
-  Raw := Parser.Body;
-  if Length(Raw) = 0 then
-    Exit;
-  CT := LowerCase(Req.Headers.Values['Content-Type']);
-  if (Pos('application/json', CT) > 0) or (Pos('text/', CT) > 0) then
-    Req.Body := Utf8BytesToString(Raw)
-  else
-  begin
-    Req.BodyStream := TMemoryStream.Create;
-    Req.BodyStream.WriteBuffer(Raw[1], Length(Raw));
-    Req.BodyStream.Position := 0;
-  end;
-end;
-
 procedure TBadgerIOCP.RecycleKeepAlive(Ctx: PIocpCtx);
 var
   Left: AnsiString;
@@ -513,13 +548,20 @@ begin
   begin
     Left := Ctx^.Parser.Leftover;
     Ctx^.Parser.Reset;
+    Ctx^.HdrPhase := 0;
     if Left <> '' then
     begin
+      { Pipelining: o proximo pedido ja comecou a chegar. }
+      Ctx^.HdrPhase := 1;
+      Ctx^.ReqStart := GetTickCount;
       if Ctx^.Parser.Feed(@Left[1], Length(Left)) then
       begin
+        Ctx^.HdrPhase := 2;
         FinishRequest(Ctx);
         Exit;
       end;
+      if Ctx^.Parser.State <> hpsHeaders then
+        Ctx^.HdrPhase := 2;
     end;
   end;
   PostRecv(Ctx);
@@ -531,8 +573,10 @@ var
   NowTick: DWORD;
   Ctx: PIocpCtx;
   Idle: TList;
+  Limit: Integer;
 begin
-  if (FTimeout <= 0) or not FRunning then
+  if ((FTimeout <= 0) and (FWsIdleTimeout <= 0) and (FHeaderTimeout <= 0)) or
+     not FRunning then
     Exit;
   NowTick := GetTickCount;
   Idle := TList.Create;
@@ -542,9 +586,19 @@ begin
       for I := 0 to FLiveCtx.Count - 1 do
       begin
         Ctx := PIocpCtx(FLiveCtx[I]);
-        if (Ctx^.RecvOp.Kind = ioRecv) and Ctx^.Counted and (not Ctx^.IsWebSocket) and
-           ((NowTick - Ctx^.LastActivity) >= DWORD(FTimeout)) then
+        { HTTP usa Timeout; WebSocket usa WsIdleTimeout (0 = nunca expira). }
+        if Ctx^.IsWebSocket then
+          Limit := FWsIdleTimeout
+        else
+          Limit := FTimeout;
+        if (Ctx^.RecvOp.Kind = ioRecv) and Ctx^.Counted and (not Ctx^.InDispatch) and
+           (((Limit > 0) and ((NowTick - Ctx^.LastActivity) >= DWORD(Limit))) or
+            ((FHeaderTimeout > 0) and (not Ctx^.IsWebSocket) and (Ctx^.HdrPhase = 1) and
+             ((NowTick - Ctx^.ReqStart) >= DWORD(FHeaderTimeout)))) then
+        begin
+          InterlockedIncrement(Ctx^.Refs);
           Idle.Add(Ctx);
+        end;
       end;
     finally
       FLock.Release;
@@ -552,8 +606,11 @@ begin
     for I := 0 to Idle.Count - 1 do
     begin
       Ctx := PIocpCtx(Idle[I]);
-      if CtxIsLive(Ctx) and (Ctx^.Socket <> 0) and (Ctx^.Socket <> INVALID_SOCKET) then
-        CancelIo(THandle(Ctx^.Socket));
+      { CancelIo cancelava apenas I/O emitido pela thread chamadora, e o watchdog nao
+        emitiu estes WSARecv: era no-op e o timeout de idle nunca corria. ReleaseCtx
+        faz shutdown + CancelIoEx, que cancela o I/O pendente de qualquer thread. }
+      ReleaseCtx(Ctx);
+      ReleaseRef(Ctx);
     end;
   finally
     Idle.Free;
@@ -607,6 +664,8 @@ begin
   Result^.Conn := TBadgerConn.Create;
   Result^.RouteParams := TStringList.Create;
   Result^.RespHeaders := TStringList.Create;
+  Result^.Refs := 1;
+  Result^.Closing := 0;
   FLock.Acquire;
   try
     FLiveCtx.Add(Result);
@@ -616,6 +675,42 @@ begin
   end;
 end;
 
+procedure TBadgerIOCP.AddRef(Ctx: PIocpCtx);
+begin
+  InterlockedIncrement(Ctx^.Refs);
+end;
+
+procedure TBadgerIOCP.ReleaseRef(Ctx: PIocpCtx);
+begin
+  if Ctx = nil then
+    Exit;
+  if InterlockedDecrement(Ctx^.Refs) = 0 then
+    FreeCtx(Ctx);
+end;
+
+{ Pega referencia sob FLock, so se o contexto ainda esta registrado. Usado por quem
+  chega de fora do worker dono (SendWsText, watchdog): sem isso o ponteiro podia ser
+  liberado entre a checagem e o uso. }
+function TBadgerIOCP.TryAddRef(Ctx: PIocpCtx): Boolean;
+begin
+  Result := False;
+  if Ctx = nil then
+    Exit;
+  FLock.Acquire;
+  try
+    if FLiveCtx.IndexOf(Ctx) >= 0 then
+    begin
+      InterlockedIncrement(Ctx^.Refs);
+      Result := True;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+{ Encerra a conexao: tira do registro, fecha o socket (o que cancela o I/O pendente
+  e gera as completions de falha) e devolve a referencia do registro. A memoria so
+  sai quando a ultima operacao pendente completar. Idempotente. }
 procedure TBadgerIOCP.ReleaseCtx(Ctx: PIocpCtx);
 var
   Idx: Integer;
@@ -624,20 +719,15 @@ var
 begin
   if Ctx = nil then
     Exit;
+  if InterlockedExchange(Ctx^.Closing, 1) <> 0 then
+    Exit;
+
   WasCounted := Ctx^.Counted;
-  if WasCounted then
-  begin
-    Ctx^.Counted := False;
-    FLock.Acquire;
-    try
-      if FActiveConnections > 0 then
-        Dec(FActiveConnections);
-    finally
-      FLock.Release;
-    end;
-  end;
+  Ctx^.Counted := False;
   FLock.Acquire;
   try
+    if WasCounted and (FActiveConnections > 0) then
+      Dec(FActiveConnections);
     Idx := FLiveCtx.IndexOf(Ctx);
     if Idx >= 0 then
       FLiveCtx.Delete(Idx);
@@ -645,20 +735,58 @@ begin
   finally
     FLock.Release;
   end;
+
+  { WsClient NAO e zerado aqui: SendWsText/QueueWsFrame em outra thread (com ref
+    no Ctx) leem Ctx^.WsClient tres vezes (checa, Acquire, Release) e zerar no meio
+    dava AV em nil.IOLock, lock preso ou uso apos Free. O motor guarda uma ref do
+    Info ate FreeCtx, quando ninguem mais segura o Ctx. }
   Info := Ctx^.WsClient;
-  Ctx^.WsClient := nil;
   if Assigned(Info) then
   begin
     Info.Ctx := nil;
     if Assigned(FOnWsDetach) then
       FOnWsDetach(Info);
   end;
+
+  { ReleaseCtx corre tambem fora do worker dono (watchdog, Stop, estouro da fila WS
+    na thread da aplicacao). closesocket aqui liberava o valor do handle, que o
+    Windows reusa na hora: um worker que ja tinha lido Ctx^.Socket podia postar
+    WSASend/WSARecv no socket de OUTRA conexao. Agora: shutdown (novos posts falham
+    com WSAESHUTDOWN) + CancelIoEx (aborta os pendentes); o handle so e fechado em
+    FreeCtx, quando ninguem mais segura o Ctx. Sem CancelIoEx (XP) ou se ele falhar
+    (LSP sem handle real), fecha como antes. }
+  if (Ctx^.Socket <> 0) and (Ctx^.Socket <> INVALID_SOCKET) then
+  begin
+    shutdown(Ctx^.Socket, SD_BOTH);
+    if not (Assigned(GCancelIoEx) and
+            (GCancelIoEx(THandle(Ctx^.Socket), nil) or (GetLastError = IOCP_ERROR_NOT_FOUND))) then
+    begin
+      closesocket(Ctx^.Socket);
+      Ctx^.Socket := INVALID_SOCKET;
+    end;
+  end;
+
+  ReleaseRef(Ctx);
+  if WasCounted then
+    EnsurePendingAccepts;
+end;
+
+{ Teardown real. Corre apenas quando Refs chega a zero. }
+procedure TBadgerIOCP.FreeCtx(Ctx: PIocpCtx);
+begin
+  if Ctx = nil then
+    Exit;
   if Assigned(Ctx^.WsParser) then
   begin
     Ctx^.WsParser.Free;
     Ctx^.WsParser := nil;
   end;
   Ctx^.WsQueue := '';
+  if Assigned(Ctx^.WsClient) then
+  begin
+    Ctx^.WsClient.Release; { ref do motor, tomada em BeginWs }
+    Ctx^.WsClient := nil;
+  end;
   if Assigned(Ctx^.Parser) then
   begin
     Ctx^.Parser.Free;
@@ -689,22 +817,35 @@ begin
     closesocket(Ctx^.Socket);
   Ctx^.Socket := INVALID_SOCKET;
   FreeMem(Ctx);
-  if WasCounted then
-    EnsurePendingAccepts;
 end;
 
-function TBadgerIOCP.CtxIsLive(Ctx: PIocpCtx): Boolean;
+{ Fecha todas as conexoes registradas, com referencia garantida. }
+procedure TBadgerIOCP.CloseAllCtx;
+var
+  Tmp: TList;
+  I: Integer;
+  Ctx: PIocpCtx;
 begin
-  if Ctx = nil then
-  begin
-    Result := False;
-    Exit;
-  end;
-  FLock.Acquire;
+  Tmp := TList.Create;
   try
-    Result := FLiveCtx.IndexOf(Ctx) >= 0;
+    FLock.Acquire;
+    try
+      for I := 0 to FLiveCtx.Count - 1 do
+      begin
+        Ctx := PIocpCtx(FLiveCtx[I]);
+        InterlockedIncrement(Ctx^.Refs);
+        Tmp.Add(Ctx);
+      end;
+    finally
+      FLock.Release;
+    end;
+    for I := 0 to Tmp.Count - 1 do
+    begin
+      ReleaseCtx(PIocpCtx(Tmp[I]));
+      ReleaseRef(PIocpCtx(Tmp[I]));
+    end;
   finally
-    FLock.Release;
+    Tmp.Free;
   end;
 end;
 
@@ -756,41 +897,12 @@ begin
 end;
 
 procedure TBadgerIOCP.DrainLiveCtx;
-var
-  Tmp: TList;
-  I: Integer;
-  Ctx: PIocpCtx;
 begin
-  Tmp := TList.Create;
-  try
-    FLock.Acquire;
-    try
-      for I := 0 to FLiveCtx.Count - 1 do
-        Tmp.Add(FLiveCtx[I]);
-    finally
-      FLock.Release;
-    end;
-    for I := 0 to Tmp.Count - 1 do
-    begin
-      Ctx := PIocpCtx(Tmp[I]);
-      if (Ctx^.Socket <> 0) and (Ctx^.Socket <> INVALID_SOCKET) then
-      begin
-        CancelIo(THandle(Ctx^.Socket));
-        closesocket(Ctx^.Socket);
-        Ctx^.Socket := INVALID_SOCKET;
-      end;
-    end;
-    if Tmp.Count > 0 then
-      Sleep(20);
-    for I := 0 to Tmp.Count - 1 do
-    begin
-      Ctx := PIocpCtx(Tmp[I]);
-      Logger.Debug('drain leftover ' + IocpOpName(Ctx^.RecvOp.Kind) + ' ptr=' + Format('%p', [Pointer(Ctx)]));
-      ReleaseCtx(Ctx);
-    end;
-  finally
-    Tmp.Free;
-  end;
+  { Com refcount o fechamento e o free ficaram separados: CloseAllCtx tira do
+    registro e devolve a referencia, e a memoria sai quando a ultima operacao
+    pendente completar. Nao ha mais FreeMem a forca aqui. }
+  CloseAllCtx;
+  WaitLiveCtxIdle(1000);
 end;
 
 function TBadgerIOCP.PostAccept: Boolean;
@@ -839,6 +951,7 @@ begin
   setsockopt(Ctx^.Socket, IPPROTO_TCP, TCP_NODELAY, @One, SizeOf(One));
 
   Bytes := 0;
+  AddRef(Ctx);
   if not AcceptEx(Listen, Ctx^.Socket, @Ctx^.AcceptBuf[0], 0,
     SizeOf(TBadgerSockAddrIn) + 16, SizeOf(TBadgerSockAddrIn) + 16,
     Bytes, POverlapped(@Ctx^.RecvOp)) then
@@ -847,6 +960,7 @@ begin
     begin
       DecPendingAccept;
       ReleaseCtx(Ctx);
+      ReleaseRef(Ctx);
       Exit;
     end;
   end;
@@ -865,14 +979,42 @@ begin
   Ctx^.RecvWsa.buf := @Ctx^.Buf[0];
   Flags := 0;
   Recvd := 0;
+  { Referencia pela operacao: o kernel vai escrever neste OVERLAPPED. }
+  AddRef(Ctx);
   N := WSARecv(Ctx^.Socket, @Ctx^.RecvWsa, 1, Recvd, Flags, POverlapped(@Ctx^.RecvOp), nil);
   if N = 0 then
   begin
     if Ctx^.SkipCompletion then
-      HandleRecv(Ctx, Recvd);
+    begin
+      { Completou na hora e nao havera notificacao. Inline so em worker e com pilha
+        rasa; senao a conclusao vai para a porta e o WorkerLoop a trata (e devolve a
+        referencia) pelo caminho normal. }
+      if GIocpIsWorker and (GIocpDepth < IOCP_MAX_INLINE_DEPTH) then
+      begin
+        Inc(GIocpDepth);
+        try
+          HandleRecv(Ctx, Recvd);
+        finally
+          Dec(GIocpDepth);
+          ReleaseRef(Ctx);
+        end;
+      end
+      else if not PostQueuedCompletionStatus(FIocp, Recvd, IOCP_KEY_WORK,
+        POverlapped(@Ctx^.RecvOp)) then
+      begin
+        try
+          HandleRecv(Ctx, Recvd);
+        finally
+          ReleaseRef(Ctx);
+        end;
+      end;
+    end;
   end
   else if (N = SOCKET_ERROR) and (WSAGetLastError <> WSA_IO_PENDING) then
+  begin
     ReleaseCtx(Ctx);
+    ReleaseRef(Ctx);
+  end;
 end;
 
 procedure TBadgerIOCP.PostSend(Ctx: PIocpCtx);
@@ -894,14 +1036,40 @@ begin
   Ctx^.SendWsa.len := Cardinal(Remain);
   Ctx^.SendWsa.buf := PAnsiChar(Ctx^.SendBuf) + Ctx^.SendPos;
   Sent := 0;
+  AddRef(Ctx);
   N := WSASend(Ctx^.Socket, @Ctx^.SendWsa, 1, Sent, 0, POverlapped(@Ctx^.SendOp), nil);
   if N = 0 then
   begin
     if Ctx^.SkipCompletion then
-      HandleSend(Ctx, Sent);
+    begin
+      { Mesma regra de PostRecv. Tambem tira HandleSend das threads da aplicacao
+        (SendWsText): fora de worker a conclusao sempre vai para a porta. }
+      if GIocpIsWorker and (GIocpDepth < IOCP_MAX_INLINE_DEPTH) then
+      begin
+        Inc(GIocpDepth);
+        try
+          HandleSend(Ctx, Sent);
+        finally
+          Dec(GIocpDepth);
+          ReleaseRef(Ctx);
+        end;
+      end
+      else if not PostQueuedCompletionStatus(FIocp, Sent, IOCP_KEY_WORK,
+        POverlapped(@Ctx^.SendOp)) then
+      begin
+        try
+          HandleSend(Ctx, Sent);
+        finally
+          ReleaseRef(Ctx);
+        end;
+      end;
+    end;
   end
   else if (N = SOCKET_ERROR) and (WSAGetLastError <> WSA_IO_PENDING) then
+  begin
     ReleaseCtx(Ctx);
+    ReleaseRef(Ctx);
+  end;
 end;
 
 procedure TBadgerIOCP.PrepareAndSend(Ctx: PIocpCtx; const Resp: TBadgerWsBytes);
@@ -980,437 +1148,47 @@ begin
   EnsurePendingAccepts;
 end;
 
-procedure TBadgerIOCP.RunAfterMiddlewares(var Req: THTTPRequest; var Resp: THTTPResponse);
-var
-  I: Integer;
-  AfterWrapper: TAfterMiddlewareWrapper;
-begin
-  if not Assigned(FAfterMiddlewares) then
-    Exit;
-  for I := FAfterMiddlewares.Count - 1 downto 0 do
-  begin
-    AfterWrapper := TAfterMiddlewareWrapper(FAfterMiddlewares[I]);
-    if not Assigned(AfterWrapper) or not Assigned(AfterWrapper.Middleware) then
-      Continue;
-    try
-      AfterWrapper.Middleware(Req, Resp);
-    except
-      on E: Exception do
-        Logger.Error('After-middleware exception: ' + E.Message);
-    end;
-  end;
-end;
-
-procedure SplitCommaTokens(const AValue: string; ADest: TStringList);
-var
-  I: Integer;
-  Token: string;
-begin
-  ADest.Clear;
-  Token := '';
-  for I := 1 to Length(AValue) do
-  begin
-    if AValue[I] = ',' then
-    begin
-      Token := Trim(Token);
-      if Token <> '' then
-        ADest.Add(Token);
-      Token := '';
-    end
-    else
-      Token := Token + AValue[I];
-  end;
-  Token := Trim(Token);
-  if Token <> '' then
-    ADest.Add(Token);
-end;
-
-function TBadgerIOCP.HandleCorsPreflight(const Req: THTTPRequest; var Resp: THTTPResponse): Boolean;
-var
-  Origin, ACRM, ACRH, AllowOrigin, MethodsStr, HeadersStr, HdrPart: string;
-  AllowWildcardOrigin, OriginAllowed: Boolean;
-  I: Integer;
-  HdrParts: TStringList;
-begin
-  Result := False;
-  if not FCorsEnabled then
-    Exit;
-  if Req.Method <> 'OPTIONS' then
-    Exit;
-  Origin := Trim(Req.Headers.Values['Origin']);
-  ACRM := Trim(Req.Headers.Values['Access-Control-Request-Method']);
-  ACRH := Req.Headers.Values['Access-Control-Request-Headers'];
-  if (Origin = '') or (ACRM = '') then
-    Exit;
-
-  Result := True;
-  AllowWildcardOrigin := FCorsAllowedOrigins.IndexOf('*') >= 0;
-  if FCorsAllowCredentials then
-    OriginAllowed := FCorsAllowedOrigins.IndexOf(Origin) >= 0
-  else
-    OriginAllowed := AllowWildcardOrigin or (FCorsAllowedOrigins.IndexOf(Origin) >= 0);
-
-  if not OriginAllowed then
-  begin
-    Resp.StatusCode := HTTP_FORBIDDEN;
-    Resp.Body := 'CORS origin not allowed';
-    Resp.ContentType := TEXT_PLAIN;
-    Exit;
-  end;
-
-  if FCorsAllowedMethods.IndexOf(UpperCase(ACRM)) < 0 then
-  begin
-    Resp.StatusCode := HTTP_METHOD_NOT_ALLOWED;
-    Resp.Body := '';
-    Resp.ContentType := '';
-    Resp.HeadersCustom.Values['Allow'] := FCorsAllowedMethods.CommaText;
-    Exit;
-  end;
-
-  HeadersStr := '';
-  if ACRH <> '' then
-  begin
-    HdrParts := TStringList.Create;
-    try
-      SplitCommaTokens(ACRH, HdrParts);
-      for I := 0 to HdrParts.Count - 1 do
-      begin
-        HdrPart := Trim(HdrParts[I]);
-        if HdrPart = '' then
-          Continue;
-        if FCorsAllowedHeaders.IndexOf(HdrPart) < 0 then
-        begin
-          Resp.StatusCode := HTTP_BAD_REQUEST;
-          Resp.Body := '';
-          Resp.ContentType := '';
-          Exit;
-        end;
-        if HeadersStr = '' then
-          HeadersStr := HdrPart
-        else
-          HeadersStr := HeadersStr + ',' + HdrPart;
-      end;
-    finally
-      HdrParts.Free;
-    end;
-  end
-  else
-    HeadersStr := FCorsAllowedHeaders.CommaText;
-
-  if FCorsAllowCredentials then
-    AllowOrigin := Origin
-  else if AllowWildcardOrigin then
-    AllowOrigin := '*'
-  else
-    AllowOrigin := Origin;
-
-  MethodsStr := FCorsAllowedMethods.CommaText;
-  Resp.StatusCode := HTTP_NO_CONTENT;
-  Resp.Body := '';
-  Resp.ContentType := '';
-  Resp.HeadersCustom.Values['Access-Control-Allow-Origin'] := AllowOrigin;
-  Resp.HeadersCustom.Values['Access-Control-Allow-Methods'] := MethodsStr;
-  Resp.HeadersCustom.Values['Access-Control-Allow-Headers'] := HeadersStr;
-  if FCorsAllowCredentials then
-    Resp.HeadersCustom.Values['Access-Control-Allow-Credentials'] := 'true';
-  if FCorsMaxAge > 0 then
-    Resp.HeadersCustom.Values['Access-Control-Max-Age'] := IntToStr(FCorsMaxAge);
-  if AllowOrigin <> '*' then
-    Resp.HeadersCustom.Values['Vary'] := 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers';
-end;
-
-procedure TBadgerIOCP.ApplyCorsHeaders(const Req: THTTPRequest; var Resp: THTTPResponse);
-var
-  Origin, AllowOrigin, ExposeStr: string;
-  AllowWildcardOrigin, OriginAllowed: Boolean;
-begin
-  if not FCorsEnabled then
-    Exit;
-  Origin := Trim(Req.Headers.Values['Origin']);
-  if Origin = '' then
-    Exit;
-  AllowWildcardOrigin := FCorsAllowedOrigins.IndexOf('*') >= 0;
-  if FCorsAllowCredentials then
-    OriginAllowed := FCorsAllowedOrigins.IndexOf(Origin) >= 0
-  else
-    OriginAllowed := AllowWildcardOrigin or (FCorsAllowedOrigins.IndexOf(Origin) >= 0);
-  if not OriginAllowed then
-    Exit;
-  if FCorsAllowCredentials then
-    AllowOrigin := Origin
-  else if AllowWildcardOrigin then
-    AllowOrigin := '*'
-  else
-    AllowOrigin := Origin;
-  Resp.HeadersCustom.Values['Access-Control-Allow-Origin'] := AllowOrigin;
-  if FCorsAllowCredentials then
-    Resp.HeadersCustom.Values['Access-Control-Allow-Credentials'] := 'true';
-  ExposeStr := FCorsExposeHeaders.CommaText;
-  if ExposeStr <> '' then
-    Resp.HeadersCustom.Values['Access-Control-Expose-Headers'] := ExposeStr;
-  if AllowOrigin <> '*' then
-    Resp.HeadersCustom.Values['Vary'] := 'Origin';
-end;
-
-procedure TBadgerIOCP.FireHttpEvents(const Req: THTTPRequest; const Resp: THTTPResponse;
-  const ResponseHeader: string);
-var
-  RequestInfo: TRequestInfo;
-  ResponseInfo: TResponseInfo;
-begin
-  if not FEnableEventInfo then
-    Exit;
-  if Assigned(FOnRequest) then
-  begin
-    FillChar(RequestInfo, SizeOf(RequestInfo), 0);
-    RequestInfo.Headers := TStringList.Create;
-    RequestInfo.QueryParams := TStringList.Create;
-    try
-      RequestInfo.RemoteIP := Req.FRemoteIP;
-      RequestInfo.Method := Req.Method;
-      RequestInfo.URI := Req.URI;
-      RequestInfo.RequestLine := Req.RequestLine;
-      if Assigned(Req.Headers) then
-        RequestInfo.Headers.Assign(Req.Headers);
-      RequestInfo.Body := Req.Body;
-      if Assigned(Req.QueryParams) then
-        RequestInfo.QueryParams.Assign(Req.QueryParams);
-      RequestInfo.Timestamp := Now;
-      FOnRequest(RequestInfo);
-    finally
-      RequestInfo.Headers.Free;
-      RequestInfo.QueryParams.Free;
-    end;
-  end;
-  if Assigned(FOnResponse) then
-  begin
-    FillChar(ResponseInfo, SizeOf(ResponseInfo), 0);
-    ResponseInfo.Headers := TStringList.Create;
-    try
-      ResponseInfo.StatusCode := Resp.StatusCode;
-      ResponseInfo.StatusText := THTTPStatus.GetStatusText(Resp.StatusCode);
-      ResponseInfo.Body := Resp.Body;
-      ResponseInfo.ContentType := Resp.ContentType;
-      ResponseInfo.Headers.Text := ResponseHeader;
-      ResponseInfo.Timestamp := Now;
-      FOnResponse(ResponseInfo);
-    finally
-      ResponseInfo.Headers.Free;
-    end;
-  end;
-end;
-
 procedure TBadgerIOCP.FinishRequest(Ctx: PIocpCtx);
 var
-  Req: THTTPRequest;
-  Resp: THTTPResponse;
-  RouteEntry: TRouteEntry;
-  MiddlewareWrapper: TMiddlewareWrapper;
-  Handled: Boolean;
-  SkipRoute: Boolean;
-  I: Integer;
-  Wire: AnsiString;
-  LForwardedFor: string;
-  Header: string;
-  CloseConn: Boolean;
+  Pipe: TBadgerDispatchPipeline;
+  D: TBadgerDispatchResult;
   Serial: Boolean;
-  WsUpgraded: Boolean;
-  WSKey: string;
 begin
-  Wire := '';
-  CloseConn := True;
-  WsUpgraded := False;
   if not Assigned(Ctx^.Parser) then
   begin
     ReleaseCtx(Ctx);
     Exit;
   end;
-
-  FillChar(Req, SizeOf(Req), 0);
-  FillChar(Resp, SizeOf(Resp), 0);
-  Ctx^.RouteParams.Clear;
-  Ctx^.RespHeaders.Clear;
-  Req.Headers := Ctx^.Parser.Headers;
-  Req.QueryParams := Ctx^.Parser.QueryParams;
-  Req.RouteParams := Ctx^.RouteParams;
-  Resp.HeadersCustom := Ctx^.RespHeaders;
-  Handled := False;
-  SkipRoute := False;
+  BadgerAssignDispatchPipeline(Pipe, FRouteManager, FMiddlewares, FAfterMiddlewares,
+    FCorsEnabled, FCorsAllowedOrigins, FCorsAllowedMethods, FCorsAllowedHeaders,
+    FCorsExposeHeaders, FCorsAllowCredentials, FCorsMaxAge, FEnableEventInfo,
+    FOnRequest, FOnResponse);
+  Pipe.TrustProxyHeaders := FTrustProxyHeaders;
+  Pipe.TrustedProxies := FTrustedProxies;
+  D.Wire := '';
+  D.CloseConn := True;
+  D.WsUpgrade := False;
+  D.WsURI := '';
+  D.WsKey := '';
   Serial := not FParallelProcessing;
   if Serial then
     FSerialLock.Acquire;
+  Ctx^.InDispatch := True;
   try
-    try
-      Req.Socket := nil;
-      Req.Method := Ctx^.Parser.Method;
-      Req.URI := Ctx^.Parser.URI;
-      Req.RequestLine := Ctx^.Parser.RequestLine;
-      AttachParserBody(Ctx^.Parser, Req);
-      if Assigned(Ctx^.Conn) then
-        Req.FRemoteIP := Ctx^.Conn.RemoteIP;
-
-      LForwardedFor := Trim(Ctx^.Parser.RealIP);
-      if LForwardedFor <> '' then
-        Req.FRemoteIP := LForwardedFor
-      else
-      begin
-        LForwardedFor := Ctx^.Parser.ForwardedFor;
-        if LForwardedFor <> '' then
-        begin
-          I := Pos(',', LForwardedFor);
-          if I > 0 then
-            Req.FRemoteIP := Trim(Copy(LForwardedFor, 1, I - 1))
-          else
-            Req.FRemoteIP := Trim(LForwardedFor);
-        end;
-      end;
-
-      if Ctx^.Parser.State = hpsError then
-      begin
-        if Ctx^.Parser.Error = 'body too large' then
-        begin
-          Resp.StatusCode := HTTP_PAYLOAD_TOO_LARGE;
-          Resp.Body := '{"error":"Request body too large"}';
-          Resp.ContentType := APPLICATION_JSON;
-        end
-        else
-        begin
-          Resp.StatusCode := HTTP_BAD_REQUEST;
-          Resp.Body := Ctx^.Parser.Error;
-          Resp.ContentType := TEXT_PLAIN;
-        end;
-        Handled := True;
-        SkipRoute := True;
-      end;
-
-      if (not SkipRoute) and Ctx^.Parser.IsWebSocketUpgrade then
-      begin
-        WSKey := Trim(Req.Headers.Values['Sec-WebSocket-Key']);
-        if WSKey = '' then
-        begin
-          Resp.StatusCode := HTTP_BAD_REQUEST;
-          Resp.Body := '{"error":"Missing Sec-WebSocket-Key"}';
-          Resp.ContentType := APPLICATION_JSON;
-          Handled := True;
-          SkipRoute := True;
-        end
-        else if Req.Headers.Values['Sec-WebSocket-Version'] <> '13' then
-        begin
-          Resp.StatusCode := HTTP_BAD_REQUEST;
-          Resp.Body := '{"error":"Unsupported WebSocket version"}';
-          Resp.ContentType := APPLICATION_JSON;
-          Resp.HeadersCustom.Values['Sec-WebSocket-Version'] := '13';
-          Handled := True;
-          SkipRoute := True;
-        end
-        else
-        begin
-          SkipRoute := True;
-          Handled := True;
-          WsUpgraded := True;
-          BeginWs(Ctx, Req.URI, WSKey);
-        end;
-      end;
-
-      if (not SkipRoute) and HandleCorsPreflight(Req, Resp) then
-        SkipRoute := True
-      else if not SkipRoute then
-      begin
-        try
-          for I := 0 to FMiddlewares.Count - 1 do
-          begin
-            MiddlewareWrapper := TMiddlewareWrapper(FMiddlewares[I]);
-            try
-              if MiddlewareWrapper.Middleware(Req, Resp) then
-              begin
-                Handled := True;
-                Break;
-              end;
-            except
-              on E: Exception do
-              begin
-                Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-                Resp.Body := '{"error":"Middleware exception: ' + E.Message + '"}';
-                Resp.ContentType := APPLICATION_JSON;
-                Handled := True;
-                Break;
-              end;
-            end;
-          end;
-
-          if not Handled then
-          begin
-            if FRouteManager.MatchRoute(Req.Method, Ctx^.Parser.URILower, RouteEntry, Req.RouteParams) then
-            begin
-              if Assigned(RouteEntry) and Assigned(TMethod(RouteEntry.Callback).Code) then
-              begin
-                try
-                  RouteEntry.Callback(Req, Resp);
-                except
-                  on E: Exception do
-                  begin
-                    Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-                    Resp.Body := '{"error":"Route exception: ' + E.Message + '"}';
-                    Resp.ContentType := APPLICATION_JSON;
-                  end;
-                end;
-              end
-              else
-              begin
-                Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-                Resp.Body := '{"error":"Route handler not assigned"}';
-                Resp.ContentType := APPLICATION_JSON;
-              end;
-            end
-            else
-            begin
-              Resp.StatusCode := HTTP_NOT_FOUND;
-              Resp.Body := 'Not Found';
-              Resp.ContentType := TEXT_PLAIN;
-            end;
-          end;
-
-          if Ctx^.Parser.Origin <> '' then
-            ApplyCorsHeaders(Req, Resp);
-        finally
-          RunAfterMiddlewares(Req, Resp);
-        end;
-      end;
-    except
-      on E: Exception do
-      begin
-        Logger.Error('Dispatch exception: ' + E.Message);
-        Resp.StatusCode := HTTP_INTERNAL_SERVER_ERROR;
-        Resp.Body := 'Internal Server Error';
-        Resp.ContentType := TEXT_PLAIN;
-      end;
-    end;
-
-    if not WsUpgraded then
-    begin
-      CloseConn := Ctx^.Parser.WantsClose;
-      if Ctx^.Parser.State = hpsError then
-        CloseConn := True;
-      Ctx^.CloseAfterSend := CloseConn;
-      Wire := BadgerAssembleHTTPMessage(Resp.StatusCode, Resp.Body, Resp.Stream,
-        Resp.ContentType, CloseConn, Resp.HeadersCustom);
-      if FEnableEventInfo and (Assigned(FOnRequest) or Assigned(FOnResponse)) then
-      begin
-        Header := string(Copy(Wire, 1, Pos(AnsiString(#13#10#13#10), Wire) + 3));
-        FireHttpEvents(Req, Resp, Header);
-      end;
-    end;
+    D := BadgerDispatchHttp(Ctx^.Parser, Ctx^.Conn, Ctx^.RouteParams, Ctx^.RespHeaders, Pipe);
+    Ctx^.CloseAfterSend := D.CloseConn;
+    if D.WsUpgrade then
+      BeginWs(Ctx, D.WsURI, D.WsKey);
   finally
-    if Assigned(Resp.Stream) then
-      Resp.Stream.Free;
-    if Assigned(Req.BodyStream) then
-      Req.BodyStream.Free;
     if Serial then
       FSerialLock.Release;
+    Ctx^.InDispatch := False;
+    Touch(Ctx);
   end;
-  if not WsUpgraded then
-    PrepareAndSend(Ctx, Wire);
+  if not D.WsUpgrade then
+    PrepareAndSend(Ctx, D.Wire);
 end;
+
 
 procedure TBadgerIOCP.HandleRecv(Ctx: PIocpCtx; Bytes: DWORD);
 begin
@@ -1430,10 +1208,30 @@ begin
     ReleaseCtx(Ctx);
     Exit;
   end;
+  if Ctx^.HdrPhase = 0 then
+  begin
+    Ctx^.HdrPhase := 1;
+    Ctx^.ReqStart := GetTickCount;
+  end;
   if Ctx^.Parser.Feed(@Ctx^.Buf[0], Integer(Bytes)) then
-    FinishRequest(Ctx)
+  begin
+    Ctx^.HdrPhase := 2;
+    FinishRequest(Ctx);
+  end
   else
+  begin
+    if Ctx^.Parser.State <> hpsHeaders then
+      Ctx^.HdrPhase := 2;
+    { 'Expect: 100-continue': sem o interim o cliente so manda o corpo depois de
+      estourar o proprio timeout. Envio direto (25 bytes num socket pronto) evita
+      uma segunda operacao sobreposta so para isto. }
+    if Ctx^.Parser.ExpectContinue and not Ctx^.Parser.ContinueSent then
+    begin
+      Ctx^.Parser.ContinueSent := True;
+      BadgerSendAll(Ctx^.Socket, HTTP_100_CONTINUE);
+    end;
     PostRecv(Ctx);
+  end;
 end;
 
 procedure TBadgerIOCP.HandleSend(Ctx: PIocpCtx; Bytes: DWORD);
@@ -1503,12 +1301,16 @@ begin
     Ctx^.Parser.Free;
     Ctx^.Parser := nil;
   end;
-  Info := TClientSocketInfo.Create;
+  Info := TClientSocketInfo.Create; { ref do motor: solta em FreeCtx }
   Info.Socket := nil;
   Info.Ctx := Ctx;
   Info.URI := URI;
   Info.InUse := True;
   Ctx^.WsClient := Info;
+  { Ref entregue ao par attach/detach: quem assina OnWsDetach a solta (TBadger faz
+    Info.Release). Sem detach, so a ref do motor existe e FreeCtx libera o Info. }
+  if Assigned(FOnWsDetach) then
+    Info.AddRef;
   if Assigned(FOnWsAttach) then
     FOnWsAttach(Info);
   Logger.Info('WebSocket handshake established for ' + URI);
@@ -1524,20 +1326,32 @@ begin
   begin
     if Ctx^.WsParser.Failed then
     begin
+      { Fecha com status em vez de derrubar o TCP calado. }
+      QueueWsFrame(Ctx, BadgerWsCloseFrame(Ctx^.WsParser.CloseCode));
       Result := False;
       Exit;
     end;
+    { Fragmento intermediario: bytes consumidos, mensagem ainda incompleta. }
+    if not Ctx^.WsParser.Complete then
+      Continue;
     case Ctx^.WsParser.Opcode of
       WS_OP_CLOSE:
         begin
+          QueueWsFrame(Ctx, BadgerWsCloseFrame(WS_CLOSE_NORMAL));
           Result := False;
           Exit;
         end;
       WS_OP_TEXT:
-        if (Ctx^.WsParser.Payload <> '') and Assigned(FOnWebSocketMessage) and
-           Assigned(Ctx^.WsClient) then
+        if Assigned(FOnWebSocketMessage) and Assigned(Ctx^.WsClient) then
           FOnWebSocketMessage(Ctx^.WsClient, Ctx^.WsClient.URI,
             Ctx^.WsParser.Text);
+      WS_OP_BINARY:
+        { Sem evento binario na API publica: recusa explicita em vez de descarte. }
+        begin
+          QueueWsFrame(Ctx, BadgerWsCloseFrame(WS_CLOSE_UNSUPPORTED));
+          Result := False;
+          Exit;
+        end;
       WS_OP_PING:
         QueueWsFrame(Ctx, BadgerWsPongFrame(Ctx^.WsParser.Payload));
     end;
@@ -1560,15 +1374,27 @@ end;
 
 procedure TBadgerIOCP.QueueWsFrame(Ctx: PIocpCtx; const Frame: TBadgerWsBytes);
 var
-  StartNow: Boolean;
+  StartNow, Overflow: Boolean;
 begin
-  if (Frame = '') or not Assigned(Ctx^.WsClient) then
+  if (Frame = '') or not Assigned(Ctx^.WsClient) or (Ctx^.Closing <> 0) then
     Exit;
   StartNow := False;
+  Overflow := False;
   Ctx^.WsClient.IOLock.Acquire;
   try
     if Ctx^.WsSendBusy then
-      Ctx^.WsQueue := Ctx^.WsQueue + Frame
+    begin
+      { Sem teto, um cliente lento com broadcaster rapido acumula memoria sem
+        limite (e a concatenacao repetida e O(n2)). Estourar = derrubar a conexao:
+        so esvaziar a fila perdia mensagens em silencio e a conexao seguia. }
+      if Length(Ctx^.WsQueue) + Length(Frame) > WS_MAX_QUEUE then
+      begin
+        Ctx^.WsQueue := '';
+        Overflow := True;
+      end
+      else
+        Ctx^.WsQueue := Ctx^.WsQueue + Frame;
+    end
     else
     begin
       Ctx^.WsSendBusy := True;
@@ -1577,7 +1403,12 @@ begin
   finally
     Ctx^.WsClient.IOLock.Release;
   end;
-  if StartNow then
+  if Overflow then
+  begin
+    Logger.Warning('WebSocket send queue overflow; closing ' + Ctx^.WsClient.URI);
+    ReleaseCtx(Ctx);
+  end
+  else if StartNow then
     PrepareAndSend(Ctx, Frame);
 end;
 
@@ -1588,9 +1419,18 @@ begin
   if not Assigned(ClientInfo) or (ClientInfo.Ctx = nil) then
     Exit;
   Ctx := PIocpCtx(ClientInfo.Ctx);
-  if not CtxIsLive(Ctx) then
+  { Chamado de thread da aplicacao (broadcast, echo). Antes era CtxIsLive seguido de
+    uso do ponteiro: o contexto podia ser liberado no intervalo. A referencia mantem
+    a memoria viva por toda a operacao. }
+  if not TryAddRef(Ctx) then
     Exit;
-  QueueWsFrame(Ctx, BadgerWsTextFrame(AMessage));
+  try
+    if ClientInfo.Ctx <> Ctx then
+      Exit;
+    QueueWsFrame(Ctx, BadgerWsTextFrame(AMessage));
+  finally
+    ReleaseRef(Ctx);
+  end;
 end;
 
 procedure TBadgerIOCP.WorkerLoop;
@@ -1603,6 +1443,8 @@ var
   Ok: BOOL;
   Kind: TIocpOp;
 begin
+  GIocpIsWorker := True;
+  GIocpDepth := 0;
   while True do
   begin
     Bytes := 0;
@@ -1620,33 +1462,43 @@ begin
     Hdr := PIocpOpHdr(Ov);
     Ctx := Hdr^.Ctx;
     Kind := Hdr^.Kind;
-    if not CtxIsLive(Ctx) then
-      Continue;
+    { Sem CtxIsLive: era check-then-act sobre memoria que outra thread podia ter
+      liberado (e GetMem podia reciclar o endereco para outra conexao). A referencia
+      tomada ao postar garante que este ponteiro e valido agora. }
     try
-      if not Ok then
-      begin
-        if Kind = ioAccept then
+      try
+        if not Ok then
         begin
-          CompleteAccept(Ctx, False);
+          if Kind = ioAccept then
+          begin
+            CompleteAccept(Ctx, False);
+            ReleaseCtx(Ctx);
+            EnsurePendingAccepts;
+          end
+          else
+            ReleaseCtx(Ctx);
+          Continue;
+        end;
+        case Kind of
+          ioAccept:
+            HandleAccept(Ctx);
+          ioRecv:
+            HandleRecv(Ctx, Bytes);
+          ioSend:
+            HandleSend(Ctx, Bytes);
+        end;
+      except
+        on E: Exception do
+        begin
+          Logger.Error('IOCP worker (' + IocpOpName(Kind) + '): ' + E.Message);
+          if (Kind = ioAccept) and not Ctx^.Counted then
+            CompleteAccept(Ctx, False);
           ReleaseCtx(Ctx);
-          EnsurePendingAccepts;
-        end
-        else
-          ReleaseCtx(Ctx);
-        Continue;
+        end;
       end;
-      case Kind of
-        ioAccept:
-          HandleAccept(Ctx);
-        ioRecv:
-          HandleRecv(Ctx, Bytes);
-        ioSend:
-          HandleSend(Ctx, Bytes);
-      end;
-    except
-      if (Kind = ioAccept) and Assigned(Ctx) and not Ctx^.Counted then
-        CompleteAccept(Ctx, False);
-      ReleaseCtx(Ctx);
+    finally
+      { Devolve a referencia da operacao que acabou de completar. }
+      ReleaseRef(Ctx);
     end;
   end;
 end;
@@ -1669,7 +1521,9 @@ begin
       raise EBadgerIOCP.CreateFmt('WSASocket failed (%d)', [WSAGetLastError]);
 
     One := 1;
-    setsockopt(FListen, SOL_SOCKET, SO_REUSEADDR, @One, SizeOf(One));
+    { SO_REUSEADDR no Windows nao e o do POSIX: permite que outro processo faca bind
+      no mesmo porto e sequestre conexoes. SO_EXCLUSIVEADDRUSE e o equivalente seguro. }
+    setsockopt(FListen, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, @One, SizeOf(One));
 
     FillChar(Addr, SizeOf(Addr), 0);
     Addr.sin_family := AF_INET;
@@ -1739,9 +1593,17 @@ begin
     FWatchdog := nil;
   end;
   CloseListenSocket;
-  Log('listen closed, waiting AcceptEx drain: ' + CtxStats);
-  WaitLiveCtxIdle(2000);
-  Log('after AcceptEx wait: ' + CtxStats);
+  Log('listen closed: ' + CtxStats);
+
+  { Ordem importa. Antes os workers eram encerrados primeiro e so depois os sockets
+    eram fechados e a memoria liberada: as completions geradas pelo fechamento caiam
+    numa porta que ninguem mais drenava, e o OVERLAPPED (primeiro campo do contexto)
+    era devolvido ao heap com o kernel ainda apontando para ele. Agora fechamos as
+    conexoes com os workers vivos, deixamos as completions serem consumidas, e so
+    entao sinalizamos o shutdown. }
+  CloseAllCtx;
+  WaitLiveCtxIdle(5000);
+  Log('after client drain: ' + CtxStats);
 
   for I := 0 to Length(FWorkers) - 1 do
     PostQueuedCompletionStatus(FIocp, 0, IOCP_KEY_SHUTDOWN, nil);
@@ -1758,6 +1620,7 @@ begin
   SetLength(FWorkers, 0);
 
   Log('workers stopped: ' + CtxStats);
+  { Rede de seguranca: o que sobrou apos o dreno acima. }
   DrainLiveCtx;
   Log('after drain: ' + CtxStats);
 

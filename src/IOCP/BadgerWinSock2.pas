@@ -33,8 +33,11 @@ const
   SOL_SOCKET = $FFFF;
   SO_REUSEADDR = $0004;
   SO_UPDATE_ACCEPT_CONTEXT = $700B;
+  SO_EXCLUSIVEADDRUSE = not 4; { ((int)(~SO_REUSEADDR)) }
 
   TCP_NODELAY = 1;
+
+  SD_BOTH = 2;
 
   SOMAXCONN = $7FFFFFFF;
 
@@ -96,11 +99,14 @@ function WSASend(s: TBadgerSocket; lpBuffers: PBadgerWsaBuf; dwBufferCount: DWOR
 function bind(s: TBadgerSocket; name: Pointer; namelen: Integer): Integer; stdcall;
 function listen(s: TBadgerSocket; backlog: Integer): Integer; stdcall;
 function closesocket(s: TBadgerSocket): Integer; stdcall;
+function shutdown(s: TBadgerSocket; how: Integer): Integer; stdcall;
 function setsockopt(s: TBadgerSocket; level, optname: Integer; optval: Pointer;
   optlen: Integer): Integer; stdcall;
 function htons(hostshort: Word): Word; stdcall;
 function connect(s: TBadgerSocket; name: Pointer; namelen: Integer): Integer; stdcall;
 function send(s: TBadgerSocket; buf: Pointer; len, flags: Integer): Integer; stdcall;
+{ Envio bloqueante curto, para respostas interinas (100 Continue). }
+function BadgerSendAll(s: TBadgerSocket; const Data: AnsiString): Boolean;
 function recv(s: TBadgerSocket; buf: Pointer; len, flags: Integer): Integer; stdcall;
 function inet_addr(cp: PAnsiChar): Cardinal; stdcall;
 function getpeername(s: TBadgerSocket; name: Pointer; var namelen: Integer): Integer; stdcall;
@@ -145,6 +151,8 @@ function listen(s: TBadgerSocket; backlog: Integer): Integer; stdcall;
   external WS2_DLL name 'listen';
 function closesocket(s: TBadgerSocket): Integer; stdcall;
   external WS2_DLL name 'closesocket';
+function shutdown(s: TBadgerSocket; how: Integer): Integer; stdcall;
+  external WS2_DLL name 'shutdown';
 function setsockopt(s: TBadgerSocket; level, optname: Integer; optval: Pointer;
   optlen: Integer): Integer; stdcall;
   external WS2_DLL name 'setsockopt';
@@ -279,6 +287,25 @@ begin
     if NeedWsa then
       BadgerWSARelease;
   end;
+end;
+
+function BadgerSendAll(s: TBadgerSocket; const Data: AnsiString): Boolean;
+var
+  Sent, Total, Len: Integer;
+begin
+  Len := Length(Data);
+  Total := 0;
+  while Total < Len do
+  begin
+    Sent := send(s, @PAnsiChar(Data)[Total], Len - Total, 0);
+    if Sent <= 0 then
+    begin
+      Result := False;
+      Exit;
+    end;
+    Inc(Total, Sent);
+  end;
+  Result := True;
 end;
 
 end.

@@ -24,6 +24,9 @@ type
     FLogLevel: TLogLevel;
     FLogStream: TFileStream;
     FFileWriteErrorReported: Boolean;
+    FMaxFileSize: Int64;
+    FRotateRetryAt: TDateTime;
+    procedure RotateIfNeeded;
     function HasConsole: Boolean;
     procedure ReportLogWriteFailure(const Detail: string);
     procedure CloseLogStream;
@@ -48,6 +51,9 @@ type
     property LogToConsole: Boolean read FLogToConsole write FLogToConsole;
     property LogLevel: TLogLevel read FLogLevel write FLogLevel;
     property LogFileName: string read FLogFileName write FLogFileName;
+    { Rotaciona ao ultrapassar este tamanho (bytes). 0 desliga. Sem isto o arquivo
+      cresce sem limite quando LogToFile esta ligado. Default 10 MB. }
+    property MaxFileSize: Int64 read FMaxFileSize write FMaxFileSize;
   end;
 
 var
@@ -84,6 +90,7 @@ begin
   FLogStream := nil;
   FisActive := True;
   FFileWriteErrorReported := False;
+  FMaxFileSize := 10 * 1024 * 1024;
   {$IFDEF DEBUG}
   FLogLevel := llDebug;
   {$ENDIF}
@@ -179,7 +186,12 @@ var
 begin
   {$IFDEF BADGER_WINDOWS}
     H := GetStdHandle(STD_OUTPUT_HANDLE);
-    Result := (H <> 0) and (H <> INVALID_HANDLE_VALUE) and GetConsoleMode(H, Mode);
+    { Saida redirecionada para arquivo ou pipe (servico via NSSM, Docker,
+      '> log.txt') tambem conta: antes so console real valia e esses logs sumiam
+      em silencio. IsConsole: app GUI nao abre Output e WriteLn levantaria. }
+    Result := IsConsole and (H <> 0) and (H <> INVALID_HANDLE_VALUE) and
+      (GetConsoleMode(H, Mode) or (GetFileType(H) = FILE_TYPE_DISK) or
+       (GetFileType(H) = FILE_TYPE_PIPE));
     Exit;
   {$ENDIF}
 
@@ -202,11 +214,43 @@ begin
   FLogToFile := False;
 
   if HasConsole then
+  try
     System.WriteLn('[BADGER][LOGGER] ' + Detail + ' - file logging disabled.');
+  except
+    FLogToConsole := False;
+  end;
 
   {$IFDEF BADGER_WINDOWS}
     WriteToDebugger('[BADGER][LOGGER] ' + Detail + ' - file logging disabled.');
   {$ENDIF}
+end;
+
+{ Renomeia o arquivo atual para .1 e recomeca. Uma geracao basta para impedir o
+  crescimento sem limite, sem inventar politica de retencao. }
+procedure TBadgerLogger.RotateIfNeeded;
+var
+  Old: string;
+begin
+  if (FMaxFileSize <= 0) or not Assigned(FLogStream) then
+    Exit;
+  if FLogStream.Size < FMaxFileSize then
+    Exit;
+  { RenameFile falha sem excecao (arquivo aberto por visualizador/antivirus): sem
+    espera, CADA linha seguinte fechava, apagava o .1, tentava renomear e reabria. }
+  if Now < FRotateRetryAt then
+    Exit;
+  CloseLogStream;
+  Old := FLogFileName + '.1';
+  try
+    if FileExists(Old) then
+      DeleteFile(Old);
+    if not RenameFile(FLogFileName, Old) then
+      FRotateRetryAt := Now + 1 / (24 * 60); { tenta de novo em 1 minuto }
+  except
+    on E: Exception do
+      ReportLogWriteFailure('rotacao falhou: ' + E.Message);
+  end;
+  EnsureLogStream;
 end;
 
 procedure TBadgerLogger.WriteToFile(const Msg: string);
@@ -214,6 +258,8 @@ var
   LogLine: AnsiString;
 begin
   if not EnsureLogStream then Exit;
+  RotateIfNeeded;
+  if not Assigned(FLogStream) then Exit;
 
   LogLine := AnsiString(Msg + sLineBreak);
   try
@@ -232,7 +278,16 @@ end;
 procedure TBadgerLogger.WriteToConsole(const Msg: string);
 begin
   if FLogToConsole and HasConsole then
+  try
     WriteLn(Msg);
+    { Redirecionado, Output fica em buffer: servico morto/reiniciado perdia as
+      ultimas linhas justamente do problema. }
+    Flush(Output);
+  except
+    { Pipe fechado pelo leitor: EInOutError sairia de dentro de uma requisicao.
+      Desliga o console e segue. }
+    FLogToConsole := False;
+  end;
 end;
 
 {$IFDEF BADGER_WINDOWS}

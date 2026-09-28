@@ -26,21 +26,40 @@ type
   private
     FRoutes: TObjectList;
     FContextIndex: TStringList;
+    FSealed: Boolean;
     function SplitString(const S, Delim: string): TStringList;
+    function ScanBucket(ABucket: TObjectList; const AVerb, APath: string;
+      out Entry: TRouteEntry; var Params: TStringList): Boolean;
 
   public
     constructor Create;
     destructor Destroy; override;
     function AddMethod(const AVerb, ARoute: string; ACallback: TRoutingCallback): TRouteManager;
     function AddDel(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    { Alias de AddDel: 'AddDel' nao aparece em busca por 'Delete'. }
+    function AddDelete(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
     function AddGet(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
     function AddPatch(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
     function AddPost(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
     function AddPut(const ARoute: string; ACallback: TRoutingCallback): TRouteManager;
+    { Declara que ARoute aceita upgrade WebSocket. Sem callback: o handshake é do
+      motor, e as mensagens chegam por TBadger.OnWebSocketMessage. }
+    function AddWebSocket(const ARoute: string): TRouteManager;
 
     function Unregister(const Route: string): TRouteManager;
+    { Chamado pelo Start do servidor. Depois disso Add*/Unregister levantam excecao:
+      TObjectList nao tem lock e realocar a lista enquanto um worker a percorre e
+      access violation ou middleware pulado. }
+    procedure Seal;
+    function Sealed: Boolean;
     function MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; var Params: TStringList): Boolean;
   end;
+
+{ True quando APath esta sob APattern, segmento a segmento: ':nome' no padrao casa
+  qualquer segmento nao vazio e os demais comparam sem caixa. Usado pelos
+  middlewares de auth: a comparacao literal deixava '/users/:id' protegido so no
+  texto, e '/users/5' passava sem autenticacao. }
+function BadgerPathUnderPattern(const APath, APattern: string): Boolean;
 
 const
   CGET   = 'GET';
@@ -48,8 +67,53 @@ const
   CPUT   = 'PUT';
   CPATCH = 'PATCH';
   CDEL   = 'DELETE';
+  CWS    = 'WS';
 
 implementation
+
+uses
+  BadgerLogger;
+
+procedure SplitPathSegments(const S: string; L: TStringList);
+var
+  I, St: Integer;
+begin
+  L.Clear;
+  St := 1;
+  for I := 1 to Length(S) do
+    if S[I] = '/' then
+    begin
+      L.Add(Copy(S, St, I - St));
+      St := I + 1;
+    end;
+  L.Add(Copy(S, St, MaxInt));
+end;
+
+function BadgerPathUnderPattern(const APath, APattern: string): Boolean;
+var
+  P, R: TStringList;
+  I: Integer;
+begin
+  P := TStringList.Create;
+  R := TStringList.Create;
+  try
+    SplitPathSegments(APattern, P);
+    SplitPathSegments(APath, R);
+    Result := R.Count >= P.Count;
+    I := 0;
+    while Result and (I < P.Count) do
+    begin
+      if Copy(P[I], 1, 1) = ':' then
+        Result := R[I] <> ''
+      else
+        Result := SameText(P[I], R[I]);
+      Inc(I);
+    end;
+  finally
+    R.Free;
+    P.Free;
+  end;
+end;
 
 { TRouteEntry }
 
@@ -79,6 +143,9 @@ var
   RemovedCount: Integer;
 begin
   Result := Self;
+  if FSealed then
+    raise Exception.Create(
+      'TRouteManager: Unregister com o servidor no ar nao e suportado.');
   RemovedCount := 0;
   for I := FRoutes.Count - 1 downto 0 do
   begin
@@ -116,14 +183,31 @@ begin
   Result := AddMethod(CDEL, ARoute, ACallback);
 end;
 
+function TRouteManager.AddDelete(const ARoute: string;
+  ACallback: TRoutingCallback): TRouteManager;
+begin
+  Result := AddMethod(CDEL, ARoute, ACallback);
+end;
+
 function TRouteManager.AddGet(const ARoute: string;
   ACallback: TRoutingCallback): TRouteManager;
 begin
   Result := AddMethod(CGET, ARoute, ACallback);
 end;
 
+procedure TRouteManager.Seal;
+begin
+  FSealed := True;
+end;
+
+function TRouteManager.Sealed: Boolean;
+begin
+  Result := FSealed;
+end;
+
 function TRouteManager.AddMethod(const AVerb, ARoute: string; ACallback: TRoutingCallback): TRouteManager;
 var
+  I: Integer;
   Entry: TRouteEntry;
   CleanRoute: string;
   Parts: TStringList;
@@ -132,11 +216,29 @@ var
   Bucket: TObjectList;
 begin
   Result := Self;
-  CleanRoute := StringReplace(ARoute, '//', '/', [rfReplaceAll]);
+  if FSealed then
+    raise Exception.CreateFmt(
+      'TRouteManager: rota "%s %s" registrada com o servidor no ar. Registre as ' +
+      'rotas antes de Start.', [AVerb, ARoute]);
+  { Um StringReplace so deixava '///' como '//' e a rota nunca casava. }
+  CleanRoute := ARoute;
+  while Pos('//', CleanRoute) > 0 do
+    CleanRoute := StringReplace(CleanRoute, '//', '/', [rfReplaceAll]);
   if Copy(CleanRoute, 1, 1) <> '/' then
     CleanRoute := '/' + CleanRoute;
   if (Length(CleanRoute) > 1) and (CleanRoute[Length(CleanRoute)] = '/') then
     SetLength(CleanRoute, Length(CleanRoute) - 1);
+
+  { Mesma rota duas vezes: a primeira vence (ScanBucket para no primeiro) e a
+    segunda nunca roda. Mantido, mas avisado: costuma ser copia-e-cola. }
+  for I := 0 to FRoutes.Count - 1 do
+    if (TRouteEntry(FRoutes[I]).Verb = UpperCase(AVerb)) and
+       (TRouteEntry(FRoutes[I]).Pattern = LowerCase(CleanRoute)) then
+    begin
+      Logger.Warning(Format('TRouteManager: route "%s %s" registered twice; ' +
+        'the first registration wins', [UpperCase(AVerb), CleanRoute]));
+      Break;
+    end;
 
   Entry := TRouteEntry.Create;
   Entry.Verb := UpperCase(AVerb);
@@ -182,6 +284,11 @@ function TRouteManager.AddPut(const ARoute: string;
   ACallback: TRoutingCallback): TRouteManager;
 begin
   Result := AddMethod(CPUT, ARoute, ACallback);
+end;
+
+function TRouteManager.AddWebSocket(const ARoute: string): TRouteManager;
+begin
+  Result := AddMethod(CWS, ARoute, nil);
 end;
 
 constructor TRouteManager.Create;
@@ -247,34 +354,28 @@ begin
     Result := '';
 end;
 
-function TRouteManager.MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; var Params: TStringList): Boolean;
+{ Varre um bucket. Os valores de :param saem do APath original — o padrão já está
+  em minúsculas (AddMethod), então a comparação é SameText e a caixa da URI é
+  preservada nos parâmetros. }
+function TRouteManager.ScanBucket(ABucket: TObjectList; const AVerb, APath: string;
+  out Entry: TRouteEntry; var Params: TStringList): Boolean;
 var
-  I, J, CtxIdx: Integer;
+  I, J: Integer;
   PatternParts, PathParts: TStringList;
-  Part, ParamName, ContextKey: string;
-  Bucket: TObjectList;
+  Part, ParamName: string;
 begin
   Result := False;
-  Params.Clear;
   Entry := nil;
-
-  ContextKey := RouteContextKey(APath);
-  CtxIdx := FContextIndex.IndexOf(ContextKey);
-  if CtxIdx >= 0 then
-    Bucket := TObjectList(FContextIndex.Objects[CtxIdx])
-  else
-    Bucket := FRoutes;
-
-  for I := 0 to Bucket.Count - 1 do
+  for I := 0 to ABucket.Count - 1 do
   begin
-    Entry := TRouteEntry(Bucket[I]);
+    Entry := TRouteEntry(ABucket[I]);
     if not Assigned(Entry) then Continue;
     if Entry.Verb <> AVerb then Continue;
 
     Params.Clear;
     if not Entry.HasParams then
     begin
-      if Entry.Pattern = APath then
+      if SameText(Entry.Pattern, APath) then
       begin
         Result := True;
         Exit;
@@ -301,7 +402,7 @@ begin
           ParamName := Copy(Part, 2, MaxInt);
           Params.Add(ParamName + '=' + PathParts[J]);
         end
-        else if Part <> PathParts[J] then
+        else if not SameText(Part, PathParts[J]) then
         begin
           Result := False;
           Break;
@@ -318,6 +419,37 @@ begin
     end;
   end;
   Entry := nil;
+end;
+
+function TRouteManager.MatchRoute(const AVerb, APath: string; out Entry: TRouteEntry; var Params: TStringList): Boolean;
+var
+  CtxIdx: Integer;
+  Bucket: TObjectList;
+  Path: string;
+begin
+  Params.Clear;
+  Entry := nil;
+
+  { Rota registrada perde a barra final (AddMethod); o path da requisicao nao
+    perdia, entao /users/ nunca casava com /users. }
+  Path := APath;
+  if (Length(Path) > 1) and (Path[Length(Path)] = '/') then
+    SetLength(Path, Length(Path) - 1);
+
+  CtxIdx := FContextIndex.IndexOf(RouteContextKey(Path));
+  if CtxIdx >= 0 then
+    Bucket := TObjectList(FContextIndex.Objects[CtxIdx])
+  else
+    Bucket := FRoutes;
+
+  Result := ScanBucket(Bucket, AVerb, Path, Entry, Params);
+  { O bucket de contexto não guarda as rotas cujo primeiro segmento é :param
+    (vivem na chave ''). Sem este segundo passe, /:a/:b nunca casa quando existe
+    qualquer rota estática com o mesmo primeiro segmento. }
+  if (not Result) and (Bucket <> FRoutes) then
+    Result := ScanBucket(FRoutes, AVerb, Path, Entry, Params);
+  if not Result then
+    Entry := nil;
 end;
 
 end.
